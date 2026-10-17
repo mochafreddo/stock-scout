@@ -9,7 +9,7 @@ node scripts/kis-probe.ts <volume|amount> <NAS|NYS|AMS>
 node scripts/kis-probe.ts <daily|info> <NAS|NYS|AMS> <symbol>
 ```
 
-별도 옵션이나 `--help`는 없다. 모드와 거래소는 표기한 대소문자를 그대로 사용한다. `volume/amount`는 종목을 지정하지 않으며 `daily/info`는 종목이 필수다. 종목 문자열은 정규식 `^[A-Z0-9./^-]{1,20}$`에 맞아야 한다. 이 검사는 존재하는 증권이나 유형을 확인하는 절차가 아니다. 세 번째 위치 인수 뒤의 추가 인수는 거부한다.
+별도 옵션이나 `--help`는 없다. 모드와 거래소는 표기한 대소문자를 그대로 사용한다. `volume/amount`의 세 번째 인수는 생략하거나 빈 문자열이어야 하며 `daily/info`는 종목이 필수다. 종목 문자열은 정규식 `^[A-Z0-9./^-]{1,20}$`에 맞아야 한다. 이 검사는 존재하는 증권이나 유형을 확인하는 절차가 아니다. 세 번째 위치 인수 뒤의 추가 인수는 거부한다.
 
 예시는 `node scripts/kis-probe.ts info NYS BAC/B`다. OTC는 지원하지 않는다. Node.js 요구 버전과 개발 명령은 [package.json](../package.json)이 기준이다.
 
@@ -20,6 +20,8 @@ node scripts/kis-probe.ts <daily|info> <NAS|NYS|AMS> <symbol>
 | `KIS_ACCESS_TOKEN` | 필수. `authorization`의 Bearer 토큰으로 사용한다. |
 
 세 값은 프로세스 환경에서 읽으며 누락 또는 빈 문자열이면 실패한다. 파일을 읽거나 토큰 유효기간을 사전 검사하지 않는다. 입력 인수 검사 뒤에 환경 변수를 검사한다. 계좌번호나 OpenAI 인증은 사용하지 않는다.
+
+따라서 잘못된 인수와 인증 누락이 함께 있으면 `USAGE`가 먼저 발생하며 요청을 보내지 않는다. 유효한 인수에서 인증만 누락되면 `CREDENTIALS_MISSING`으로 끝나며 요청을 보내지 않는다. 인증 없는 실행 예시는 [시작 안내의 모의 관측](getting-started.md#인증-없이-관측-json-확인하기)에 있다.
 
 ## 요청과 제한
 
@@ -53,6 +55,8 @@ stdout에 JSON 객체 하나와 줄바꿈을 출력하고 종료 코드 0으로 
 
 필드 선택은 아래 허용 목록에서 **값이 문자열인 항목만** 보존한다. 숫자 타입·null·누락 값은 생략하며 문자열 숫자를 변환하거나 단위·유형으로 해석하지 않는다. 허용 필드가 전혀 없는 객체도 빈 객체로 남을 수 있다. 선택 대상이 null·배열·객체 이외의 값이면 실패한다.
 
+순위·일별 응답은 `output2`가 빈 배열이어도 `output1`이 객체여야 한다. `info`는 `output`이 객체여야 하고 `output1`은 읽지 않는다. 필수 시장 필드의 존재를 검사하지 않으므로 `rows: [{}]`도 관측 성공이 될 수 있다. `rowCount`는 유효한 종목이나 분석 가능한 행의 개수가 아니다.
+
 | 위치 | 허용 필드 |
 | --- | --- |
 | `summary` | `zdiv`, `stat`, `crec`, `trec`, `nrec`, `rsym` |
@@ -80,6 +84,8 @@ stdout에 JSON 객체 하나와 줄바꿈을 출력하고 종료 코드 0으로 
 | `REQUEST_FAILED` | 잘못된 JSON, 통신·시간 제한·리디렉션 등 위 코드로 분류되지 않은 예외 |
 
 오류 코드만으로 토큰 만료·권한·호출 한도 등 KIS 내부 원인을 구분할 수 없다. 빈 응답의 관측 성공도 제품의 [빈 후보군](../GLOSSARY.md) 또는 후보 없음 판정을 뜻하지 않는다.
+
+오류 판정은 HTTP 상태, JSON 해석과 최상위 객체, `rt_cd`, 행 배열, 연속 조회 표시, 선택 대상 객체 순서로 진행한다. 예를 들어 HTTP 실패 응답의 본문은 해석하지 않으며, HTTP 성공이어도 잘못된 JSON이면 `REQUEST_FAILED`, JSON의 최상위 값이 배열이나 null이면 `RESPONSE_SHAPE`다. `rt_cd`가 숫자 `0`인 경우도 문자열 `"0"`과 다르므로 `KIS_FAILURE`다.
 
 ## 검증 경계
 

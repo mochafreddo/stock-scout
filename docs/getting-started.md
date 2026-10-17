@@ -29,9 +29,32 @@
    npm test
    ```
 
-   현재 테스트 6개가 모두 통과하면 정상 관측, 오류와 비밀 필드 배제, 지원 모드와 시장, 빈 응답과 연속 조회 표시, 잘못된 입력, 인증 누락에 대한 모의 검사가 끝납니다. 이는 실제 KIS 인증이나 데이터 의미 검증의 결과가 아닙니다.
+   실패한 테스트가 없으면 정상 관측, 오류와 비밀 필드 배제, 지원 모드와 시장, 빈 응답과 연속 조회 표시, 잘못된 입력, 인증 누락에 대한 모의 검사가 끝납니다. 이는 실제 KIS 인증이나 데이터 의미 검증의 결과가 아닙니다.
 
 테스트의 공개 경계는 CLI 인수·stdout·stderr·종료 코드입니다. 구현은 [scripts/kis-probe.ts](../scripts/kis-probe.ts), 테스트는 [tests/kis-probe.test.mjs](../tests/kis-probe.test.mjs), 외부 HTTP 대체 코드는 [tests/kis-http-mock.mjs](../tests/kis-http-mock.mjs)에 있습니다.
+
+## 인증 없이 관측 JSON 확인하기
+
+테스트 결과에 이어 CLI의 JSON을 직접 확인하려면 저장소 루트에서 다음 명령을 실행하세요. `env -i`로 상속된 환경을 비우고 실행 경로와 모의 값만 전달합니다. `--import`로 불러온 테스트 전용 코드가 `fetch`를 대체하므로 실제 KIS 요청이나 토큰 발급은 발생하지 않습니다.
+
+```sh
+env -i PATH="$PATH" \
+  KIS_APP_KEY=test-key KIS_APP_SECRET=test-secret KIS_ACCESS_TOKEN=test-token \
+  SCENARIO=ok \
+  node --import ./tests/kis-http-mock.mjs scripts/kis-probe.ts volume NAS
+```
+
+종료 코드 0과 JSON 한 줄을 확인하세요. 모의 응답의 `rowCount`는 1이며 `rows[0]`에는 `symb: "AAPL"`, `tvol: "123"`, `tamt: "456"`이 있습니다. `validation: "unverified"`와 `dataSession: null`도 확인하세요. 시각은 실행할 때 생성하며 수치는 테스트용입니다. 이 결과를 실제 시세로 사용하지 마세요.
+
+같은 명령에서 `SCENARIO=ok`만 다음 값으로 바꿔 경계 동작도 확인하세요.
+
+| 값 | 예상 결과 |
+| --- | --- |
+| `empty` | 종료 코드 0, `rowCount: 0`, `rows: []`. 정상적인 빈 후보군이라는 뜻은 아닙니다. |
+| `continued` | 종료 코드 0, `continuation: "M"`. 다음 페이지는 요청하지 않습니다. |
+| `api-error` | 종료 코드 1, stdout은 비어 있고 stderr에 `{"error":"KIS_FAILURE"}`를 출력합니다. |
+
+이 모의 코드는 테스트용 헤더 값과 요청 조건을 검사합니다. 실제 인증 값을 넣지 마세요. 다른 모드·거래소의 모의 실행도 실제 상장 여부나 종목 유형을 확인하는 절차는 아닙니다.
 
 ## 변경 후 로컬 검사하기
 
@@ -68,6 +91,16 @@ node scripts/kis-probe.ts info NYS BAC/B
 
 성공하면 stdout에 JSON 한 줄과 종료 코드 0을 받습니다. `request`의 거래소·종목·요청 조건, `rowCount`, `rows`, UTC 요청·수신 시각을 확인하세요. `validation`은 항상 `unverified`, `dataSession`은 항상 `null`입니다. 빈 `rows`나 연속 조회 표시는 추가 판단이 필요한 관측 결과입니다. 후보군 구성·유형 제외·장전 시간 판정은 수행하지 않습니다.
 
-실패하면 stdout은 비어 있고 stderr에 `{"error":"오류 코드"}` 형식의 JSON을 받으며 종료 코드는 1입니다. 코드별 의미는 [오류 레퍼런스](kis-probe-reference.md#오류와-종료-코드)를 참고하세요. 인증 누락은 환경 변수의 준비 여부를 확인하고, HTTP·KIS·통신 오류는 기존 인증 및 서비스 상태를 확인하세요. 도구는 오류 원문을 출력하지 않으므로 이 코드만으로 토큰 만료 등 세부 원인을 확정하지 마세요. 비밀 값이나 인증 헤더를 진단 자료로 공유하지 마세요.
+실패하면 stdout은 비어 있고 stderr에 `{"error":"오류 코드"}` 형식의 JSON을 받으며 종료 코드는 1입니다. 코드별 의미는 [오류 레퍼런스](kis-probe-reference.md#오류와-종료-코드)를 참고하세요.
+
+| 코드 | 확인할 항목 |
+| --- | --- |
+| `USAGE` | 모드·거래소의 대소문자, 종목 인수의 필요 여부와 허용 문자, 추가 인수를 확인하세요. `--help`도 지원하지 않습니다. |
+| `CREDENTIALS_MISSING` | 필요한 세 환경 변수를 현재 프로세스에 전달했는지 확인하세요. `.env` 파일을 두는 것만으로는 전달되지 않습니다. |
+| `HTTP_FAILURE`, `KIS_FAILURE` | 기존 인증과 서비스 상태를 확인하세요. 이 코드만으로 토큰 만료를 확정하거나 자동 재발급을 기대하지 마세요. |
+| `RESPONSE_SHAPE` | 응답 구조가 CLI의 허용 조건을 벗어났습니다. 요청 모드·시각·오류 코드를 기록하고 레퍼런스의 응답 조건과 대조하세요. |
+| `REQUEST_FAILED` | 통신·시간 제한·리디렉션·JSON 해석 실패 등을 포함합니다. 연결 상태와 서비스 상태를 확인하세요. |
+
+도구는 오류 원문을 출력하지 않으므로 이 코드만으로 세부 원인을 확정하지 마세요. 비밀 값이나 인증 헤더를 진단 자료로 공유하지 마세요.
 
 현재 인수·출력의 정확한 계약은 [CLI 레퍼런스](kis-probe-reference.md)에 있습니다. 관측값을 해석하기 전에 [KIS 데이터 검증](kis-data-validation.md)의 실제 관측 범위와 미검증 조건을 확인하세요. 이 문서의 실제 KIS 명령은 이번 문서 작성 과정에서 재실행하지 않았습니다. 기존 실연동 자료와 이번 로컬 모의 검사는 구분합니다.
