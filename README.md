@@ -7,7 +7,6 @@
 ## 문서
 
 - [용어집](GLOSSARY.md)
-- [저장소 전환 결정](docs/adr/0001-stock-scout-reset.md)
 - [작업 이슈](https://github.com/mochafreddo/stock-scout/issues)
 
 ## 라이선스
