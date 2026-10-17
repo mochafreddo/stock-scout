@@ -94,20 +94,11 @@ GOOG·GOOGL의 이름은 모두 ALPHABET INC지만 `std_pdno`와 ISIN은 각각 
 
 ## 검증 도구와 재현
 
-`scripts/kis-probe.ts`는 Node.js 24 이상에서 실행하는 TypeScript 관측 CLI다. 자격 증명은 프로세스 환경의 `KIS_APP_KEY`, `KIS_APP_SECRET`, `KIS_ACCESS_TOKEN`에서 받는다. 도구 자체는 토큰 발급·파일 저장·재시도·페이지 반복·유형 판정·후보군 생성을 하지 않는다. 승인된 기존 보관소에서 환경을 준비하며 비밀 값을 명령 인수나 셸 기록에 넣지 않는다.
-
-```sh
-node scripts/kis-probe.ts volume NAS
-node scripts/kis-probe.ts amount NYS
-node scripts/kis-probe.ts daily AMS SPY
-node scripts/kis-probe.ts info NYS BAC/B
-```
-
-순위 모드는 종목 인수를 받지 않고, `daily/info`에는 종목이 필요하다. NAS·NYS·AMS 외의 시장은 거부한다. 성공은 관측 JSON 하나와 종료 코드 0이며, 자료의 의미는 항상 미검증이다. 빈 배열·후속 페이지 표시도 그대로 관측한다. HTTP·KIS 오류·잘못된 응답 구조·통신 실패는 stdout 없이 고정 오류 코드 JSON을 stderr에 쓰고 종료 코드 1로 끝난다. 오류 원문·헤더는 출력하지 않는다.
+현재 관측 CLI의 실행 환경·로컬 검사·실제 조회 절차는 [처음 실행하고 검증하기](getting-started.md)에 있다. 인수·환경 변수·요청 조건·출력 필드·오류의 정확한 계약은 [KIS 관측 CLI 레퍼런스](kis-probe-reference.md)에 있다. 도구의 성공 코드는 자료의 의미나 장전 지원 시간을 검증한 결과가 아니다.
 
 마스터 표본은 공식 예제를 실행하지 않고 표준 라이브러리로 ZIP을 메모리에서 읽어 선택했다. 마스터 자동 수집 기능은 CLI에 추가하지 않았다. 재확인할 때 ZIP의 대문자 파일명과 24열 구조를 확인하고, 위 공식 열 정의에 따라 `symbol`, `securityType`, `dr`, `etpType`, 거래소·식별자만 추린다. 새 분류 표본은 후보군에 추가하지 않는다.
 
-로컬 검사는 `npm run check`, `npm run typecheck`, `npm test`다. 테스트는 CLI 경계에서 외부 HTTP만 모의 처리하며 정상 관측·오류·비밀 필드 배제·여섯 순위 요청·종목 조회·빈 응답·연속 표시·잘못된 입력·인증 누락을 확인한다. 모의 검사와 위 실제 조회는 별도 근거다. 검사 결과와 음성 대조 결과는 이슈 작업 기록에 남긴다. Actions는 비활성 상태를 유지한다.
+모의 검사와 위 실제 조회는 별도 근거다. 기존 검사 결과와 음성 대조 결과는 [#243 작업 기록](https://github.com/mochafreddo/stock-scout/issues/243#issuecomment-6232840769)에 있다. 재현 명령과 검사 대상은 시작 안내에서 확인한다. Actions는 비활성 상태를 유지한다.
 
 ## 인증 절차 명세
 
