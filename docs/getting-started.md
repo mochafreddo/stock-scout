@@ -33,6 +33,18 @@
 
 테스트의 공개 경계는 CLI 인수·stdout·stderr·종료 코드입니다. 구현은 [scripts/kis-probe.ts](../scripts/kis-probe.ts), 테스트는 [tests/kis-probe.test.mjs](../tests/kis-probe.test.mjs), 외부 HTTP 대체 코드는 [tests/kis-http-mock.mjs](../tests/kis-http-mock.mjs)에 있습니다.
 
+## push 전 로컬 검증 설정하기
+
+저장소 루트에서 `node scripts/pre-push.ts --install`을 한 번 실행하세요. 기존 gstack 보안 훅이 있으면 `pre-push.local`에 연결하며 기존 훅의 내용을 보존합니다. 다른 훅이나 사용자 지정 `core.hooksPath`가 있으면 설치를 중단하므로 수동으로 연결해야 합니다. GitHub Actions는 사용하지 않습니다.
+
+훅은 Git이 전달한 각 ref의 커밋을 임시 디렉터리에 복원해 검사합니다. 작업 중인 파일은 검사 대상에 섞이지 않습니다. 원격 커밋과 비교해 `.md`만 바뀌면 공백 오류와 저장소 내부 링크를 확인합니다. 그 밖의 파일이 바뀌면 `npm run check`, `npm run typecheck`, `npm test`도 차례로 실행합니다. 새 ref는 전체 파일을 변경 범위로 취급하며, 삭제하는 ref는 건너뜁니다. 원격 비교 커밋이 로컬에 없으면 검증이 실패하므로 먼저 가져와야 합니다.
+
+링크 검사는 인라인 링크와 참조 링크 정의의 로컬 경로, `#` 제목과 명시적인 HTML 앵커를 확인합니다. 외부 URL과 코드 블록은 검사하지 않습니다. Markdown 전체 문법이나 외부 사이트의 유효성을 보장하는 검사는 아닙니다.
+
+코드 검사는 push할 `package-lock.json`과 로컬 잠금 파일이 같고 설치된 의존성이 준비되어 있어야 합니다. 기존 `node_modules/`를 임시 디렉터리에 복사하고 `npm ls --offline --all`로 확인합니다. 훅이 패키지를 설치하거나 파일을 자동 수정하지는 않습니다. npm은 오프라인 모드로 실행되지만 이는 실행하는 스크립트의 네트워크 접근까지 차단하는 격리 환경은 아닙니다. 현재 테스트는 외부 HTTP를 모의 응답으로 대체합니다.
+
+검증 실패 시 출력된 경로나 명령을 확인해 수정한 뒤 다시 push하세요. 임시 디렉터리는 성공과 실패 모두에서 삭제됩니다. 훅 자체의 동작은 `node --test tests/pre-push.test.mjs`로 확인할 수 있습니다.
+
 ## 인증 없이 관측 JSON 확인하기
 
 테스트 결과에 이어 CLI의 JSON을 직접 확인하려면 저장소 루트에서 다음 명령을 실행하세요. `env -i`로 상속된 환경을 비우고 실행 경로와 모의 값만 전달합니다. `--import`로 불러온 테스트 전용 코드가 `fetch`를 대체하므로 실제 KIS 요청이나 토큰 발급은 발생하지 않습니다.
