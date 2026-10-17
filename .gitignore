@@ -3,3 +3,5 @@
 .env.*
 .envrc.local
 *.local.md
+
+node_modules/

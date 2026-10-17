@@ -1,0 +1,110 @@
+# KIS 후보군 데이터 검증
+
+## 결론과 차단 조건
+
+[#243](https://github.com/mochafreddo/stock-scout/issues/243)의 검증은 진행 중이다. 2026-10-17 토요일의 실제 KIS 조회로 여섯 순위·일별 시세·일부 종목 정보의 응답을 확보했다. 정상 거래일 개장 60·30·15분 전 관측은 아직 수행하지 않았다. 최종 지원 시간과 N을 확정하거나 [#239](https://github.com/mochafreddo/stock-scout/issues/239)의 후보군 조회 및 후속 추천 구현을 검증 완료로 처리할 수 없다.
+
+다음 필수 조건이 남아 있다.
+
+- 장전 세 시점의 여섯 순위와 비교 시세가 직전 완료 정규장을 나타내는지 확인한다. 순위에는 이번에 확인한 필드 중 기준일이 없으며, 조회 시각을 기준 세션으로 대체하지 않는다.
+- 순위와 일별 시세의 정규장 범위, 거래량·거래대금의 단위와 집계 정의를 공식 자료로 확인한다. 같은 공급자의 두 응답이 일치한다는 사실만으로 시간외 포함 여부를 판정하지 않는다.
+- 보통주·우선주를 구분하는 상품기본정보 코드의 공식 정의를 확보한다. 워런트는 실제 유형 표본이 미확보다. 이름이나 티커의 접미사로 분류하지 않는다.
+- 페이지 이어받기, 빈 응답의 정상 여부, 계정에 적용되는 호출 제한과 준비 시각을 확인한 뒤 N·기간·전체 호출 및 실행 시간 제한을 합의한다.
+
+기존 구현의 독립 공급자 대조·통합 시장 순위·정확한 거래대금 입증 요구는 적용하지 않았다. 이번 도구는 후보군이나 추천을 생성하지 않는다.
+
+## 공식 근거
+
+KIS 공식 저장소의 확인 커밋은 `2077773a69a428daf63e148182511f068cc45de3`이다. 아래 예제의 구현과 필드 명칭을 직접 확인했다. 예제의 주석과 실제 서비스의 보장 범위는 구분한다.
+
+| 자료 | 확인한 정의와 한계 |
+| --- | --- |
+| [거래량 순위](https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/trade_vol/trade_vol.py) | `HHDFS76310010`, `NDAY=0` 당일, `VOL_RANG=0` 전체, 빈 가격 조건. 기준일·정규장 지정 인수 없음. `NDAY` 인수 설명에 “N분전”과 일 단위 선택값이 혼재함. |
+| [거래대금 순위](https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/trade_pbmn/trade_pbmn.py) | `HHDFS76320010`, 같은 당일·전체 조건. `KEYB`와 `tr_cont` 연속 조회 코드가 있으나 실제 두 번째 페이지는 미검증. |
+| [순위 필드](https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/trade_vol/chk_trade_vol.py) | `rank` 순위, `tvol` 거래량, `tamt` 거래대금, `last` 현재가, `zdiv` 소수점자리수. [거래대금 필드](https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/trade_pbmn/chk_trade_pbmn.py)도 같은 명칭이다. 명칭만으로 정규장 집계 범위·금액 배율을 확정하지 않음. |
+| [일별 시세](https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/dailyprice/chk_dailyprice.py) | `GUBN=0` 일별, 빈 `BYMD`는 오늘 기준, `MODP=0` 수정주가 미반영. `xymd` 날짜, `clos` 종가, `tvol` 거래량, `tamt` 거래대금. 예제의 `nrec` 한글명은 “전일종가”이지만 실제 값은 100이었다. 이 라벨을 데이터 의미의 근거로 쓰지 않음. |
+| [상품기본정보](https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/search_info/search_info.py), [필드](https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/search_info/chk_search_info.py) | `CTPF1702R`, NAS/NYS/AMS는 상품유형 입력 `512/513/529`. `ovrs_stck_dvsn_cd` 해외주식구분코드, `std_pdno` 표준상품번호, `istt_usge_isin_cd` 기관용도ISIN코드. 확인한 예제에 구분코드 값의 열거 정의는 없음. |
+| [종목 마스터](https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/stocks_info/overseas_stock_code.py) | 유형 `1` 지수, `2` 주식, `3` ETP(ETF), `4` 워런트. DR 여부와 국가, ETP 세부 유형 `001` ETF·`002` ETN·`005` VIX ETF·`006` VIX ETN 등. 예제의 TLS 검증 해제와 ZIP 디스크 추출은 실행하지 않음. |
+
+Context7에서 공식 저장소를 찾은 뒤 원본을 고정 커밋으로 읽었다. 검색 결과에 섞인 국내 시세·다른 엔드포인트의 설명을 해외 일별 시세의 정규장 근거로 사용하지 않았다. KIS 포털의 [호출 유량 안내](https://apiportal.koreainvestment.com/community/10000000-0000-0011-0000-000000000001/post/d0d1a83f-6f8d-4437-9700-6d26702fd989)는 검색에서 발견했지만 본문 열기에 실패했다. 따라서 검색 요약의 유량 숫자를 계정 운영 한도로 채택하지 않았다.
+
+## 실제 관측
+
+원자료는 [evidence/issue-243](evidence/issue-243)에 필요한 필드만 저장했다. 인증 헤더·토큰·앱 키·계좌 정보·오류 원문은 자료에 포함하지 않는다. 숫자는 KIS가 반환한 문자열 그대로 보존했다. 각 API 자료의 `requestedAt`·`receivedAt`은 UTC이며 요청 조건과 공식 출처를 포함한다. `dataSession: null`과 `validation: unverified`는 관측을 완료된 제품 검증으로 오인하지 않도록 한다.
+
+### 순위와 일별 시세
+
+여섯 순위의 요청 시작은 2026-10-17 19:23:07~19:23:13 KST다. 일별 세 요청은 19:23:14~19:23:17 KST에 시작했다. 모두 장전 관측이 아니다.
+
+| 거래소 | 순위 | 응답 행 | `trec` | `tr_cont` | 관측한 정렬 |
+| --- | --- | --- | --- | --- | --- |
+| NAS | 거래량 | 100 | 5028 | F | `rank` 1~100, `tvol` 내림차순 |
+| NAS | 거래대금 | 100 | 5026 | F | `rank` 1~100, `tamt` 내림차순 |
+| NYS | 거래량 | 100 | 2783 | F | `rank` 1~100, `tvol` 내림차순 |
+| NYS | 거래대금 | 100 | 2783 | F | `rank` 1~100, `tamt` 내림차순 |
+| AMS | 거래량 | 100 | 4735 | F | `rank` 1~100, `tvol` 내림차순 |
+| AMS | 거래대금 | 100 | 4735 | F | `rank` 1~100, `tamt` 내림차순 |
+
+각 페이지에서 `rsym`은 100개 모두 달랐다. NAS 두 순위의 `trec`는 달랐으므로 전체 개수를 같은 모집단의 고정 크기로 취급하지 않는다. 각 API가 제공한 거래소별 순위를 보존하며 통합 순위를 만들지 않았다. 행 수 100과 후속 표시 F는 이번 응답의 관측값이며 API 최대 페이지 크기나 상위 100개 정책을 확정한 근거는 아니다.
+
+일별 응답은 각 100행이며 날짜는 `20261016`부터 `20260527`까지였다. 아래 세 종목은 각 거래소의 두 순위에 모두 있었고, `last/tvol/tamt`가 일별 첫 행의 `clos/tvol/tamt`와 문자열까지 일치했다.
+
+| 종목 | 일별 `xymd` | 거래량 순위 | 거래대금 순위 | `clos` | `tvol` | `tamt` |
+| --- | --- | --- | --- | --- | --- | --- |
+| NAS AAPL | 20261016 | 26 | 5 | 343.4600 | 59946368 | 20645996425 |
+| NYS TSM | 20261016 | 57 | 1 | 412.6100 | 16675070 | 6917481646 |
+| AMS SPY | 20261016 | 7 | 1 | 763.2500 | 64384579 | 49309307277 |
+
+이는 세 표본의 날짜 대응과 수치 일치를 관측한 결과다. 모든 순위 행의 날짜, 금액 단위, 정규장 밖 거래의 포함 여부는 입증하지 못했다. `USD`는 종목 정보·마스터의 통화로 확인했지만, 그것만으로 순위 `tamt`의 배율까지 증명하지 않는다.
+
+처음 기존 토큰으로 NAS 거래량 순위를 요청했을 때 HTTP 500, `rt_cd=1`, `msg_cd=EGW00205`를 받았다. 2026-10-17T10:20:56.392422+00:00의 실패로 기록하며, 정상 빈 응답으로 세지 않는다. 사용자 승인 후 토큰을 메모리에서만 발급해 실제 조회했다. 기존 인증 파일은 갱신하지 않았다. `BAC/PB` 조회도 KIS 실패였으며 실제 마스터의 표기 `BAC/B`로 재조회했다.
+
+### 종목 유형과 식별
+
+마스터는 공식 URL `https://new.real.download.dws.co.kr/common/master/{nas,nys,ams}mst.cod.zip`에서 메모리로 읽고 필요한 표본만 남겼다. 실제 ZIP 멤버명은 대문자 `NASMST.COD` 등이며, cp949 탭 구분 24열이었다. 세 파일의 전체 행은 각각 5265·2839·4765개였다. 마스터와 순위의 범위가 같다고 가정하지 않는다.
+
+| 표본 | 실제 필드 | 판정 범위 |
+| --- | --- | --- |
+| AAPL | 마스터 유형 2, DR N, 상품 구분 01 | 주식이라는 대분류는 확인. 보통주 판별의 공식 코드 정의는 미확보. |
+| TSM | 마스터 유형 2, DR Y, DR 국가 TW, 상품 구분 01 | KIS의 명시적 DR 필드로 미국 상장 예탁증서를 구분할 근거 확보. 국가를 제외 조건으로 사용하지 않음. |
+| SPY | 마스터 유형 3, ETP 001 | 공식 마스터 정의에 따라 ETF 제외를 판별할 근거 확보. |
+| VXX | 마스터 유형 3, ETP 006 | 공식 마스터 정의에 따라 VIX ETN 제외를 판별할 근거 확보. |
+| BAC와 BAC/B·BAC/L | 마스터는 모두 유형 2·DR N·빈 ETP. 상품 구분은 각각 01과 04·04 | 마스터만으로 구분되지 않는 실제 사례. 04의 공식 정의를 확보하기 전에는 이름이나 두 표본만으로 우선주 규칙을 확정하지 않음. |
+| 워런트 | 세 마스터에서 유형 4의 표본을 찾지 못함 | 공식 유형 정의만 확인. 실제 워런트 분류는 미검증. |
+
+상품기본정보의 `prdt_clsf_cd=101210`, `prdt_clsf_name=해외주식`은 AAPL·TSM·SPY·VXX·BAC 표본에서 같았다. 이 값만으로 ETF·ETN이나 ADR을 가를 수 없다. `prdt_type_cd_2`도 이 표본에서 비어 있었다.
+
+GOOG·GOOGL의 이름은 모두 ALPHABET INC지만 `std_pdno`와 ISIN은 각각 `US02079K1079`, `US02079K3059`로 달랐다. 같은 회사 이름으로 합치면 안 된다는 실제 근거다. AAPL의 두 순위는 모두 `DNASAAPL`이었다. 상장 종목을 연결할 때 거래소+종목 코드와 제공 식별자를 보존할 수 있다. 마스터 `NASAAPL`과 순위 `DNASAAPL`처럼 실시간 심볼의 표기가 다르므로 접두사를 추정해 지우지 않는다. 심볼 변경·거래소 이동까지 안정적인 영구 식별자를 입증한 결과는 아니다.
+
+## 다음 장전 관측과 운영값
+
+[NYSE 공식 일정](https://www.nyse.com/trade/hours-calendars)과 [Nasdaq 공식 일정](https://www.nasdaq.com/market-activity/stock-market-holiday-schedule)의 정규장 개장은 09:30 ET다. 2026-10-19 월요일을 다음 관측 후보로 제안한다. 실행 직전에 공식 일정의 변경을 다시 확인해야 하며, 자동 실행이나 예약은 이번 작업에서 만들지 않았다.
+
+10월 19일의 목표는 08:30·09:00·09:15 America/New_York, 한국 시각 21:30·22:00·22:15다. 정상 개장 예정 시각은 22:30 KST다. 이는 시간대 변환과 관측 계획이며 제품 지원 시간의 확정이 아니다. 세 시점 각각 여섯 순위와 비교 일별 시세를 수집하고 실제 요청·수신 시각을 기록한다. 실행이 목표 시각을 벗어나면 벗어난 그대로 보고한다. 휴장 다음 날·서머타임 전환·조기 폐장 이후를 검증한 것으로 확대하지 않는다.
+
+| 값 | 현재 상태와 후속 판단 |
+| --- | --- |
+| N | 미확정. 첫 페이지 100행을 관측했지만 제외 후 보충하지 않는 정책의 최종 N은 장전 준비 상태·실행량과 함께 결정. |
+| 순위 기간 | 관측은 `NDAY=0` 한 조건. 기간 선택값의 누적 범위·세션 경계는 미확정. |
+| 일별 기간 | 관측은 일별·오늘 기준·미수정 첫 페이지. 분석용 최소 조회 기간은 미확정. |
+| 페이지 | 이번 도구는 한 페이지만 요청. 공식 예제는 F/M 후 N 연속 요청을 사용하나 KEYB 처리가 두 순위 예제에서 다름. 실제 이어받기는 후속 검증 대상. |
+| 호출 제한 | 관측 스크립트는 순차 호출 사이에 1초를 두었음. 계정의 허용 호출률을 측정한 결과는 아님. |
+| 실행 제한 | 도구는 실행당 1개 요청, fetch 15초 제한, 행 수 1000 초과 거부. 안전한 관측용 제한이며 공급자 SLA나 제품 전체 실행 제한이 아님. |
+| 지원 시간·빈 응답 | 모두 미검증. 빈 배열을 수집할 수는 있지만 정상 빈 후보군으로 승인하지 않음. |
+
+## 검증 도구와 재현
+
+`scripts/kis-probe.ts`는 Node.js 24 이상에서 실행하는 TypeScript 관측 CLI다. 자격 증명은 프로세스 환경의 `KIS_APP_KEY`, `KIS_APP_SECRET`, `KIS_ACCESS_TOKEN`에서 받는다. 도구 자체는 토큰 발급·파일 저장·재시도·페이지 반복·유형 판정·후보군 생성을 하지 않는다. 승인된 기존 보관소에서 환경을 준비하며 비밀 값을 명령 인수나 셸 기록에 넣지 않는다.
+
+```sh
+node scripts/kis-probe.ts volume NAS
+node scripts/kis-probe.ts amount NYS
+node scripts/kis-probe.ts daily AMS SPY
+node scripts/kis-probe.ts info NYS BAC/B
+```
+
+순위 모드는 종목 인수를 받지 않고, `daily/info`에는 종목이 필요하다. NAS·NYS·AMS 외의 시장은 거부한다. 성공은 관측 JSON 하나와 종료 코드 0이며, 자료의 의미는 항상 미검증이다. 빈 배열·후속 페이지 표시도 그대로 관측한다. HTTP·KIS 오류·잘못된 응답 구조·통신 실패는 stdout 없이 고정 오류 코드 JSON을 stderr에 쓰고 종료 코드 1로 끝난다. 오류 원문·헤더는 출력하지 않는다.
+
+마스터 표본은 공식 예제를 실행하지 않고 표준 라이브러리로 ZIP을 메모리에서 읽어 선택했다. 마스터 자동 수집 기능은 CLI에 추가하지 않았다. 재확인할 때 ZIP의 대문자 파일명과 24열 구조를 확인하고, 위 공식 열 정의에 따라 `symbol`, `securityType`, `dr`, `etpType`, 거래소·식별자만 추린다. 새 분류 표본은 후보군에 추가하지 않는다.
+
+로컬 검사는 `npm run check`, `npm run typecheck`, `npm test`다. 테스트는 CLI 경계에서 외부 HTTP만 모의 처리하며 정상 관측·오류·비밀 필드 배제·여섯 순위 요청·종목 조회·빈 응답·연속 표시·잘못된 입력·인증 누락을 확인한다. 모의 검사와 위 실제 조회는 별도 근거다. 검사 결과와 음성 대조 결과는 이슈 작업 기록에 남긴다. Actions는 비활성 상태를 유지한다.

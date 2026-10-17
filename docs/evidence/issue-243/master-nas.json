@@ -1,0 +1,47 @@
+{
+  "receivedAt": "2026-10-17T10:24:17.918764+00:00",
+  "source": "https://new.real.download.dws.co.kr/common/master/nasmst.cod.zip",
+  "definition": "https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/stocks_info/overseas_stock_code.py",
+  "totalLines": 5265,
+  "rows": [
+    {
+      "nationalCode": "US",
+      "exchangeId": "22",
+      "exchangeCode": "NAS",
+      "symbol": "AAPL",
+      "realtimeSymbol": "NASAAPL",
+      "englishName": "APPLE INC",
+      "securityType": "2",
+      "currency": "USD",
+      "dr": "N",
+      "drCountry": "",
+      "etpType": "   "
+    },
+    {
+      "nationalCode": "US",
+      "exchangeId": "22",
+      "exchangeCode": "NAS",
+      "symbol": "GOOG",
+      "realtimeSymbol": "NASGOOG",
+      "englishName": "ALPHABET INC",
+      "securityType": "2",
+      "currency": "USD",
+      "dr": "N",
+      "drCountry": "",
+      "etpType": "   "
+    },
+    {
+      "nationalCode": "US",
+      "exchangeId": "22",
+      "exchangeCode": "NAS",
+      "symbol": "GOOGL",
+      "realtimeSymbol": "NASGOOGL",
+      "englishName": "ALPHABET INC",
+      "securityType": "2",
+      "currency": "USD",
+      "dr": "N",
+      "drCountry": "",
+      "etpType": "   "
+    }
+  ]
+}
