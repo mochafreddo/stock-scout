@@ -1,10 +1,11 @@
 # AGENTS.md
 
-- 제품 요구사항의 기준은 [#237](https://github.com/mochafreddo/stock-scout/issues/237)과 작업 대상 티켓이다. 작업 전에 본문과 댓글을 읽는다. 이전 구현의 전략·검증 요구사항은 자동 승계하지 않는다.
-- 필요한 최소 구현부터 만든다. 첫 버전의 기술 선택은 TypeScript와 Vercel AI SDK이며 제품 범위는 CLI다.
-- 이슈 조회·발행·수정에는 이 저장소에서 GitHub CLI를 사용한다. 여러 줄 본문은 파일에 작성하고 `--body-file`로 전달한다.
-- 코드와 도메인을 탐색하기 전에 `GLOSSARY.md`와 관련 `docs/adr/`를 읽는다. 확정한 도메인 용어는 용어집에, 장기 설계 결정은 ADR에 기록한다.
-- `main`에 직접 커밋·푸시할 수 있다. 이력 교체와 강제 푸시는 #238의 초기화에 한해 승인된 작업이며 이후에는 별도 승인이 필요하다.
-- Actions는 비활성화 상태를 유지한다. 필요한 검증은 로컬에서 실행하고, 모의 검증과 실제 서비스 연동 검증을 구분한다.
-- 환경 파일과 인증정보는 커밋하거나 출력하지 않는다. 새 인증정보의 보관은 명세와 승인된 저장 위치를 따른다.
-- `CLAUDE.md`는 이 파일을 참조한다. 공유 지침은 이 파일에서 관리하고 제자리에서 편집한다.
+- Use [#237](https://github.com/mochafreddo/stock-scout/issues/237) and the task's ticket as the authority for product requirements. Read their bodies and comments before starting work. Do not automatically inherit strategy or verification requirements from the previous implementation.
+- Start with the minimum necessary implementation. Use TypeScript and the Vercel AI SDK for the first version, scoped to a CLI.
+- Use the GitHub CLI from this repository to read, create, and update issues. Write multiline bodies to a file and pass it with `--body-file`.
+- Read `GLOSSARY.md` and relevant `docs/adr/` entries before exploring the code or domain. Record agreed domain terms in the glossary and long-term design decisions in ADRs.
+- Write documents primarily consumed by agents in English, including `AGENTS.md`, agent skills, and agent task instructions. Write other documents in Korean, including `README.md`, `GLOSSARY.md`, ADRs, user guides, and issues. Preserve code identifiers and official names in their original form.
+- Commit and push directly to `main` as needed. History replacement and force-pushing were authorized only for the initialization in #238; obtain separate approval for subsequent uses.
+- Keep Actions disabled. Run required verification locally and distinguish mocked checks from live service integration checks.
+- Do not commit or print environment files or credentials. Follow the specification and approved storage locations when storing new credentials.
+- Keep `CLAUDE.md` as a reference to this file. Maintain shared instructions here and edit this file in place.
