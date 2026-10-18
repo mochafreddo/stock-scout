@@ -37,6 +37,20 @@ Node.js 24 이상과 npm이 필요합니다. [처음 실행하고 검증하기](
 
 원본 출처·고정 리비전·변경 범위는 [도입 기록](.agents/skills/document-generate/UPSTREAM.md)에 있으며, 해당 스킬에는 [원본 MIT 라이선스](.agents/skills/document-generate/LICENSE)를 포함했습니다.
 
+## QA 스킬
+
+에이전트 공용 [qa](.agents/skills/qa/SKILL.md)는 지정한 CLI 동작을 점검하고 결함을 재현한 뒤, 회귀 테스트와 최소 수정으로 다시 검증합니다. 명시적으로 호출할 때만 실행하며 gstack 설치는 필요하지 않습니다.
+
+- Codex: `$qa KIS 관측 CLI를 점검하고 발견한 버그를 수정해 주세요.`
+- Claude Code: `/qa KIS 관측 CLI를 점검하고 발견한 버그를 수정해 주세요.`
+- 다른 에이전트: 위 `SKILL.md`를 읽고 따르도록 명시적으로 요청하세요.
+
+기본은 지정 범위의 전체 점검과 중간 심각도 이상 결함 수정입니다. `--quick`은 빠른 점검, `--exhaustive`는 경미한 결함까지 수정, `--regression <보고서 경로>`는 이전 실패 재검증, `--report-only`는 보고만 수행합니다. 이 옵션은 스킬의 실행 방식을 지정하며 제품 CLI에 전달하지 않습니다.
+
+외부 통신은 기본적으로 모의 처리하며 실연동은 대상과 호출 범위에 대한 승인이 있을 때 수행합니다. 실행별 한국어 보고서와 비밀값을 제외한 증거는 기본적으로 접근을 제한한 임시 디렉터리에 보관합니다. QA 호출만으로 커밋·푸시하지 않습니다. 공용 본문과 Claude Code 연결 방식은 문서 생성 스킬과 같으며, 목록에 보이지 않으면 새 세션을 시작하세요.
+
+출처와 변경 범위는 [도입 기록](.agents/skills/qa/UPSTREAM.md)에 있으며 [원본 MIT 라이선스](.agents/skills/qa/LICENSE)를 포함했습니다.
+
 ## 라이선스
 
 [MIT](LICENSE)
