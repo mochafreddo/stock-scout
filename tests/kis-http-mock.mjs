@@ -1,8 +1,46 @@
 import assert from 'node:assert/strict';
+import fs, { appendFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { mock } from 'node:test';
+import { setTimeout } from 'node:timers/promises';
+
+if (process.env.TEST_NOW) mock.timers.enable({ apis: ['Date'], now: Number(process.env.TEST_NOW) });
 
 globalThis.fetch = async (url, options) => {
   const request = new URL(url);
+  if (process.env.TEST_TRACE) appendFileSync(process.env.TEST_TRACE, `${request.pathname}\n`);
+  if (process.env.SCENARIO === 'no-network') throw new Error('Unexpected network');
   assert.equal(request.origin, 'https://openapi.koreainvestment.com:9443');
+  if (request.pathname === '/oauth2/tokenP') {
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers['content-type'], 'application/json');
+    assert.deepEqual(JSON.parse(options.body), {
+      grant_type: 'client_credentials',
+      appkey: process.env.KIS_APP_KEY,
+      appsecret: process.env.KIS_APP_SECRET,
+    });
+    assert.equal(options.redirect, 'error');
+    const record = JSON.parse(
+      readFileSync(join(process.env.HOME, 'Library/Caches/stock-scout/issuance.json')),
+    );
+    assert.equal(record.kind, 'attempt');
+    assert.equal(record.at, Date.now());
+    if (process.env.TEST_GATE) {
+      fs.writeFileSync(`${process.env.TEST_GATE}.ready`, 'ready', { mode: 0o600 });
+      while (!fs.existsSync(process.env.TEST_GATE)) await setTimeout(10);
+    }
+    if (process.env.SCENARIO === 'issue-transport')
+      throw new Error('test-key test-secret test-token');
+    if (process.env.SCENARIO === 'issue-http') return new Response('test-secret', { status: 403 });
+    if (process.env.SCENARIO === 'issue-malformed') return new Response('test-key');
+    const body = {
+      access_token: 'test-token',
+      token_type: 'Bearer',
+      access_token_token_expired: '2026-10-18 10:00:00',
+      ...JSON.parse(process.env.TEST_TOKEN_BODY || '{}'),
+    };
+    return Response.json(body);
+  }
   assert.equal(
     options.headers.tr_id,
     {
@@ -13,6 +51,11 @@ globalThis.fetch = async (url, options) => {
     }[request.pathname],
   );
   assert.equal(options.headers.authorization, 'Bearer test-token');
+  assert.equal(
+    JSON.parse(readFileSync(join(process.env.HOME, 'Library/Caches/stock-scout/token.json')))
+      .access_token,
+    'test-token',
+  );
   assert.equal(options.redirect, 'error');
   const scenario = process.env.SCENARIO;
   if (scenario === 'transport-error') throw new Error('test-token test-secret');

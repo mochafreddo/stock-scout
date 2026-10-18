@@ -7,7 +7,7 @@
 | 구분 | 현재 상태 |
 | --- | --- |
 | KIS 관측 CLI | 구현됨. NAS·NYS·AMS에서 한 페이지를 조회하고 선택한 필드를 JSON으로 출력합니다. |
-| KIS 자동 토큰 발급·캐시 | [#243](https://github.com/mochafreddo/stock-scout/issues/243)에 명세가 있으며 아직 구현하지 않았습니다. 현재는 사전 발급된 토큰이 필요합니다. |
+| KIS 자동 토큰 발급·캐시 | [#247](https://github.com/mochafreddo/stock-scout/issues/247)에서 구현했습니다. 앱 키·시크릿으로 발급하고 보호된 캐시를 재사용합니다. 첫 실행은 5분 대기를 기록합니다. 조회 중 만료 복구는 #248의 범위입니다. |
 | 장전 후보군 조회 | [#239](https://github.com/mochafreddo/stock-scout/issues/239)의 계획입니다. 데이터 의미·종목 유형·지원 시간 검증이 남아 있습니다. |
 | AI 매수 후보 추천 | #237의 계획입니다. Vercel AI SDK·OpenAI 인증·모델 호출·비용 제한은 아직 구현하지 않았습니다. |
 
@@ -21,6 +21,7 @@ Node.js 24 이상과 npm이 필요합니다. [처음 실행하고 검증하기](
 
 - [용어집](GLOSSARY.md)
 - [처음 실행하고 검증하기](docs/getting-started.md): 개발 환경, 인증 없는 모의 실행, 오류 확인, 실제 관측 절차
+- [KIS 인증과 복구](docs/kis-auth.md): 캐시, 발급 간격, 수동 복구와 검증 범위
 - [KIS 관측 CLI 레퍼런스](docs/kis-probe-reference.md): 인수, 환경 변수, 출력, 오류
 - [KIS 데이터 검증](docs/kis-data-validation.md): 실제 관측 근거, 자동 검사 범위와 한계, 후속 차단 조건
 - [작업 이슈](https://github.com/mochafreddo/stock-scout/issues)
