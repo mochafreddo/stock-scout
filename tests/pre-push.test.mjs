@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -21,7 +22,7 @@ function git(cwd, ...args) {
   return result.stdout.trim();
 }
 
-function fixture(t) {
+function fixture(t, initial = true) {
   const root = mkdtempSync(join(tmpdir(), 'stock-scout-push-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   git(root, 'init', '-b', 'main');
@@ -39,9 +40,11 @@ function fixture(t) {
       },
     }),
   );
-  git(root, 'add', '.');
-  git(root, 'commit', '-m', 'baseline');
-  const base = git(root, 'rev-parse', 'HEAD');
+  if (initial) {
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'baseline');
+  }
+  const base = initial ? git(root, 'rev-parse', 'HEAD') : null;
   return { root, base };
 }
 
@@ -53,6 +56,310 @@ function run(root, tip, base, args = []) {
     env: { PATH: process.env.PATH, HOME: root, TMPDIR: tmpdir() },
   });
 }
+
+function installCommitHook(root) {
+  mkdirSync(join(root, 'scripts'), { recursive: true });
+  copyFileSync(cli, join(root, 'scripts/pre-push.ts'));
+  const result = spawnSync(process.execPath, [cli, '--install-pre-commit'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+}
+
+test('pre-commit checks the staged document and preserves an unstaged repair', (t) => {
+  const { root, base } = fixture(t);
+  installCommitHook(root);
+  writeFileSync(join(root, 'README.md'), '# Start\n\n[missing](missing.md)\n');
+  git(root, 'add', 'README.md');
+  writeFileSync(join(root, 'README.md'), '# Unstaged repair\n');
+  const before = git(root, 'diff', '--cached', '--binary');
+  const result = spawnSync('git', ['commit', '-m', 'broken staged document'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /missing\.md/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(git(root, 'diff', '--cached', '--binary'), before);
+  assert.equal(readFileSync(join(root, 'README.md'), 'utf8'), '# Unstaged repair\n');
+});
+
+test('pre-commit refuses a changed active index after quality checks', (t) => {
+  const { root, base } = fixture(t);
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  manifest.scripts.check = `git -C "${root}" add README.md`;
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  git(root, 'add', 'package.json');
+  writeFileSync(join(root, 'README.md'), '# Added during checks\n');
+  installCommitHook(root);
+  const result = spawnSync('git', ['commit', '-m', 'index changes during check'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /[Ii]ndex changed/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(git(root, 'show', ':README.md'), '# Added during checks');
+});
+
+test('staged CLI preserves the active index bytes', (t) => {
+  const { root } = fixture(t);
+  writeFileSync(join(root, 'README.md'), '# Staged document\n');
+  git(root, 'add', 'README.md');
+  const index = join(root, '.git/index');
+  const before = readFileSync(index);
+  const result = spawnSync(process.execPath, [cli, '--staged'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readFileSync(index), before);
+});
+
+test('pre-commit supports the initial code commit without running the full test command', (t) => {
+  const { root } = fixture(t, false);
+  git(root, 'add', 'README.md', 'package.json');
+  installCommitHook(root);
+  const result = spawnSync('git', ['commit', '-m', 'initial commit'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /fixture check/);
+  assert.match(result.stderr, /fixture typecheck/);
+  assert.doesNotMatch(result.stderr, /fixture test/);
+  assert.equal(git(root, 'show', 'HEAD:README.md'), '# Start');
+});
+
+test('pre-commit checks code in the index and honors the alternate index used by commit -a', (t) => {
+  const { root, base } = fixture(t);
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  manifest.scripts.check = 'node -e "process.exit(23)"';
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  git(root, 'add', 'package.json');
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ ...manifest, scripts: {} }));
+  installCommitHook(root);
+  const staged = git(root, 'diff', '--cached', '--binary');
+  const failed = spawnSync('git', ['commit', '-m', 'bad staged code'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(failed.status, 0, failed.stderr);
+  assert.match(failed.stderr, /npm run check failed/);
+  assert.equal(git(root, 'diff', '--cached', '--binary'), staged);
+  git(root, 'reset', 'package.json');
+  const fixed = JSON.parse(git(root, 'show', 'HEAD:package.json'));
+  writeFileSync(join(root, 'package.json'), JSON.stringify(fixed));
+  writeFileSync(join(root, 'README.md'), '[missing](absent.md)\n');
+  const automatic = spawnSync('git', ['commit', '-am', 'bad automatic staging'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(automatic.status, 0, automatic.stderr);
+  assert.match(automatic.stderr, /absent\.md/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+  writeFileSync(join(root, 'README.md'), '# Automatic staging\n');
+  const good = spawnSync('git', ['commit', '-am', 'good automatic staging'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.equal(good.status, 0, good.stderr);
+  assert.equal(git(root, 'show', 'HEAD:README.md'), '# Automatic staging');
+  assert.doesNotMatch(good.stderr, /fixture check|fixture typecheck|fixture test/);
+});
+
+test('pre-commit rechecks an explicit alternate index after quality commands mutate it', (t) => {
+  const { root, base } = fixture(t);
+  const alternate = join(root, 'alternate-index');
+  copyFileSync(join(root, '.git/index'), alternate);
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  manifest.scripts.check = `GIT_INDEX_FILE="${alternate}" git -C "${root}" add README.md`;
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  const env = { ...process.env, GIT_INDEX_FILE: alternate };
+  const added = spawnSync('git', ['add', 'package.json'], { cwd: root, encoding: 'utf8', env });
+  assert.equal(added.status, 0, added.stderr);
+  writeFileSync(join(root, 'README.md'), '# Changed alternate index\n');
+  const originalIndex = readFileSync(join(root, '.git/index'));
+  installCommitHook(root);
+  const result = spawnSync('git', ['commit', '-m', 'alternate changes during checks'], {
+    cwd: root,
+    encoding: 'utf8',
+    env,
+  });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /[Ii]ndex changed/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+  assert.deepEqual(readFileSync(join(root, '.git/index')), originalIndex);
+  const changed = spawnSync('git', ['show', ':README.md'], { cwd: root, encoding: 'utf8', env });
+  assert.equal(changed.status, 0, changed.stderr);
+  assert.equal(changed.stdout, '# Changed alternate index\n');
+});
+
+test('staged CLI honors an explicit alternate index and preserves both indexes', (t) => {
+  const { root } = fixture(t);
+  const alternate = join(root, 'alternate-index');
+  copyFileSync(join(root, '.git/index'), alternate);
+  writeFileSync(join(root, 'README.md'), '[missing](alternate-missing.md)\n');
+  const env = { ...process.env, GIT_INDEX_FILE: alternate };
+  const added = spawnSync('git', ['add', 'README.md'], { cwd: root, encoding: 'utf8', env });
+  assert.equal(added.status, 0, added.stderr);
+  const normalBefore = readFileSync(join(root, '.git/index'));
+  const alternateBefore = readFileSync(alternate);
+  const result = spawnSync(process.execPath, [cli, '--staged'], {
+    cwd: root,
+    encoding: 'utf8',
+    env,
+  });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /alternate-missing\.md/);
+  assert.deepEqual(readFileSync(join(root, '.git/index')), normalBefore);
+  assert.deepEqual(readFileSync(alternate), alternateBefore);
+});
+
+test('staged CLI rejects an unmerged index without changing it', (t) => {
+  const { root } = fixture(t);
+  installCommitHook(root);
+  const blob = git(root, 'rev-parse', 'HEAD:README.md');
+  const unmerged = spawnSync('git', ['update-index', '--index-info'], {
+    cwd: root,
+    encoding: 'utf8',
+    input: `0 ${'0'.repeat(40)}\tREADME.md\n100644 ${blob} 1\tREADME.md\n100644 ${blob} 2\tREADME.md\n100644 ${blob} 3\tREADME.md\n`,
+  });
+  assert.equal(unmerged.status, 0, unmerged.stderr);
+  const index = join(root, '.git/index');
+  const before = readFileSync(index);
+  const result = spawnSync(process.execPath, [cli, '--staged'], { cwd: root, encoding: 'utf8' });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /unmerged/);
+  assert.deepEqual(readFileSync(index), before);
+  const commit = spawnSync('git', ['commit', '-m', 'unmerged commit'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(commit.status, 0, commit.stderr);
+  assert.match(commit.stderr, /unmerged/);
+});
+
+test('pre-commit blocks staged whitespace errors in documents', (t) => {
+  const { root, base } = fixture(t);
+  installCommitHook(root);
+  writeFileSync(join(root, 'README.md'), '# Trailing whitespace  \n');
+  git(root, 'add', 'README.md');
+  const result = spawnSync('git', ['commit', '-m', 'whitespace error'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /trailing whitespace/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+});
+
+test('pre-commit installation is idempotent and preserves occupied and custom hook paths', (t) => {
+  const { root } = fixture(t);
+  installCommitHook(root);
+  const hook = join(root, '.git/hooks/pre-commit');
+  const installed = readFileSync(hook);
+  installCommitHook(root);
+  assert.deepEqual(readFileSync(hook), installed);
+  writeFileSync(hook, '#!/bin/sh\nexit 27\n');
+  const occupied = readFileSync(hook);
+  const refused = spawnSync(process.execPath, [cli, '--install-pre-commit'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(refused.status, 0, refused.stderr);
+  assert.match(refused.stderr, /preserved/);
+  assert.deepEqual(readFileSync(hook), occupied);
+  const scanner = '#!/bin/sh\n# gstack-redact pre-push (managed)\n# hooks/pre-push.local\nexit 0\n';
+  writeFileSync(hook, scanner);
+  const wrongKind = spawnSync(process.execPath, [cli, '--install-pre-commit'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(wrongKind.status, 0, wrongKind.stderr);
+  assert.match(wrongKind.stderr, /preserved/);
+  assert.equal(readFileSync(hook, 'utf8'), scanner);
+  assert.equal(existsSync(join(root, '.git/hooks/pre-push.local')), false);
+  const custom = join(root, 'custom-hooks');
+  git(root, 'config', 'core.hooksPath', custom);
+  const configured = spawnSync(process.execPath, [cli, '--install-pre-commit'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(configured.status, 0, configured.stderr);
+  assert.match(configured.stderr, /core\.hooksPath/);
+  assert.equal(existsSync(custom), false);
+  assert.equal(readFileSync(hook, 'utf8'), scanner);
+});
+
+test('pre-commit requires installed dependencies for the staged lock before allowing code commits', (t) => {
+  const { root, base } = fixture(t);
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  manifest.devDependencies = { 'fixture-dependency': '1.0.0' };
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  const lock = JSON.stringify({
+    name: 'fixture',
+    lockfileVersion: 3,
+    packages: {
+      '': { devDependencies: manifest.devDependencies },
+      'node_modules/fixture-dependency': { version: '1.0.0', dev: true },
+    },
+  });
+  writeFileSync(join(root, 'package-lock.json'), lock);
+  git(root, 'add', 'package.json', 'package-lock.json');
+  installCommitHook(root);
+  const staged = git(root, 'diff', '--cached', '--binary');
+  const commit = () =>
+    spawnSync('git', ['commit', '-m', 'dependencies prepared'], { cwd: root, encoding: 'utf8' });
+  const missing = commit();
+  assert.notEqual(missing.status, 0, missing.stderr);
+  assert.match(missing.stderr, /Prepare installed dependencies for the staged package-lock/);
+  assert.doesNotMatch(missing.stderr, /fixture check/);
+  const dependency = join(root, 'node_modules/fixture-dependency');
+  mkdirSync(dependency, { recursive: true });
+  writeFileSync(
+    join(dependency, 'package.json'),
+    '{"name":"fixture-dependency","version":"2.0.0"}',
+  );
+  const invalid = commit();
+  assert.notEqual(invalid.status, 0, invalid.stderr);
+  assert.match(invalid.stderr, /npm ls --offline --all failed/);
+  assert.doesNotMatch(invalid.stderr, /fixture check/);
+  writeFileSync(
+    join(dependency, 'package.json'),
+    '{"name":"fixture-dependency","version":"1.0.0"}',
+  );
+  writeFileSync(join(root, 'package-lock.json'), `${lock}\n`);
+  const mismatch = commit();
+  assert.notEqual(mismatch.status, 0, mismatch.stderr);
+  assert.match(mismatch.stderr, /Prepare installed dependencies for the staged package-lock/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(git(root, 'diff', '--cached', '--binary'), staged);
+  assert.equal(readFileSync(join(root, 'package-lock.json'), 'utf8'), `${lock}\n`);
+  writeFileSync(join(root, 'package-lock.json'), lock);
+  const good = commit();
+  assert.equal(good.status, 0, good.stderr);
+  assert.match(good.stderr, /fixture check/);
+  assert.match(good.stderr, /fixture typecheck/);
+  assert.doesNotMatch(good.stderr, /fixture test/);
+});
+
+test('pre-commit distinguishes an unavailable quality check from a failed check', (t) => {
+  const { root, base } = fixture(t);
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  delete manifest.scripts.typecheck;
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  git(root, 'add', 'package.json');
+  installCommitHook(root);
+  const result = spawnSync('git', ['commit', '-m', 'unavailable check'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Quality check unavailable: npm run typecheck is not configured/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+});
 
 test('pre-push rejects a broken committed link even when the working copy fixes it', (t) => {
   const { root, base } = fixture(t);

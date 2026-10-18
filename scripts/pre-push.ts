@@ -15,8 +15,13 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
-function git(args: string[], cwd = process.cwd(), input?: string) {
-  const result = spawnSync('git', args, { cwd, input, maxBuffer: 64 * 1024 * 1024 });
+function git(args: string[], cwd = process.cwd(), input?: string, index?: string) {
+  const result = spawnSync('git', args, {
+    cwd,
+    input,
+    env: index ? { ...process.env, GIT_INDEX_FILE: index } : process.env,
+    maxBuffer: 64 * 1024 * 1024,
+  });
   if (result.error) throw result.error;
   if (result.status !== 0)
     throw new Error(result.stderr.toString() || result.stdout.toString() || 'Git command failed');
@@ -202,8 +207,13 @@ function checkSkills(root: string, files: string[]) {
   }
 }
 
-function qualityChecks(root: string, source: string) {
+function qualityChecks(root: string, source: string, staged = false) {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const commands = staged ? ['check', 'typecheck'] : ['check', 'typecheck', 'test'];
+  for (const name of commands) {
+    if (typeof manifest.scripts?.[name] !== 'string' || !manifest.scripts[name].trim())
+      throw new Error(`Quality check unavailable: npm run ${name} is not configured`);
+  }
   if (Object.keys({ ...manifest.dependencies, ...manifest.devDependencies }).length) {
     const lock = join(root, 'package-lock.json');
     if (
@@ -212,7 +222,9 @@ function qualityChecks(root: string, source: string) {
       !readFileSync(lock).equals(readFileSync(join(source, 'package-lock.json'))) ||
       !existsSync(join(source, 'node_modules'))
     ) {
-      throw new Error('Prepare installed dependencies for the pushed package-lock.json first');
+      throw new Error(
+        `Prepare installed dependencies for the ${staged ? 'staged' : 'pushed'} package-lock.json first`,
+      );
     }
     cpSync(join(source, 'node_modules'), join(root, 'node_modules'), { recursive: true });
   }
@@ -224,38 +236,39 @@ function qualityChecks(root: string, source: string) {
     npm_config_audit: 'false',
     npm_config_update_notifier: 'false',
   };
-  for (const args of [
-    ['ls', '--offline', '--all'],
-    ...['check', 'typecheck', 'test'].map((name) => ['run', name]),
-  ]) {
+  for (const args of [['ls', '--offline', '--all'], ...commands.map((name) => ['run', name])]) {
     const result = spawnSync('npm', args, { cwd: root, env, stdio: ['ignore', 2, 2] });
-    if (result.error) throw result.error;
+    if (result.error)
+      throw new Error(`Quality check unavailable: npm ${args.join(' ')}: ${result.error.message}`);
+    if (result.signal)
+      throw new Error(`Quality check unavailable: npm stopped by ${result.signal}`);
     if (result.status !== 0) throw new Error(`npm ${args.join(' ')} failed`);
   }
 }
 
-function installHook() {
+function installHook(staged = false) {
   const hooks = resolve(git(['rev-parse', '--git-path', 'hooks']).toString().trim());
   const configured = spawnSync('git', ['config', '--get', 'core.hooksPath'], { encoding: 'utf8' });
   if (configured.status !== 1)
     throw new Error('Custom core.hooksPath requires manual hook integration');
-  const primary = join(hooks, 'pre-push');
-  const wrapper =
-    '#!/bin/sh\nexec node "$(git rev-parse --show-toplevel)/scripts/pre-push.ts" "$@"\n';
+  const name = staged ? 'pre-commit' : 'pre-push';
+  const primary = join(hooks, name);
+  const wrapper = `#!/bin/sh\nexec node "$(git rev-parse --show-toplevel)/scripts/pre-push.ts"${staged ? ' --staged' : ''} "$@"\n`;
   let destination = primary;
   if (
     existsSync(primary) &&
     (lstatSync(primary).isSymbolicLink() || !(lstatSync(primary).mode & 0o111))
   ) {
-    throw new Error('Existing pre-push hook is linked or not executable; preserved');
+    throw new Error(`Existing ${name} hook is linked or not executable; preserved`);
   }
   if (existsSync(primary) && readFileSync(primary, 'utf8') !== wrapper) {
     const text = readFileSync(primary, 'utf8');
     if (
+      staged ||
       !text.includes('# gstack-redact pre-push (managed)') ||
       !text.includes('hooks/pre-push.local')
     ) {
-      throw new Error('Existing pre-push hook requires manual integration; preserved');
+      throw new Error(`Existing ${name} hook requires manual integration; preserved`);
     }
     destination = join(hooks, 'pre-push.local');
   }
@@ -274,12 +287,54 @@ function installHook() {
   process.stderr.write(`Installed ${destination}\n`);
 }
 
+function checkStaged(source: string) {
+  const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-commit-')));
+  const root = join(temporary, 'snapshot');
+  try {
+    mkdirSync(root);
+    const index = resolve(git(['rev-parse', '--git-path', 'index']).toString().trim());
+    const copiedIndex = join(temporary, 'index');
+    const stagedTree = () => {
+      cpSync(index, copiedIndex);
+      return git(['write-tree'], source, undefined, copiedIndex).toString().trim();
+    };
+    const tree = stagedTree();
+    const head = spawnSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
+      cwd: source,
+    });
+    if (head.error) throw head.error;
+    if (head.status !== 0 && head.status !== 1) throw new Error(head.stderr.toString());
+    const base =
+      head.status === 0
+        ? head.stdout.toString().trim()
+        : git(['hash-object', '-t', 'tree', '--stdin'], source, '').toString().trim();
+    git(['diff', '--check', base, tree], source);
+    const changed = git(['diff', '--name-only', '-z', base, tree], source)
+      .toString()
+      .split('\0')
+      .filter(Boolean);
+    const files = snapshot(tree, root);
+    checkSkills(root, files);
+    checkLinks(root, files);
+    if (changed.some((file) => !file.endsWith('.md'))) qualityChecks(root, source, true);
+    if (stagedTree() !== tree)
+      throw new Error('Index changed during staged checks; retry the commit');
+    process.stderr.write(`Verified staged tree ${tree}\n`);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
 try {
-  if (process.argv.includes('--install')) {
-    installHook();
+  if (process.argv.includes('--install') || process.argv.includes('--install-pre-commit')) {
+    installHook(process.argv.includes('--install-pre-commit'));
     process.exit(0);
   }
   const source = git(['rev-parse', '--show-toplevel']).toString().trim();
+  if (process.argv.includes('--staged')) {
+    checkStaged(source);
+    process.exit(0);
+  }
   const input = readFileSync(0, 'utf8');
   for (const line of input.trim().split('\n').filter(Boolean)) {
     const fields = line.split(/\s+/);
@@ -313,6 +368,8 @@ try {
     }
   }
 } catch (error) {
-  process.stderr.write(`Push check failed: ${(error as Error).message}\n`);
+  process.stderr.write(
+    `${process.argv.includes('--staged') || process.argv.includes('--install-pre-commit') ? 'Commit' : 'Push'} check failed: ${(error as Error).message}\n`,
+  );
   process.exitCode = 1;
 }
