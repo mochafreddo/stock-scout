@@ -1,3 +1,5 @@
+import { AuthError, accessToken } from './kis-auth.ts';
+
 const sourceCommit = '2077773a69a428daf63e148182511f068cc45de3';
 const kinds = {
   volume: ['overseas-stock/v1/ranking/trade-vol', 'HHDFS76310010', 'trade_vol'],
@@ -76,14 +78,15 @@ try {
   } else {
     params = { EXCD: exchange, NDAY: '0', VOL_RANG: '0', KEYB: '', AUTH: '', PRC1: '', PRC2: '' };
   }
-  const { KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCESS_TOKEN } = process.env;
-  if (!KIS_APP_KEY || !KIS_APP_SECRET || !KIS_ACCESS_TOKEN) throw new Error('CREDENTIALS_MISSING');
+  const { KIS_APP_KEY, KIS_APP_SECRET } = process.env;
+  if (!KIS_APP_KEY || !KIS_APP_SECRET) throw new Error('CREDENTIALS_MISSING');
+  const token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET);
   const url = new URL(`https://openapi.koreainvestment.com:9443/uapi/${path}`);
   url.search = new URLSearchParams(params).toString();
   const requestedAt = new Date().toISOString();
   const response = await fetch(url, {
     headers: {
-      authorization: `Bearer ${KIS_ACCESS_TOKEN}`,
+      authorization: `Bearer ${token}`,
       appkey: KIS_APP_KEY,
       appsecret: KIS_APP_SECRET,
       tr_id: trId,
@@ -115,15 +118,28 @@ try {
   };
   console.log(JSON.stringify(record));
 } catch (error) {
-  const safeCodes = [
-    'USAGE',
-    'RESPONSE_SHAPE',
-    'CREDENTIALS_MISSING',
-    'HTTP_FAILURE',
-    'KIS_FAILURE',
-  ];
-  const code =
-    error instanceof Error && safeCodes.includes(error.message) ? error.message : 'REQUEST_FAILED';
-  console.error(JSON.stringify({ error: code }));
-  process.exitCode = 1;
+  if (error instanceof AuthError) {
+    console.error(
+      JSON.stringify({
+        error: error.message,
+        retryAfterSeconds: error.retryAfterSeconds,
+        guidance: error.guidance,
+      }),
+    );
+    process.exitCode = 1;
+  } else {
+    const safeCodes = [
+      'USAGE',
+      'RESPONSE_SHAPE',
+      'CREDENTIALS_MISSING',
+      'HTTP_FAILURE',
+      'KIS_FAILURE',
+    ];
+    const code =
+      error instanceof Error && safeCodes.includes(error.message)
+        ? error.message
+        : 'REQUEST_FAILED';
+    console.error(JSON.stringify({ error: code }));
+    process.exitCode = 1;
+  }
 }

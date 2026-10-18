@@ -1,6 +1,6 @@
 # KIS 관측 CLI 레퍼런스
 
-이 문서는 현재 [scripts/kis-probe.ts](../scripts/kis-probe.ts)의 외부 입출력을 설명한다. 실행 절차는 [시작 안내](getting-started.md), 실제 자료의 해석 한계는 [KIS 데이터 검증](kis-data-validation.md)에 있다. #243의 자동 토큰 발급·캐시는 아직 구현되지 않았으며 아래 계약은 현재 관측 도구에만 해당한다.
+이 문서는 현재 [scripts/kis-probe.ts](../scripts/kis-probe.ts)의 외부 입출력을 설명한다. 실행 절차는 [시작 안내](getting-started.md), 실제 자료의 해석 한계는 [KIS 데이터 검증](kis-data-validation.md)에 있다. 자동 발급·보호된 캐시 재사용 정책과 복구 절차는 [KIS 인증과 복구](kis-auth.md)에 있다.
 
 ## 실행 구문과 입력
 
@@ -17,15 +17,14 @@ node scripts/kis-probe.ts <daily|info> <NAS|NYS|AMS> <symbol>
 | --- | --- |
 | `KIS_APP_KEY` | 필수. 요청의 `appkey` 헤더에 사용한다. |
 | `KIS_APP_SECRET` | 필수. 요청의 `appsecret` 헤더에 사용한다. |
-| `KIS_ACCESS_TOKEN` | 필수. `authorization`의 Bearer 토큰으로 사용한다. |
 
-세 값은 프로세스 환경에서 읽으며 누락 또는 빈 문자열이면 실패한다. 파일을 읽거나 토큰 유효기간을 사전 검사하지 않는다. 입력 인수 검사 뒤에 환경 변수를 검사한다. 계좌번호나 OpenAI 인증은 사용하지 않는다.
+두 값은 프로세스 환경에서 읽으며 누락 또는 빈 문자열이면 실패한다. 사전 발급 토큰 환경 변수는 사용하지 않는다. `.env`는 자동으로 읽지 않는다. 승인된 캐시를 검사하고 필요한 경우 공식 발급 API로 토큰을 확보한 뒤 조회한다. 입력 인수 검사 뒤에 환경 변수를 검사한다. 계좌번호나 OpenAI 인증은 사용하지 않는다.
 
 따라서 잘못된 인수와 인증 누락이 함께 있으면 `USAGE`가 먼저 발생하며 요청을 보내지 않는다. 유효한 인수에서 인증만 누락되면 `CREDENTIALS_MISSING`으로 끝나며 요청을 보내지 않는다. 인증 없는 실행 예시는 [시작 안내의 모의 관측](getting-started.md#인증-없이-관측-json-확인하기)에 있다.
 
 ## 요청과 제한
 
-대상은 `https://openapi.koreainvestment.com:9443`의 운영 API다. 모든 요청에 `custtype=P`를 사용하며 리디렉션은 거부한다. 아래 경로 앞에는 `/uapi/`가 붙는다.
+대상은 `https://openapi.koreainvestment.com:9443`의 운영 API다. 시세 요청에 `custtype=P`를 사용하며 리디렉션은 거부한다. 아래 경로 앞에는 `/uapi/`가 붙는다.
 
 | 모드 | 경로 | `tr_id` | 쿼리 조건 |
 | --- | --- | --- | --- |
@@ -34,7 +33,7 @@ node scripts/kis-probe.ts <daily|info> <NAS|NYS|AMS> <symbol>
 | `daily` | `overseas-price/v1/quotations/dailyprice` | `HHDFS76240000` | `EXCD=<exchange>`, `SYMB=<symbol>`, `GUBN=0`, `MODP=0`; `AUTH/BYMD`는 빈 문자열 |
 | `info` | `overseas-price/v1/quotations/search-info` | `CTPF1702R` | `PDNO=<symbol>`; `PRDT_TYPE_CD`는 NAS `512`, NYS `513`, AMS `529` |
 
-실행당 `fetch`를 한 번 호출한다. `AbortSignal.timeout(15_000)`을 요청에 적용하지만 프로세스 전체의 완료 시간을 보장하는 별도 제한은 없다. 재시도·토큰 발급·페이지 이어받기·거래 일정 검사는 없다. 반환 행 수 1000 초과는 거부한다. 이는 관측 도구의 방어 조건이며 KIS의 페이지 크기나 운영 호출 한도를 뜻하지 않는다.
+시세 조회는 실행당 한 번이다. 유효한 캐시가 없으면 제한을 지켜 POST `/oauth2/tokenP` 발급 요청을 먼저 한 번 보낸다. 초기 대기·발급 제한·잠금·저장 실패에서는 시세를 조회하지 않는다. `AbortSignal.timeout(15_000)`을 요청에 적용하지만 프로세스 전체의 완료 시간을 보장하는 별도 제한은 없다. 조회 재시도·페이지 이어받기·거래 일정 검사는 없다. 조회 중 만료 복구는 #248의 범위다. 반환 행 수 1000 초과는 거부한다. 이는 관측 도구의 방어 조건이며 KIS의 페이지 크기나 운영 호출 한도를 뜻하지 않는다.
 
 ## 성공 출력
 
@@ -78,6 +77,11 @@ stdout에 JSON 객체 하나와 줄바꿈을 출력하고 종료 코드 0으로 
 | --- | --- |
 | `USAGE` | 모드·거래소·종목·추가 인수가 입력 조건에 맞지 않음 |
 | `CREDENTIALS_MISSING` | 필수 환경 변수가 없거나 빈 문자열임 |
+| `AUTH_COOLDOWN` | 초기 대기 또는 발급 제한. `retryAfterSeconds`와 고정 `guidance`를 함께 출력함 |
+| `AUTH_LOCKED` | 발급 잠금 충돌. 모든 CLI 종료 확인 후 잠금만 제거하는 `guidance`를 출력함 |
+| `AUTH_RECORD` | 손상된 발급 기록. 수동 복구와 새 초기 대기 안내를 출력함 |
+| `AUTH_STORAGE` | 캐시 권한·소유자·링크·읽기·안전한 저장 실패 |
+| `AUTH_FAILED` | 발급 통신·HTTP·응답·토큰·서버 만료 정보 검증 실패 |
 | `HTTP_FAILURE` | HTTP 응답의 `ok`가 false임 |
 | `KIS_FAILURE` | 파싱된 객체의 `rt_cd`가 문자열 `"0"`이 아님. 필드 누락도 포함함. |
 | `RESPONSE_SHAPE` | 최상위 또는 선택 대상 객체의 구조가 잘못됨, 순위·일별 행 배열이 아님, 행 수 1000 초과, 연속 조회 표시가 허용값 밖임 |

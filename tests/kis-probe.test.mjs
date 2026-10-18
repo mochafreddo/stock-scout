@@ -1,25 +1,18 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
+import { fixture, runCli } from './kis-cli-helper.mjs';
 
-const cli = new URL('../scripts/kis-probe.ts', import.meta.url);
-const mock = new URL('./kis-http-mock.mjs', import.meta.url);
 function run(scenario, args = ['volume', 'NAS'], credentials = {}) {
-  return spawnSync(process.execPath, ['--import', mock.pathname, cli.pathname, ...args], {
-    encoding: 'utf8',
-    env: {
-      PATH: process.env.PATH,
-      KIS_APP_KEY: 'test-key',
-      KIS_APP_SECRET: 'test-secret',
-      KIS_ACCESS_TOKEN: 'test-token',
-      SCENARIO: scenario,
-      ...credentials,
-    },
-  });
+  const f = fixture();
+  try {
+    return runCli(f, scenario, args, credentials);
+  } finally {
+    f.close();
+  }
 }
 
 test('CLI rejects missing credentials without printing values', () => {
-  const result = run('ok', ['volume', 'NAS'], { KIS_ACCESS_TOKEN: '' });
+  const result = run('ok', ['volume', 'NAS'], { KIS_APP_KEY: '' });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
   assert.equal(JSON.parse(result.stderr).error, 'CREDENTIALS_MISSING');

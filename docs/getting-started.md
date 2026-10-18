@@ -47,18 +47,24 @@
 
 ## 인증 없이 관측 JSON 확인하기
 
-테스트 결과에 이어 CLI의 JSON을 직접 확인하려면 저장소 루트에서 다음 명령을 실행하세요. `env -i`로 상속된 환경을 비우고 실행 경로와 모의 값만 전달합니다. `--import`로 불러온 테스트 전용 코드가 `fetch`를 대체하므로 실제 KIS 요청이나 토큰 발급은 발생하지 않습니다.
+테스트 결과에 이어 CLI의 JSON을 직접 확인하려면 저장소 루트에서 다음 명령을 실행하세요. 테스트 도우미가 임시 홈과 캐시, 통제된 시각, 모의 자격 증명만 전달합니다. `--import`로 불러온 테스트 전용 코드가 `fetch`를 대체하므로 실제 KIS 요청이나 토큰 발급은 발생하지 않습니다.
 
 ```sh
-env -i PATH="$PATH" \
-  KIS_APP_KEY=test-key KIS_APP_SECRET=test-secret KIS_ACCESS_TOKEN=test-token \
-  SCENARIO=ok \
-  node --import ./tests/kis-http-mock.mjs scripts/kis-probe.ts volume NAS
+node --input-type=module -e '
+import { fixture, runCli } from "./tests/kis-cli-helper.mjs";
+const f = fixture();
+try {
+  const result = runCli(f, "ok");
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+  process.exitCode = result.status;
+} finally { f.close(); }
+'
 ```
 
 종료 코드 0과 JSON 한 줄을 확인하세요. 모의 응답의 `rowCount`는 1이며 `rows[0]`에는 `symb: "AAPL"`, `tvol: "123"`, `tamt: "456"`이 있습니다. `validation: "unverified"`와 `dataSession: null`도 확인하세요. 시각은 실행할 때 생성하며 수치는 테스트용입니다. 이 결과를 실제 시세로 사용하지 마세요.
 
-같은 명령에서 `SCENARIO=ok`만 다음 값으로 바꿔 경계 동작도 확인하세요.
+같은 명령에서 `runCli(f, "ok")`의 `"ok"`를 다음 값으로 바꿔 경계 동작도 확인하세요.
 
 | 값 | 예상 결과 |
 | --- | --- |
@@ -82,17 +88,16 @@ npm test
 
 ## 실제 KIS 응답 관측하기
 
-이 단계는 KIS 운영 API로 실제 요청을 보냅니다. 앞선 테스트와 달리 외부 서비스에 접근합니다. 현재 CLI는 토큰을 발급하거나 갱신하지 않습니다. #243의 자동 인증 절차가 구현되기 전까지 승인된 기존 보관소에서 다음 값을 **프로세스 환경으로 준비한 경우에만** 진행하세요.
+이 단계는 KIS 운영 API로 실제 요청을 보냅니다. 앞선 테스트와 달리 외부 서비스에 접근합니다. CLI는 자동 발급과 실행 간 재사용을 처리합니다. 승인된 기존 보관소에서 다음 값을 프로세스 환경으로 준비하세요. [인증과 복구](kis-auth.md)의 첫 실행 대기와 캐시 보호 조건을 확인하세요.
 
 | 환경 변수 | 필요한 값 |
 | --- | --- |
 | `KIS_APP_KEY` | 기존 KIS 앱 키 |
 | `KIS_APP_SECRET` | 해당 앱 시크릿 |
-| `KIS_ACCESS_TOKEN` | 사전 발급된 유효 접근토큰 |
 
 CLI는 `.env` 파일을 자동으로 읽지 않습니다. 비밀 값을 명령 인수·셸 기록·로그에 입력하거나 문서에 붙여 넣지 마세요. 이 안내는 새 자격 증명 발급이나 새 보관 위치 설정을 다루지 않습니다.
 
-필요한 관측 명령 하나를 선택해 실행하세요. 각 명령은 한 번의 요청만 보냅니다.
+필요한 관측 명령 하나를 선택해 실행하세요. 각 명령은 시세를 한 번 조회하며 필요한 경우 발급 요청이 먼저 발생합니다. 발급 기록이 없는 첫 실행은 요청 없이 실패하고 300초 뒤 재실행을 안내합니다. CLI가 자동으로 기다리지는 않습니다.
 
 ```sh
 node scripts/kis-probe.ts volume NAS
@@ -108,7 +113,9 @@ node scripts/kis-probe.ts info NYS BAC/B
 | 코드 | 확인할 항목 |
 | --- | --- |
 | `USAGE` | 모드·거래소의 대소문자, 종목 인수의 필요 여부와 허용 문자, 추가 인수를 확인하세요. `--help`도 지원하지 않습니다. |
-| `CREDENTIALS_MISSING` | 필요한 세 환경 변수를 현재 프로세스에 전달했는지 확인하세요. `.env` 파일을 두는 것만으로는 전달되지 않습니다. |
+| `CREDENTIALS_MISSING` | 필요한 두 환경 변수를 현재 프로세스에 전달했는지 확인하세요. `.env` 파일을 두는 것만으로는 전달되지 않습니다. |
+| `AUTH_COOLDOWN` | `retryAfterSeconds` 이상 지난 뒤 재실행하세요. 시계 확인 안내가 있으면 시스템 시각을 확인하세요. |
+| `AUTH_LOCKED`, `AUTH_RECORD`, `AUTH_STORAGE`, `AUTH_FAILED` | [인증 복구 절차](kis-auth.md)를 확인하세요. |
 | `HTTP_FAILURE`, `KIS_FAILURE` | 기존 인증과 서비스 상태를 확인하세요. 이 코드만으로 토큰 만료를 확정하거나 자동 재발급을 기대하지 마세요. |
 | `RESPONSE_SHAPE` | 응답 구조가 CLI의 허용 조건을 벗어났습니다. 요청 모드·시각·오류 코드를 기록하고 레퍼런스의 응답 조건과 대조하세요. |
 | `REQUEST_FAILED` | 통신·시간 제한·리디렉션·JSON 해석 실패 등을 포함합니다. 연결 상태와 서비스 상태를 확인하세요. |
