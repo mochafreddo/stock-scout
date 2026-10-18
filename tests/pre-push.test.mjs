@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -229,4 +237,147 @@ test('nested list links remain checked while list code examples are ignored', (t
   git(root, 'commit', '-am', 'list code');
   const result = run(root, git(root, 'rev-parse', 'HEAD'), base);
   assert.equal(result.status, 0, result.stderr);
+});
+
+function skillFixture(t, name = 'sample') {
+  const { root, base } = fixture(t);
+  const directory = join(root, '.agents/skills', name);
+  mkdirSync(join(directory, 'agents'), { recursive: true });
+  mkdirSync(join(root, '.claude/skills'), { recursive: true });
+  writeFileSync(
+    join(directory, 'SKILL.md'),
+    `---
+name: ${name}
+disable-model-invocation: true
+---
+
+# Example
+`,
+  );
+  writeFileSync(
+    join(directory, 'agents/openai.yaml'),
+    'policy:\n  allow_implicit_invocation: false\n',
+  );
+  writeFileSync(join(directory, 'UPSTREAM.md'), '# Provenance\n');
+  writeFileSync(join(directory, 'LICENSE'), 'Synthetic fixture license\n');
+  symlinkSync(`../../.agents/skills/${name}`, join(root, '.claude/skills', name));
+  return { root, base, directory, link: join(root, '.claude/skills', name) };
+}
+
+test('pre-push rejects a committed skill link even when the working copy repairs it', (t) => {
+  const { root, base, link } = skillFixture(t);
+  rmSync(link);
+  symlinkSync('../../.agents/skills/other', link);
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'broken skill link');
+  const tip = git(root, 'rev-parse', 'HEAD');
+  rmSync(link);
+  symlinkSync('../../.agents/skills/sample', link);
+  const before = git(root, 'status', '--porcelain');
+  const broken = run(root, tip, base);
+  assert.equal(broken.status, 1, broken.stderr);
+  assert.match(broken.stderr, /sample.*relative symlink/);
+  assert.equal(git(root, 'status', '--porcelain'), before);
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'repair skill link');
+  const good = run(root, git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(good.status, 0, good.stderr);
+  for (const target of [null, 'regular', join(root, '.agents/skills/sample')]) {
+    rmSync(link, { force: true });
+    if (target === 'regular') writeFileSync(link, 'not a symlink\n');
+    else if (target !== null) symlinkSync(target, link);
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'invalid skill link kind');
+    const invalid = run(root, git(root, 'rev-parse', 'HEAD'), base);
+    assert.equal(invalid.status, 1, invalid.stderr);
+    assert.match(invalid.stderr, /sample.*relative symlink/);
+  }
+});
+
+test('pre-push rejects inconsistent or ambiguous skill invocation settings', (t) => {
+  const { root, base, directory } = skillFixture(t);
+  for (const yaml of [
+    'policy:\n  allow_implicit_invocation: true\n',
+    'policy:\n  allow_implicit_invocation: "false"\n',
+    'policy:\n  allow_implicit_invocation: false\n  allow_implicit_invocation: true\n',
+    'policy: {allow_implicit_invocation: false}\n',
+  ]) {
+    writeFileSync(join(directory, 'agents/openai.yaml'), yaml);
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'invalid invocation settings');
+    const result = run(root, git(root, 'rev-parse', 'HEAD'), base);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /sample.*invocation/);
+  }
+  writeFileSync(
+    join(directory, 'agents/openai.yaml'),
+    '# Codex policy\npolicy: # explicit invocation\n    allow_implicit_invocation: false # disabled\n',
+  );
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'valid invocation settings');
+  const good = run(root, git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(good.status, 0, good.stderr);
+  writeFileSync(
+    join(directory, 'SKILL.md'),
+    '---\nname: sample\ndisable-model-invocation: false\n---\n\n# Revised title\n',
+  );
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'mismatched Claude setting');
+  const mismatch = run(root, git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(mismatch.status, 1, mismatch.stderr);
+  assert.match(mismatch.stderr, /sample.*invocation/);
+  for (const fields of [
+    'disable-model-invocation: true\n"disable-model-invocation": false',
+    'disable-model-invocation: true\n  false',
+  ]) {
+    writeFileSync(join(directory, 'SKILL.md'), `---\nname: sample\n${fields}\n---\n`);
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'ambiguous frontmatter');
+    const ambiguous = run(root, git(root, 'rev-parse', 'HEAD'), base);
+    assert.equal(ambiguous.status, 1, ambiguous.stderr);
+    assert.match(ambiguous.stderr, /sample.*invocation/);
+  }
+  writeFileSync(
+    join(directory, 'SKILL.md'),
+    '---\nname: sample\ndisable-model-invocation: false\n---\n',
+  );
+  writeFileSync(
+    join(directory, 'agents/openai.yaml'),
+    'policy:\n  allow_implicit_invocation: true\n',
+  );
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'consistent implicit invocation');
+  const implicit = run(root, git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(implicit.status, 0, implicit.stderr);
+});
+
+test('pre-push requires a nonempty regular license only for adapted skills', (t) => {
+  const { root, base, directory } = skillFixture(t, 'another');
+  const license = join(directory, 'LICENSE');
+  for (const content of [null, '', '\n\n']) {
+    if (content === null) rmSync(license);
+    else writeFileSync(license, content);
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'missing or empty license');
+    const tip = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(license, 'Working copy license repair\n');
+    const before = git(root, 'status', '--porcelain');
+    const result = run(root, tip, base);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /another.*LICENSE/);
+    assert.equal(git(root, 'status', '--porcelain'), before);
+  }
+  rmSync(license);
+  symlinkSync('SKILL.md', license);
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'linked license');
+  const linked = run(root, git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(linked.status, 1, linked.stderr);
+  assert.match(linked.stderr, /LICENSE.*regular file/);
+  rmSync(license);
+  rmSync(join(directory, 'UPSTREAM.md'));
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'native project skill');
+  const native = run(root, git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(native.status, 0, native.stderr);
 });

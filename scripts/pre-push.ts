@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -138,6 +139,69 @@ function checkLinks(root: string, files: string[]) {
   }
 }
 
+function skillFile(path: string) {
+  if (!existsSync(path) || !lstatSync(path).isFile())
+    throw new Error(`${path}: skill metadata must be a regular file`);
+  return readFileSync(path, 'utf8');
+}
+
+function checkSkills(root: string, files: string[]) {
+  const names = new Set(
+    files.flatMap((file) => /^\.agents\/skills\/([^/]+)\//.exec(file)?.[1] ?? []),
+  );
+  for (const name of names) {
+    const directory = join(root, '.agents/skills', name);
+    const link = join(root, '.claude/skills', name);
+    if (
+      !files.includes(`.claude/skills/${name}`) ||
+      !lstatSync(link).isSymbolicLink() ||
+      isAbsolute(readlinkSync(link)) ||
+      resolve(dirname(link), readlinkSync(link)) !== directory
+    ) {
+      throw new Error(`${name}: Claude skill must be a relative symlink to its shared directory`);
+    }
+
+    const skill = skillFile(join(directory, 'SKILL.md'));
+    const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(skill)?.[1];
+    const fields = frontmatter?.split(/\r?\n/) ?? [];
+    const manual = fields.filter((line) => line.startsWith('disable-model-invocation:'));
+    const nextField = fields
+      .slice(fields.indexOf(manual[0]) + 1)
+      .find((line) => line.trim() && !line.trimStart().startsWith('#'));
+    const disabled = manual[0]?.match(
+      /^disable-model-invocation:[ \t]*(true|false)[ \t]*(?:#.*)?$/,
+    )?.[1];
+    const policy = skillFile(join(directory, 'agents/openai.yaml'))
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*(?:#.*)?$/.test(line));
+    const implicit = policy[1]?.match(
+      /^ +allow_implicit_invocation:[ \t]*(true|false)[ \t]*(?:#.*)?$/,
+    )?.[1];
+    if (
+      !fields.every((line) => /^(?:\s|#|[A-Za-z][\w-]*:|$)/.test(line)) ||
+      manual.length !== 1 ||
+      (nextField !== undefined && /^\s/.test(nextField)) ||
+      disabled === undefined ||
+      policy.length !== 2 ||
+      !/^policy:[ \t]*(?:#.*)?$/.test(policy[0]) ||
+      implicit === undefined
+    ) {
+      throw new Error(
+        `${name}: invocation metadata requires one frontmatter boolean and a policy-only block with one boolean`,
+      );
+    }
+    if (disabled === implicit)
+      throw new Error(`${name}: Claude and Codex invocation settings disagree`);
+
+    if (
+      files.includes(`.agents/skills/${name}/UPSTREAM.md`) &&
+      !skillFile(join(directory, 'LICENSE')).trim()
+    ) {
+      throw new Error(`${name}: adapted skill LICENSE must not be empty`);
+    }
+  }
+}
+
 function qualityChecks(root: string, source: string) {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   if (Object.keys({ ...manifest.dependencies, ...manifest.devDependencies }).length) {
@@ -240,6 +304,7 @@ try {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-push-')));
     try {
       const files = snapshot(commit, root);
+      checkSkills(root, files);
       checkLinks(root, files);
       if (changed.some((file) => !file.endsWith('.md'))) qualityChecks(root, source);
       process.stderr.write(`Verified ${commit}\n`);

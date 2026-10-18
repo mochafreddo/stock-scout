@@ -52,6 +52,12 @@ Node.js 24 이상과 npm이 필요합니다. [처음 실행하고 검증하기](
 
 출처와 변경 범위는 [도입 기록](.agents/skills/qa/UPSTREAM.md)에 있으며 [원본 MIT 라이선스](.agents/skills/qa/LICENSE)를 포함했습니다.
 
+## 프로젝트 스킬 검사
+
+기존 pre-push 검사는 커밋 스냅샷의 프로젝트 스킬도 확인합니다. `.agents/skills/<이름>/`의 각 스킬에는 같은 이름의 Claude 상대 심볼릭 링크와 Codex 호출 설정이 필요합니다. `UPSTREAM.md`가 있는 스킬에는 비어 있지 않은 일반 파일인 `LICENSE`가 필요하며, 라이선스의 법적 적합성은 별도로 검토합니다.
+
+호출 설정 검사는 `SKILL.md` frontmatter의 `disable-model-invocation` 불리언과 `agents/openai.yaml`의 `policy.allow_implicit_invocation` 불리언이 서로 반대인지 확인합니다. frontmatter의 최상위 키는 따옴표 없는 블록 형식을 지원합니다. 현재 Codex 설정은 `policy` 아래 해당 불리언 하나를 두는 블록 형식만 지원하며, 공백·빈 줄·주석은 허용합니다. 다른 YAML 표현이나 추가 설정은 통과시키지 않으므로 필요한 형식이 생기면 검사와 테스트도 함께 확장하세요. 이 검사는 실제 호스트의 스킬 발견·실행을 검증하지 않습니다.
+
 ## 라이선스
 
 [MIT](LICENSE)
