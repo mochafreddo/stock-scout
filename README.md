@@ -2,12 +2,12 @@
 
 미국 정규장 시작 전에 매수 검토 후보를 확인하는 개인용 CLI 프로젝트입니다. 제품 요구사항의 기준은 [명세 #237](https://github.com/mochafreddo/stock-scout/issues/237)입니다.
 
-현재는 KIS 데이터 검증 단계입니다. TypeScript 관측 CLI로 거래량·거래대금 순위, 일별 시세, 종목 정보를 한 요청씩 조회할 수 있습니다. **관측 성공은 장전 데이터 검증 완료나 매수 후보 추천을 뜻하지 않습니다.**
+현재는 KIS 데이터 검증 단계입니다. TypeScript 관측 CLI로 거래량·거래대금 순위, 일별 시세, 종목 정보를 각각 한 페이지씩 조회할 수 있습니다. **관측 성공은 장전 데이터 검증 완료나 매수 후보 추천을 뜻하지 않습니다.**
 
 | 구분 | 현재 상태 |
 | --- | --- |
 | KIS 관측 CLI | 구현됨. NAS·NYS·AMS에서 한 페이지를 조회하고 선택한 필드를 JSON으로 출력합니다. |
-| KIS 자동 토큰 발급·캐시 | [#247](https://github.com/mochafreddo/stock-scout/issues/247)에서 구현했습니다. 앱 키·시크릿으로 발급하고 보호된 캐시를 재사용합니다. 첫 실행은 5분 대기를 기록합니다. 조회 중 만료 복구는 #248의 범위입니다. |
+| KIS 자동 토큰 발급·캐시 | [#247](https://github.com/mochafreddo/stock-scout/issues/247)에서 발급·캐시 재사용을, [#248](https://github.com/mochafreddo/stock-scout/issues/248)에서 명시적 만료의 한 번 복구를 구현했습니다. 첫 실행은 5분 대기를 기록하며 복구에도 같은 발급 제한을 적용합니다. 실제 만료 복구는 미검증입니다. |
 | 장전 후보군 조회 | [#239](https://github.com/mochafreddo/stock-scout/issues/239)의 계획입니다. 데이터 의미·종목 유형·지원 시간 검증이 남아 있습니다. |
 | AI 매수 후보 추천 | #237의 계획입니다. Vercel AI SDK·OpenAI 인증·모델 호출·비용 제한은 아직 구현하지 않았습니다. |
 

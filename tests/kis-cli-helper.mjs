@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -12,6 +13,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const now = Date.parse('2026-10-18T00:00:00Z');
+export function putToken(
+  f,
+  access_token = 'rejected-token',
+  appKey = 'test-key',
+  appSecret = 'test-secret',
+) {
+  const token = {
+    fingerprint: createHash('sha256')
+      .update(JSON.stringify([appKey, appSecret]))
+      .digest('hex'),
+    access_token,
+    access_token_token_expired: '2026-10-18 10:00:00',
+  };
+  writeFileSync(join(f.cache, 'token.json'), JSON.stringify(token), { mode: 0o600 });
+  return token;
+}
 export function fixture(record = true) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-auth-')));
   const cache = join(home, 'Library/Caches/stock-scout');

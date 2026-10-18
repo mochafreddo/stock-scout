@@ -1,4 +1,4 @@
-import { AuthError, accessToken } from './kis-auth.ts';
+import { AuthError, accessToken, invalidateToken } from './kis-auth.ts';
 
 const sourceCommit = '2077773a69a428daf63e148182511f068cc45de3';
 const kinds = {
@@ -80,24 +80,47 @@ try {
   }
   const { KIS_APP_KEY, KIS_APP_SECRET } = process.env;
   if (!KIS_APP_KEY || !KIS_APP_SECRET) throw new Error('CREDENTIALS_MISSING');
-  const token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET);
+  let token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET);
   const url = new URL(`https://openapi.koreainvestment.com:9443/uapi/${path}`);
   url.search = new URLSearchParams(params).toString();
   const requestedAt = new Date().toISOString();
-  const response = await fetch(url, {
-    headers: {
-      authorization: `Bearer ${token}`,
-      appkey: KIS_APP_KEY,
-      appsecret: KIS_APP_SECRET,
-      tr_id: trId,
-      custtype: 'P',
-    },
-    signal: AbortSignal.timeout(15_000),
-    redirect: 'error',
-  });
-  if (!response.ok) throw new Error('HTTP_FAILURE');
-  const body = object(await response.json());
-  if (body.rt_cd !== '0') throw new Error('KIS_FAILURE');
+  const query = async () => {
+    const response = await fetch(url, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        appkey: KIS_APP_KEY,
+        appsecret: KIS_APP_SECRET,
+        tr_id: trId,
+        custtype: 'P',
+      },
+      signal: AbortSignal.timeout(15_000),
+      redirect: 'error',
+    });
+    let body: Record<string, unknown>;
+    try {
+      body = object(await response.json());
+    } catch (error) {
+      if (!response.ok) throw new Error('HTTP_FAILURE');
+      throw error;
+    }
+    if (body.msg_cd === 'EGW00123') {
+      if (body.rt_cd === '0') throw new Error('KIS_FAILURE');
+      return { response, body, expired: true };
+    }
+    if (!response.ok) throw new Error('HTTP_FAILURE');
+    if (body.rt_cd !== '0') throw new Error('KIS_FAILURE');
+    return { response, body, expired: false };
+  };
+  let result = await query();
+  if (result.expired) {
+    token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, token);
+    result = await query();
+    if (result.expired) {
+      await invalidateToken(KIS_APP_KEY, KIS_APP_SECRET, token);
+      throw new Error('KIS_FAILURE');
+    }
+  }
+  const { response, body } = result;
   const rawRows = kind === 'info' ? [body.output] : body.output2;
   if (!Array.isArray(rawRows) || rawRows.length > 1000) throw new Error('RESPONSE_SHAPE');
   const keys = kind === 'info' ? fields.info : kind === 'daily' ? fields.daily : fields.ranking;

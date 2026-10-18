@@ -5,6 +5,7 @@ import { mock } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
 
 if (process.env.TEST_NOW) mock.timers.enable({ apis: ['Date'], now: Number(process.env.TEST_NOW) });
+let queryCount = 0;
 
 globalThis.fetch = async (url, options) => {
   const request = new URL(url);
@@ -50,13 +51,40 @@ globalThis.fetch = async (url, options) => {
       '/uapi/overseas-price/v1/quotations/search-info': 'CTPF1702R',
     }[request.pathname],
   );
-  assert.equal(options.headers.authorization, 'Bearer test-token');
+  const step = JSON.parse(process.env.TEST_QUERY_STEPS || '[]')[queryCount++];
+  const expectedToken = step?.token || 'test-token';
+  assert.equal(options.headers.authorization, `Bearer ${expectedToken}`);
   assert.equal(
     JSON.parse(readFileSync(join(process.env.HOME, 'Library/Caches/stock-scout/token.json')))
       .access_token,
-    'test-token',
+    expectedToken,
   );
   assert.equal(options.redirect, 'error');
+  if (step?.gate) {
+    fs.writeFileSync(`${process.env.TEST_QUERY_GATE}.ready`, 'ready', { mode: 0o600 });
+    while (!fs.existsSync(process.env.TEST_QUERY_GATE)) await setTimeout(10);
+  }
+  if (step?.advance) mock.timers.tick(step.advance);
+  if (step?.peer) {
+    fs.writeFileSync(
+      join(process.env.HOME, 'Library/Caches/stock-scout/token.json'),
+      JSON.stringify(step.peer),
+      { mode: 0o600 },
+    );
+  }
+  if (step?.lock)
+    fs.mkdirSync(join(process.env.HOME, 'Library/Caches/stock-scout/issuance.lock'), {
+      mode: 0o700,
+    });
+  if (step?.unsafe)
+    fs.chmodSync(join(process.env.HOME, 'Library/Caches/stock-scout/token.json'), 0o644);
+  if (step?.blockSave)
+    fs.mkdirSync(join(process.env.HOME, 'Library/Caches/stock-scout/token.json.tmp'), {
+      mode: 0o700,
+    });
+  if (step?.transport) throw new Error('test-key test-secret rejected-token test-token');
+  if (step?.raw !== undefined) return new Response(step.raw, { status: step.status || 200 });
+  if (step?.body) return Response.json(step.body, { status: step.status || 200 });
   const scenario = process.env.SCENARIO;
   if (scenario === 'transport-error') throw new Error('test-token test-secret');
   if (scenario === 'http-error') return new Response('test-token', { status: 500 });
