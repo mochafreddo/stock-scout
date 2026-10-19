@@ -26,6 +26,7 @@ Node.js 24 이상과 npm이 필요합니다. [처음 실행하고 검증하기](
 - [KIS 관측 실행 기록](docs/kis-observe.md): 한 번의 관측 응답과 프로세스 결과·소스 해시를 함께 저장하기
 - [KIS 데이터 검증](docs/kis-data-validation.md): 실제 관측 근거, 자동 검사 범위와 한계, 후속 차단 조건
 - [KIS 종목 유형과 식별 검증](docs/kis-security-identification.md): 공식 코드 정의, 실제 워런트·우선주 ADR 반례와 후속 차단 조건
+- [외부 공식 종목 유형 자료 조사](docs/official-security-type-validation.md): 공개 구조화 목록·증권별 공시의 실제 수집 결과와 자동 판별의 남은 조건
 - [작업 이슈](https://github.com/mochafreddo/stock-scout/issues)
 
 ## 문서 생성 스킬

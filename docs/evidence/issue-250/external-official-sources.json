@@ -1,0 +1,693 @@
+{
+  "issue": 250,
+  "recordedAt": "2026-10-19T07:38:39.314226+00:00",
+  "scope": "Source feasibility investigation, not a runtime classifier or current full-market validation",
+  "requestPolicy": "HTTPS GET, no auth/cookies/custom headers; default timeout30s, max10MiB, max5same-origin redirects; one request per source",
+  "sources": [
+    {
+      "id": "nasdaqlisted",
+      "url": "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:31:27Z",
+        "contentType": "text/plain",
+        "bytes": 349398
+      },
+      "sha256": "859f1fa90ac296523d25c80e2d65458b240df75ac01e2be820efe7c7e8d09b45",
+      "header": [
+        "Symbol",
+        "Security Name",
+        "Market Category",
+        "Test Issue",
+        "Financial Status",
+        "Round Lot Size",
+        "ETF",
+        "NextShares"
+      ],
+      "footer": "File Creation Time: 1019202603:02|||||||",
+      "rowCount": 5629,
+      "samples": [
+        {
+          "Symbol": "AAPL",
+          "Security Name": "Apple Inc. - Common Stock",
+          "ETF": "N"
+        },
+        {
+          "Symbol": "ACONW",
+          "Security Name": "Aclarion, Inc. - Warrant",
+          "ETF": "N"
+        },
+        {
+          "Symbol": "ADSEW",
+          "Security Name": "ADS-TEC ENERGY PLC - Warrant",
+          "ETF": "N"
+        },
+        {
+          "Symbol": "GOOG",
+          "Security Name": "Alphabet Inc. - Class C Capital Stock",
+          "ETF": "N"
+        },
+        {
+          "Symbol": "GOOGL",
+          "Security Name": "Alphabet Inc. - Class A Common Stock",
+          "ETF": "N"
+        },
+        {
+          "Symbol": "SHOP",
+          "Security Name": "Shopify Inc. - Class A Subordinate Voting Shares",
+          "ETF": "N"
+        }
+      ]
+    },
+    {
+      "id": "otherlisted",
+      "url": "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:31:26Z",
+        "contentType": "text/plain",
+        "bytes": 543200
+      },
+      "sha256": "0d924f508357289ea77513721964d3306d79ebe6b126ce56f13218ce1f722038",
+      "header": [
+        "ACT Symbol",
+        "Security Name",
+        "Exchange",
+        "CQS Symbol",
+        "ETF",
+        "Round Lot Size",
+        "Test Issue",
+        "NASDAQ Symbol"
+      ],
+      "footer": "File Creation Time: 1019202603:02||||||",
+      "rowCount": 7675,
+      "samples": [
+        {
+          "ACT Symbol": "BAC",
+          "Security Name": "Bank of America Corporation Common Stock",
+          "Exchange": "N",
+          "CQS Symbol": "BAC",
+          "ETF": "N",
+          "NASDAQ Symbol": "BAC"
+        },
+        {
+          "ACT Symbol": "BAC$B",
+          "Security Name": "Bank of America Corporation Depositary Shares, each representing a 1/1,000th interest in a share of 6.000% Non-Cumulative Preferred Stock, Series GG",
+          "Exchange": "N",
+          "CQS Symbol": "BACpB",
+          "ETF": "N",
+          "NASDAQ Symbol": "BAC-B"
+        },
+        {
+          "ACT Symbol": "BAC$L",
+          "Security Name": "Bank of America Corporation Non Cumulative Perpetual Conv Pfd Ser L",
+          "Exchange": "N",
+          "CQS Symbol": "BACpL",
+          "ETF": "N",
+          "NASDAQ Symbol": "BAC-L"
+        },
+        {
+          "ACT Symbol": "BBD",
+          "Security Name": "Banco Bradesco Sa American Depositary Shares",
+          "Exchange": "N",
+          "CQS Symbol": "BBD",
+          "ETF": "N",
+          "NASDAQ Symbol": "BBD"
+        },
+        {
+          "ACT Symbol": "BBDO",
+          "Security Name": "Banco Bradesco Sa American Depositary Shares (each representing one Common Share)",
+          "Exchange": "N",
+          "CQS Symbol": "BBDO",
+          "ETF": "N",
+          "NASDAQ Symbol": "BBDO"
+        },
+        {
+          "ACT Symbol": "SPY",
+          "Security Name": "State Street SPDR S&P 500 ETF Trust",
+          "Exchange": "P",
+          "CQS Symbol": "SPY",
+          "ETF": "Y",
+          "NASDAQ Symbol": "SPY"
+        },
+        {
+          "ACT Symbol": "TSM",
+          "Security Name": "Taiwan Semiconductor Manufacturing Company Ltd.",
+          "Exchange": "N",
+          "CQS Symbol": "TSM",
+          "ETF": "N",
+          "NASDAQ Symbol": "TSM"
+        },
+        {
+          "ACT Symbol": "VXX",
+          "Security Name": "iPath Series B S&P 500 VIX Short-Term Futures ETN",
+          "Exchange": "Z",
+          "CQS Symbol": "VXX",
+          "ETF": "N",
+          "NASDAQ Symbol": "VXX"
+        }
+      ]
+    },
+    {
+      "id": "symbol-definitions",
+      "url": "https://www.nasdaqtrader.com/Trader.aspx?id=SymbolDirDefs",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:31:27Z",
+        "contentType": "text/html",
+        "bytes": 114996
+      },
+      "sha256": "e9d3353b7a0eb443cb695d0d581655f7b20914b62da963883076084414b3704f"
+    },
+    {
+      "id": "symbol-lookup",
+      "url": "https://www.nasdaqtrader.com/Trader.aspx?id=symbollookup",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:32:07Z",
+        "contentType": "text/html",
+        "bytes": 57090
+      },
+      "sha256": "7c97dd349df2cffc0231cb7024e831b1f7274e1a20ef5ac0dcb351987edf073e"
+    },
+    {
+      "id": "spy-product",
+      "url": "https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-500-etf-trust-spy",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:31:37Z",
+        "contentType": "text/html",
+        "bytes": 234497
+      },
+      "sha256": "9583f03bc0cc263139db093b5c35a51e7397cbfeba45484606e3cd4301e301fb"
+    },
+    {
+      "id": "nyse-mapping",
+      "url": "https://ftp.nyse.com/NYSESymbolMapping/NYSESymbolMapping_20261019.txt",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:34:23Z",
+        "contentType": "text/plain",
+        "bytes": 458316
+      },
+      "sha256": "60767c10e87fa4cb6ce58a08c38b71051b53c87c8e4f29c98c10fef8e946d472",
+      "fileDate": "20261019",
+      "fieldOrderFrom": "Pillar Common Client Specification v2.4r section9.1; trailing pipe creates final empty parse field",
+      "rowCount": 13325,
+      "samples": [
+        {
+          "Symbol": "AAPL",
+          "CQS Symbol": "AAPL",
+          "SymbolIndex": "9",
+          "MarketID": "N",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "ACONW",
+          "CQS Symbol": "ACONW",
+          "SymbolIndex": "73923",
+          "MarketID": "N",
+          "ExchangeCode": "Q",
+          "SecurityType": "W"
+        },
+        {
+          "Symbol": "ADSEW",
+          "CQS Symbol": "ADSEW",
+          "SymbolIndex": "73022",
+          "MarketID": "N",
+          "ExchangeCode": "Q",
+          "SecurityType": "W"
+        },
+        {
+          "Symbol": "BAC",
+          "CQS Symbol": "BAC",
+          "SymbolIndex": "4945",
+          "MarketID": "N",
+          "ExchangeCode": "N",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "BAC PRB",
+          "CQS Symbol": "BACpB",
+          "SymbolIndex": "61005",
+          "MarketID": "N",
+          "ExchangeCode": "N",
+          "SecurityType": "P"
+        },
+        {
+          "Symbol": "BAC PRL",
+          "CQS Symbol": "BACpL",
+          "SymbolIndex": "26962",
+          "MarketID": "N",
+          "ExchangeCode": "N",
+          "SecurityType": "P"
+        },
+        {
+          "Symbol": "BBD",
+          "CQS Symbol": "BBD",
+          "SymbolIndex": "4964",
+          "MarketID": "N",
+          "ExchangeCode": "N",
+          "SecurityType": "A"
+        },
+        {
+          "Symbol": "BBDO",
+          "CQS Symbol": "BBDO",
+          "SymbolIndex": "39747",
+          "MarketID": "N",
+          "ExchangeCode": "N",
+          "SecurityType": "H"
+        },
+        {
+          "Symbol": "GOOG",
+          "CQS Symbol": "GOOG",
+          "SymbolIndex": "43829",
+          "MarketID": "N",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "GOOGL",
+          "CQS Symbol": "GOOGL",
+          "SymbolIndex": "1753",
+          "MarketID": "N",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "SHOP",
+          "CQS Symbol": "SHOP",
+          "SymbolIndex": "49965",
+          "MarketID": "N",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "SPY",
+          "CQS Symbol": "SPY",
+          "SymbolIndex": "9280",
+          "MarketID": "N",
+          "ExchangeCode": "P",
+          "SecurityType": "E"
+        },
+        {
+          "Symbol": "TSM",
+          "CQS Symbol": "TSM",
+          "SymbolIndex": "9637",
+          "MarketID": "N",
+          "ExchangeCode": "N",
+          "SecurityType": "A"
+        },
+        {
+          "Symbol": "VXX",
+          "CQS Symbol": "VXX",
+          "SymbolIndex": "60447",
+          "MarketID": "N",
+          "ExchangeCode": "Z",
+          "SecurityType": "E"
+        }
+      ]
+    },
+    {
+      "id": "american-mapping",
+      "url": "https://ftp.nyse.com/AmericanSymbolMapping/AmericanSymbolMapping_20261019.txt",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:34:23Z",
+        "contentType": "text/plain",
+        "bytes": 447901
+      },
+      "sha256": "0e57cf989540679adc6a3f6fff39b76c4fd0dc058d9562c553f21945ce87d4a2",
+      "fileDate": "20261019",
+      "fieldOrderFrom": "Pillar Common Client Specification v2.4r section9.1; trailing pipe creates final empty parse field",
+      "rowCount": 13325,
+      "samples": [
+        {
+          "Symbol": "AAPL",
+          "CQS Symbol": "AAPL",
+          "SymbolIndex": "9",
+          "MarketID": "A",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "ACONW",
+          "CQS Symbol": "ACONW",
+          "SymbolIndex": "73923",
+          "MarketID": "A",
+          "ExchangeCode": "Q",
+          "SecurityType": "W"
+        },
+        {
+          "Symbol": "ADSEW",
+          "CQS Symbol": "ADSEW",
+          "SymbolIndex": "73022",
+          "MarketID": "A",
+          "ExchangeCode": "Q",
+          "SecurityType": "W"
+        },
+        {
+          "Symbol": "BAC",
+          "CQS Symbol": "BAC",
+          "SymbolIndex": "4945",
+          "MarketID": "A",
+          "ExchangeCode": "N",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "BAC PRB",
+          "CQS Symbol": "BACpB",
+          "SymbolIndex": "61005",
+          "MarketID": "A",
+          "ExchangeCode": "N",
+          "SecurityType": "P"
+        },
+        {
+          "Symbol": "BAC PRL",
+          "CQS Symbol": "BACpL",
+          "SymbolIndex": "26962",
+          "MarketID": "A",
+          "ExchangeCode": "N",
+          "SecurityType": "P"
+        },
+        {
+          "Symbol": "BBD",
+          "CQS Symbol": "BBD",
+          "SymbolIndex": "4964",
+          "MarketID": "A",
+          "ExchangeCode": "N",
+          "SecurityType": "A"
+        },
+        {
+          "Symbol": "BBDO",
+          "CQS Symbol": "BBDO",
+          "SymbolIndex": "39747",
+          "MarketID": "A",
+          "ExchangeCode": "N",
+          "SecurityType": "H"
+        },
+        {
+          "Symbol": "GOOG",
+          "CQS Symbol": "GOOG",
+          "SymbolIndex": "43829",
+          "MarketID": "A",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "GOOGL",
+          "CQS Symbol": "GOOGL",
+          "SymbolIndex": "1753",
+          "MarketID": "A",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "SHOP",
+          "CQS Symbol": "SHOP",
+          "SymbolIndex": "49965",
+          "MarketID": "A",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "SPY",
+          "CQS Symbol": "SPY",
+          "SymbolIndex": "9280",
+          "MarketID": "A",
+          "ExchangeCode": "P",
+          "SecurityType": "E"
+        },
+        {
+          "Symbol": "TSM",
+          "CQS Symbol": "TSM",
+          "SymbolIndex": "9637",
+          "MarketID": "A",
+          "ExchangeCode": "N",
+          "SecurityType": "A"
+        },
+        {
+          "Symbol": "VXX",
+          "CQS Symbol": "VXX",
+          "SymbolIndex": "60447",
+          "MarketID": "A",
+          "ExchangeCode": "Z",
+          "SecurityType": "E"
+        }
+      ]
+    },
+    {
+      "id": "arca-mapping",
+      "url": "https://ftp.nyse.com/ARCASymbolMapping/ARCASymbolMapping_20261019.txt",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:34:24Z",
+        "contentType": "text/plain",
+        "bytes": 453612
+      },
+      "sha256": "afe58c787ca835ce9ab8c4efc3be3b0dd9ca25d419dff4854720256a7fa90539",
+      "fileDate": "20261019",
+      "fieldOrderFrom": "Pillar Common Client Specification v2.4r section9.1; trailing pipe creates final empty parse field",
+      "rowCount": 13327,
+      "samples": [
+        {
+          "Symbol": "AAPL",
+          "CQS Symbol": "AAPL",
+          "SymbolIndex": "9",
+          "MarketID": "P",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "ACONW",
+          "CQS Symbol": "ACONW",
+          "SymbolIndex": "73923",
+          "MarketID": "P",
+          "ExchangeCode": "Q",
+          "SecurityType": "W"
+        },
+        {
+          "Symbol": "ADSEW",
+          "CQS Symbol": "ADSEW",
+          "SymbolIndex": "73022",
+          "MarketID": "P",
+          "ExchangeCode": "Q",
+          "SecurityType": "W"
+        },
+        {
+          "Symbol": "BAC",
+          "CQS Symbol": "BAC",
+          "SymbolIndex": "4945",
+          "MarketID": "P",
+          "ExchangeCode": "N",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "BAC PRB",
+          "CQS Symbol": "BACpB",
+          "SymbolIndex": "61005",
+          "MarketID": "P",
+          "ExchangeCode": "N",
+          "SecurityType": "P"
+        },
+        {
+          "Symbol": "BAC PRL",
+          "CQS Symbol": "BACpL",
+          "SymbolIndex": "26962",
+          "MarketID": "P",
+          "ExchangeCode": "N",
+          "SecurityType": "P"
+        },
+        {
+          "Symbol": "BBD",
+          "CQS Symbol": "BBD",
+          "SymbolIndex": "4964",
+          "MarketID": "P",
+          "ExchangeCode": "N",
+          "SecurityType": "A"
+        },
+        {
+          "Symbol": "BBDO",
+          "CQS Symbol": "BBDO",
+          "SymbolIndex": "39747",
+          "MarketID": "P",
+          "ExchangeCode": "N",
+          "SecurityType": "H"
+        },
+        {
+          "Symbol": "GOOG",
+          "CQS Symbol": "GOOG",
+          "SymbolIndex": "43829",
+          "MarketID": "P",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "GOOGL",
+          "CQS Symbol": "GOOGL",
+          "SymbolIndex": "1753",
+          "MarketID": "P",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "SHOP",
+          "CQS Symbol": "SHOP",
+          "SymbolIndex": "49965",
+          "MarketID": "P",
+          "ExchangeCode": "Q",
+          "SecurityType": "C"
+        },
+        {
+          "Symbol": "SPY",
+          "CQS Symbol": "SPY",
+          "SymbolIndex": "9280",
+          "MarketID": "P",
+          "ExchangeCode": "P",
+          "SecurityType": "E"
+        },
+        {
+          "Symbol": "TSM",
+          "CQS Symbol": "TSM",
+          "SymbolIndex": "9637",
+          "MarketID": "P",
+          "ExchangeCode": "N",
+          "SecurityType": "A"
+        },
+        {
+          "Symbol": "VXX",
+          "CQS Symbol": "VXX",
+          "SymbolIndex": "60447",
+          "MarketID": "P",
+          "ExchangeCode": "Z",
+          "SecurityType": "E"
+        }
+      ]
+    },
+    {
+      "id": "pillar-current",
+      "url": "https://www.nyse.com/publicdocs/nyse/data/NYSE_Pillar_Equities_Common_Client_Specification_v2.4r.pdf",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:35:35Z",
+        "contentType": "application/pdf",
+        "bytes": 801828
+      },
+      "sha256": "d67afbb27ad6829246aef77217d3c2532fc59a503be53f0421ea51b8ccbaeb71"
+    },
+    {
+      "id": "pillar-spec",
+      "url": "https://www.nyse.com/publicdocs/nyse/data/NYSE_Pillar_Equities_Common_Client_Specification.pdf",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:34:24Z",
+        "contentType": "application/pdf",
+        "bytes": 688522
+      },
+      "sha256": "a7b4538e416efddaaeffde9a42d130624a8c43f1942a354399f5bf7498cac9bb"
+    },
+    {
+      "id": "technical-documents",
+      "url": "https://www.nyse.com/market-data/technical-documents",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 0,
+      "http": {
+        "status": 200,
+        "date": "2026-10-19T07:35:33Z",
+        "contentType": "text/html",
+        "bytes": 976015
+      },
+      "sha256": "2fe382a5496d0e56590c039d5c3d47f6630943e54d5843d5010c02c484f11233"
+    },
+    {
+      "id": "bradesco-shares",
+      "url": "https://www.bradescori.com.br/en/services/bradesco-shares/",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: network_error"
+    },
+    {
+      "id": "bradesco-adr",
+      "url": "https://www.bradescori.com.br/en/services/adr-program/",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: network_error"
+    },
+    {
+      "id": "ice-terms",
+      "url": "https://www.ice.com/privacy-security-center/terms-of-use",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: http_error status=403"
+    },
+    {
+      "id": "sec-tickers",
+      "url": "https://www.sec.gov/files/company_tickers_exchange.json",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: http_error status=403"
+    },
+    {
+      "id": "sec-submissions",
+      "url": "https://data.sec.gov/submissions/CIK0001160330.json",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: http_error status=403"
+    },
+    {
+      "id": "vxx-sec",
+      "url": "https://www.sec.gov/Archives/edgar/data/312070/000191870426004069/form424b2.htm",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: http_error status=403"
+    },
+    {
+      "id": "bbd-render",
+      "url": "https://www.sec.gov/Archives/edgar/data/1160330/000129281426001753/R1.htm",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: http_error status=403"
+    },
+    {
+      "id": "acon-render",
+      "url": "https://www.sec.gov/Archives/edgar/data/1635077/000168316826003822/R1.htm",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: http_error status=403"
+    },
+    {
+      "id": "adse-render",
+      "url": "https://www.sec.gov/Archives/edgar/data/1879248/000121390026057891/R1.htm",
+      "accessMethod": "anonymous public-fetch HTTPS GET",
+      "exitCode": 1,
+      "collectorError": "ERROR: http_error status=403"
+    }
+  ],
+  "readingMethodBoundary": "SEC and Bradesco facts additionally read through web extraction; collector failures are not claimed as successful CLI collection",
+  "specVersions": {
+    "current": "v2.4r via NYSE technical-documents Current link",
+    "unversioned": "v2.4u, Upcoming Q4; not used for current availability policy"
+  },
+  "sourceAdoption": "unconfirmed; eligible source candidates and unresolved conditions documented in report"
+}

@@ -2,6 +2,8 @@
 
 2026-10-19 [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 조사 기록이다. 상위 요구사항은 [#237](https://github.com/mochafreddo/stock-scout/issues/237)·[#239](https://github.com/mochafreddo/stock-scout/issues/239), 부모는 [#243](https://github.com/mochafreddo/stock-scout/issues/243)이다. [기존 검증 기록](kis-data-validation.md)의 2026-10-17 관측을 재사용하고, 공식 코드 정의·공개 마스터·추가 상품 정보로 보완했다. 기존 기록의 코드 정의 미확보와 워런트 표본 미확보 상태는 아래 조사 결과로 갱신한다.
 
+이후 같은 날 종목 유형과 증권 연결에 외부 공식 자료를 허용하는 설계를 합의하고 [후속 조사](official-security-type-validation.md)를 수행했다. 아래 KIS 전용 조사와 당시의 차단·재개 설명은 이력으로 보존하며, 현재 허용 범위와 후속 조사 결과는 새 기록을 따른다. 실제 적격 종목 자동 판별과 후속 구현의 차단은 유지한다.
+
 ## 결론과 후속 차단
 
 **현재 확인한 KIS 필드만으로 보통주·적격 ADR을 안전하게 자동 판별할 수 있다는 검증은 미완료다. #250과 #243 및 후속 후보군·추천 구현의 차단을 유지한다.** 공식 코드 정의와 실제 응답의 불일치를 확인했으며, KIS 자체의 수정 가능성이나 다른 공식 필드로 해결할 가능성까지 부정한 결론은 아니다.
