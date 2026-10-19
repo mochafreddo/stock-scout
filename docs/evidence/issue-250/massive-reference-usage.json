@@ -1,0 +1,106 @@
+{
+  "issue": 250,
+  "recorded_at": "2026-10-19T12:44:12.008129+00:00",
+  "scope": "Massive reference metadata personal CLI automated use, private retention and public methods/conclusions; no authenticated API requests.",
+  "collection": {
+    "collector": "dotfiles public-fetch.py",
+    "timeout_seconds": 30,
+    "authentication": false,
+    "bodies_committed": false,
+    "http_date_is_dataset_as_of": false
+  },
+  "sources": [
+    {
+      "id": "individuals",
+      "url": "https://massive.com/legal/individuals-terms-of-service",
+      "retrieved_at": "2026-10-19T12:42:48.365070+00:00",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T12:42:47Z",
+      "content_type": "text/html",
+      "bytes": 256551,
+      "sha256": "3d7f56ea411a39463c6b55c87c375b66c7290b7c084d22be5715233e3f8fe4f3",
+      "error": null,
+      "role": "primary_source"
+    },
+    {
+      "id": "market",
+      "url": "https://massive.com/legal/market-data-terms-of-service",
+      "retrieved_at": "2026-10-19T12:42:48.202144+00:00",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T12:42:47Z",
+      "content_type": "text/html",
+      "bytes": 248902,
+      "sha256": "abf08be1a63c6b44e39131f94ff42b97a3479eb670822df67a62f73e641dcff5",
+      "error": null,
+      "role": "primary_source"
+    },
+    {
+      "id": "personal-app",
+      "url": "https://massive.com/knowledge-base/article/which-plan-do-i-need-to-show-massive-data-in-my-app",
+      "retrieved_at": "2026-10-19T12:42:48.028409+00:00",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T12:42:47Z",
+      "content_type": "text/html",
+      "bytes": 189538,
+      "sha256": "72a54644b01edcac4f4e7345e90b8cd2abff1c4a2aed22f3f0525b20709d12c6",
+      "error": null,
+      "role": "primary_source"
+    },
+    {
+      "id": "legal-index",
+      "url": "https://massive.com/legal/terms",
+      "retrieved_at": "2026-10-19T12:42:48.057388+00:00",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T12:42:47Z",
+      "content_type": "text/html",
+      "bytes": 148462,
+      "sha256": "9e0b6a2d3059ee5d7b1e3b62009313760467742fd83c139ba05738ff79daba37",
+      "error": null,
+      "role": "primary_source"
+    },
+    {
+      "id": "non-display",
+      "url": "https://massive.com/knowledge-base/article/what-is-non-display-usage",
+      "retrieved_at": "2026-10-19T12:42:47.329748+00:00",
+      "method": "anonymous_https_get",
+      "exit_code": 1,
+      "http_status": 404,
+      "http_date": null,
+      "content_type": null,
+      "bytes": null,
+      "sha256": null,
+      "error": "ERROR: http_error status=404",
+      "role": "exploratory_address_not_a_confirmed_article"
+    }
+  ],
+  "document_last_updated": {
+    "individuals": "2025-07-18",
+    "market": "2025-08-28"
+  },
+  "findings": {
+    "personal_scripts_general_guidance": "confirmed_in_official_knowledge_base",
+    "reference_metadata_non_display_permission": "unresolved",
+    "private_response_retention_scope": "unresolved",
+    "public_data_derived_conclusions_without_raw_responses": "unresolved",
+    "terms_precedence": "market_terms_section_9",
+    "result": "judgment_deferred",
+    "runtime_adoption": "on_hold"
+  },
+  "evidence_limits": [
+    "HTTP captures establish public document retrieval, not authenticated reference API access or licensing approval.",
+    "The exploratory non-display address returned HTTP 404 and is not evidence of an existing article or of permission/prohibition.",
+    "Context7 official client reference examples are technical documentation, not observed API results or licensing authority.",
+    "Additional official-domain search did not resolve the examined applicability questions; this is not an exhaustive absence claim."
+  ],
+  "actual_security_responses_requested": false,
+  "inquiry_status": "draft_only_not_sent",
+  "downstream_blockers_retained": [250, 243, 239, 245]
+}
