@@ -1,0 +1,180 @@
+{
+  "issue": 250,
+  "recorded_at": "2026-10-19T12:01:25.926533+00:00",
+  "scope": "Public documentation research of three third-party reference-data vendors; no authenticated data API requests.",
+  "detailed_candidates": [
+    "Massive",
+    "EODHD",
+    "Financial Modeling Prep"
+  ],
+  "collection": {
+    "collector": "dotfiles public-fetch.py",
+    "timeout_seconds": 30,
+    "authentication": false,
+    "bodies_committed": false,
+    "http_date_is_dataset_as_of": false
+  },
+  "sources": [
+    {
+      "id": "massive-types",
+      "url": "https://massive.com/knowledge-base/article/what-are-the-different-types-of-tickers-that-massive-supports",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T11:59:04Z",
+      "content_type": "text/html",
+      "bytes": 219579,
+      "sha256": "5d824c479b8384812094fea10ec6786bf048607b8c8449aedcdeea1bd545cef3",
+      "error": null
+    },
+    {
+      "id": "massive-types-api",
+      "url": "https://massive.com/docs/rest/stocks/tickers/ticker-types",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T11:59:06Z",
+      "content_type": "text/html",
+      "bytes": 1581220,
+      "sha256": "cc31a51ca9fff8f2632a23049a171fe2a489a80dacdd3fcc141fe03879f6f313",
+      "error": null
+    },
+    {
+      "id": "massive-overview",
+      "url": "https://massive.com/docs/rest/stocks/tickers/ticker-overview",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T11:59:06Z",
+      "content_type": "text/html",
+      "bytes": 1654410,
+      "sha256": "3b8054d4b7e4a1aeb715dc0de2137eaece43c60b4edc414c5d8e7219e155ea1c",
+      "error": null
+    },
+    {
+      "id": "massive-individual-terms",
+      "url": "https://massive.com/legal/individuals-terms-of-service",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T11:59:06Z",
+      "content_type": "text/html",
+      "bytes": 256473,
+      "sha256": "9b1d34c04dc00296ba16f56205f292e8aa832a71c0e35072a833c8509dc7af76",
+      "error": null
+    },
+    {
+      "id": "massive-market-terms",
+      "url": "https://massive.com/legal/market-data-terms-of-service",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T11:59:05Z",
+      "content_type": "text/html",
+      "bytes": 248824,
+      "sha256": "6a02a844b3e9f263d7ab73b385900e447b9847ec5cd370f370aff91ad900e961",
+      "error": null
+    },
+    {
+      "id": "massive-pricing",
+      "url": "https://massive.com/pricing",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T11:59:06Z",
+      "content_type": "text/html",
+      "bytes": 263106,
+      "sha256": "6416e24c3279359b0ceb6b70e8bc396d4a1cc808bef22ef216e83278f43ceeb1",
+      "error": null
+    },
+    {
+      "id": "eodhd-types",
+      "url": "https://eodhd.com/financial-academy/financial-faq/fundamentals-glossary-common-stock",
+      "method": "anonymous_https_get",
+      "exit_code": 1,
+      "http_status": null,
+      "http_date": null,
+      "content_type": null,
+      "bytes": null,
+      "sha256": null,
+      "error": "ERROR: timeout"
+    },
+    {
+      "id": "eodhd-pricing",
+      "url": "https://eodhd.com/pricing",
+      "method": "anonymous_https_get",
+      "exit_code": 1,
+      "http_status": null,
+      "http_date": null,
+      "content_type": null,
+      "bytes": null,
+      "sha256": null,
+      "error": "ERROR: timeout"
+    },
+    {
+      "id": "eodhd-terms",
+      "url": "https://eodhd.com/financial-apis/terms-conditions",
+      "method": "anonymous_https_get",
+      "exit_code": 0,
+      "http_status": 200,
+      "http_date": "2026-10-19T11:59:11Z",
+      "content_type": "text/html",
+      "bytes": 139630,
+      "sha256": "0f1577575bda618e9570d3ecd22050558ed98130f9aaa23a0b8c2045805c2d99",
+      "error": null
+    },
+    {
+      "id": "fmp-pricing",
+      "url": "https://site.financialmodelingprep.com/pricing-plans",
+      "method": "anonymous_https_get",
+      "exit_code": 1,
+      "http_status": 403,
+      "http_date": null,
+      "content_type": null,
+      "bytes": null,
+      "sha256": null,
+      "error": "ERROR: http_error status=403"
+    },
+    {
+      "id": "fmp-cycle",
+      "url": "https://site.financialmodelingprep.com/developer/docs/cycle-times-stable",
+      "method": "anonymous_https_get",
+      "exit_code": 1,
+      "http_status": 403,
+      "http_date": null,
+      "content_type": null,
+      "bytes": null,
+      "sha256": null,
+      "error": "ERROR: http_error status=403"
+    },
+    {
+      "id": "fmp-terms",
+      "url": "https://site.financialmodelingprep.com/terms-of-service",
+      "method": "anonymous_https_get",
+      "exit_code": 1,
+      "http_status": 403,
+      "http_date": null,
+      "content_type": null,
+      "bytes": null,
+      "sha256": null,
+      "error": "ERROR: http_error status=403"
+    }
+  ],
+  "evidence_limits": [
+    "Successful HTTP capture proves the public page was retrieved, not data API access, license applicability, current security rights, or KIS mapping.",
+    "FMP documentation and EODHD timeout pages were read through web text extraction separately; no successful direct HTTP response or body hash is claimed for those pages.",
+    "Context7 was used first for API documentation discovery; generated examples are not observed API responses."
+  ],
+  "actual_security_responses": {
+    "requested": false,
+    "reason": "Signup, credentials and live integration are outside the approved research scope."
+  },
+  "sample_status": "All new vendor sample classifications, ADR rights, KIS security mappings and currentness checks remain unverified.",
+  "runtime_adoption": "on_hold",
+  "downstream_blockers_retained": [
+    250,
+    243,
+    239,
+    245
+  ]
+}
