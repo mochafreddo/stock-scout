@@ -1,0 +1,509 @@
+{
+  "scope": "KIS official public documentation only; no authenticated market-data requests",
+  "officialCommit": "2077773a69a428daf63e148182511f068cc45de3",
+  "inventorySource": "https://api.github.com/repos/koreainvestment/open-trading-api/git/trees/2077773a69a428daf63e148182511f068cc45de3?recursive=1",
+  "overseasStockFunctions": [
+    "algo_ordno",
+    "asking_price",
+    "brknews_title",
+    "ccnl_notice",
+    "colable_by_company",
+    "countries_holiday",
+    "dailyprice",
+    "daytime_order",
+    "daytime_order_rvsecncl",
+    "delayed_asking_price_asia",
+    "delayed_ccnl",
+    "foreign_margin",
+    "industry_price",
+    "industry_theme",
+    "inquire_algo_ccnl",
+    "inquire_asking_price",
+    "inquire_balance",
+    "inquire_ccnl",
+    "inquire_daily_chartprice",
+    "inquire_nccs",
+    "inquire_paymt_stdr_balance",
+    "inquire_period_profit",
+    "inquire_period_trans",
+    "inquire_present_balance",
+    "inquire_psamount",
+    "inquire_search",
+    "inquire_time_indexchartprice",
+    "inquire_time_itemchartprice",
+    "market_cap",
+    "new_highlow",
+    "news_title",
+    "order",
+    "order_resv",
+    "order_resv_ccnl",
+    "order_resv_list",
+    "order_rvsecncl",
+    "period_rights",
+    "price",
+    "price_detail",
+    "price_fluct",
+    "quot_inquire_ccnl",
+    "rights_by_ice",
+    "search_info",
+    "trade_growth",
+    "trade_pbmn",
+    "trade_turnover",
+    "trade_vol",
+    "updown_rate",
+    "volume_power",
+    "volume_surge"
+  ],
+  "apis": [
+    {
+      "source": "https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/overseas-price/v1/quotations/search-info",
+      "retrieval": "https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=/uapi/overseas-price/v1/quotations/search-info",
+      "savedAt": "2026-10-19T05:26:00.285263+00:00",
+      "responseSha256": "b22b42bbb02445df3ba03dcfa51fa17c4655847521bc836671884fdc6f1bbf83",
+      "name": "해외주식 상품기본정보[v1_해외주식-034]",
+      "path": "/uapi/overseas-price/v1/quotations/search-info",
+      "trId": "CTPF1702R",
+      "requestFields": [
+        "PRDT_TYPE_CD",
+        "PDNO"
+      ],
+      "responseFields": [
+        "rt_cd",
+        "msg_cd",
+        "msg1",
+        "output",
+        "std_pdno",
+        "prdt_eng_name",
+        "natn_cd",
+        "natn_name",
+        "tr_mket_cd",
+        "tr_mket_name",
+        "ovrs_excg_cd",
+        "ovrs_excg_name",
+        "tr_crcy_cd",
+        "ovrs_papr",
+        "crcy_name",
+        "ovrs_stck_dvsn_cd",
+        "prdt_clsf_cd",
+        "prdt_clsf_name",
+        "sll_unit_qty",
+        "buy_unit_qty",
+        "tr_unit_amt",
+        "lstg_stck_num",
+        "lstg_dt",
+        "ovrs_stck_tr_stop_dvsn_cd",
+        "lstg_abol_item_yn",
+        "ovrs_stck_prdt_grp_no",
+        "lstg_yn",
+        "tax_levy_yn",
+        "ovrs_stck_erlm_rosn_cd",
+        "ovrs_stck_hist_rght_dvsn_cd",
+        "chng_bf_pdno",
+        "prdt_type_cd_2",
+        "ovrs_item_name",
+        "sedol_no",
+        "blbg_tckr_text",
+        "ovrs_stck_etf_risk_drtp_cd",
+        "etp_chas_erng_rt_dbnb",
+        "istt_usge_isin_cd",
+        "mint_svc_yn",
+        "mint_svc_yn_chng_dt",
+        "prdt_name",
+        "lei_cd",
+        "ovrs_stck_stop_rson_cd",
+        "lstg_abol_dt",
+        "mini_stk_tr_stat_dvsn_cd",
+        "mint_frst_svc_erlm_dt",
+        "mint_dcpt_trad_psbl_yn",
+        "mint_fnum_trad_psbl_yn",
+        "mint_cblc_cvsn_ipsb_yn",
+        "ptp_item_yn",
+        "ptp_item_trfx_exmt_yn",
+        "ptp_item_trfx_exmt_strt_dt",
+        "ptp_item_trfx_exmt_end_dt",
+        "dtm_tr_psbl_yn",
+        "sdrf_stop_ecls_yn",
+        "sdrf_stop_ecls_erlm_dt",
+        "memo_text1",
+        "ovrs_now_pric1",
+        "sgle_item_lvrg_etp_yn",
+        "last_rcvg_dtime",
+        "etp_bast_lcls_cd",
+        "etp_bast_mcls_cd",
+        "etp_bast_scls_cd"
+      ],
+      "selectedFields": [
+        {
+          "bodyType": "res_b",
+          "propertyCd": "ovrs_stck_dvsn_cd",
+          "propertyNm": "해외주식구분코드",
+          "description": "01.주식\r\n02.WARRANT\r\n03.ETF\r\n04.우선주"
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "prdt_clsf_cd",
+          "propertyNm": "상품분류코드",
+          "description": " "
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "prdt_clsf_name",
+          "propertyNm": "상품분류명",
+          "description": " "
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "ovrs_stck_prdt_grp_no",
+          "propertyNm": "해외주식상품그룹번호",
+          "description": " "
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "ovrs_stck_hist_rght_dvsn_cd",
+          "propertyNm": "해외주식이력권리구분코드",
+          "description": " "
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "prdt_type_cd_2",
+          "propertyNm": "상품유형코드2",
+          "description": " "
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "ovrs_stck_etf_risk_drtp_cd",
+          "propertyNm": "해외주식ETF위험지표코드",
+          "description": "001.ETF\r\n002.ETN\r\n003.ETC(Exchage Traded Commodity)\r\n004.Others(REIT's, Mutual Fund)\r\n005.VIX Underlying ETF\r\n006.VIX Underlying ETN"
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "sgle_item_lvrg_etp_yn",
+          "propertyNm": "단일종목레버리지ETP여부",
+          "description": ""
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "etp_bast_lcls_cd",
+          "propertyNm": "ETP기초자산대분류코드",
+          "description": ""
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "etp_bast_mcls_cd",
+          "propertyNm": "ETP기초자산중분류코드",
+          "description": ""
+        },
+        {
+          "bodyType": "res_b",
+          "propertyCd": "etp_bast_scls_cd",
+          "propertyNm": "ETP기초자산소분류코드",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "source": "https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/overseas-price/v1/quotations/price-detail",
+      "retrieval": "https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=/uapi/overseas-price/v1/quotations/price-detail",
+      "savedAt": "2026-10-19T05:26:00.490755+00:00",
+      "responseSha256": "6019a1520d2934be80eb2cd075cdd4cda7b603452e72fd4fc9a93197d9b90f9f",
+      "name": "해외주식 현재가상세[v1_해외주식-029]",
+      "path": "/uapi/overseas-price/v1/quotations/price-detail",
+      "trId": "HHDFS76200200",
+      "requestFields": [
+        "AUTH",
+        "EXCD",
+        "SYMB"
+      ],
+      "responseFields": [
+        "rt_cd",
+        "msg_cd",
+        "msg1",
+        "output",
+        "rsym",
+        "pvol",
+        "open",
+        "high",
+        "low",
+        "last",
+        "base",
+        "tomv",
+        "pamt",
+        "uplp",
+        "dnlp",
+        "h52p",
+        "h52d",
+        "l52p",
+        "l52d",
+        "perx",
+        "pbrx",
+        "epsx",
+        "bpsx",
+        "shar",
+        "mcap",
+        "curr",
+        "zdiv",
+        "vnit",
+        "t_xprc",
+        "t_xdif",
+        "t_xrat",
+        "p_xprc",
+        "p_xdif",
+        "p_xrat",
+        "t_rate",
+        "p_rate",
+        "t_xsgn",
+        "p_xsng",
+        "e_ordyn",
+        "e_hogau",
+        "e_icod",
+        "e_parp",
+        "tvol",
+        "tamt",
+        "etyp_nm"
+      ],
+      "selectedFields": [
+        {
+          "bodyType": "res_b",
+          "propertyCd": "etyp_nm",
+          "propertyNm": "ETP 분류명",
+          "description": " "
+        }
+      ]
+    },
+    {
+      "source": "https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/overseas-price/v1/quotations/inquire-search",
+      "retrieval": "https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=/uapi/overseas-price/v1/quotations/inquire-search",
+      "savedAt": "2026-10-19T05:26:00.705029+00:00",
+      "responseSha256": "6037c46aa3c577ebaef73c68d264c7684e1f9db6a2b583ede184b70f6f434cf6",
+      "name": "해외주식조건검색[v1_해외주식-015]",
+      "path": "/uapi/overseas-price/v1/quotations/inquire-search",
+      "trId": "HHDFS76410000",
+      "requestFields": [
+        "AUTH",
+        "EXCD",
+        "CO_YN_PRICECUR",
+        "CO_ST_PRICECUR",
+        "CO_EN_PRICECUR",
+        "CO_YN_RATE",
+        "CO_ST_RATE",
+        "CO_EN_RATE",
+        "CO_YN_VALX",
+        "CO_ST_VALX",
+        "CO_EN_VALX",
+        "CO_YN_SHAR",
+        "CO_ST_SHAR",
+        "CO_EN_SHAR",
+        "CO_YN_VOLUME",
+        "CO_ST_VOLUME",
+        "CO_EN_VOLUME",
+        "CO_YN_AMT",
+        "CO_ST_AMT",
+        "CO_EN_AMT",
+        "CO_YN_EPS",
+        "CO_ST_EPS",
+        "CO_EN_EPS",
+        "CO_YN_PER",
+        "CO_ST_PER",
+        "CO_EN_PER",
+        "KEYB"
+      ],
+      "responseFields": [
+        "rt_cd",
+        "msg_cd",
+        "msg1",
+        "output1",
+        "zdiv",
+        "stat",
+        "crec",
+        "trec",
+        "nrec",
+        "output2",
+        "rsym",
+        "excd",
+        "name",
+        "symb",
+        "last",
+        "shar",
+        "valx",
+        "plow",
+        "phigh",
+        "popen",
+        "tvol",
+        "rate",
+        "diff",
+        "sign",
+        "avol",
+        "eps",
+        "per",
+        "rank",
+        "ename",
+        "e_ordyn"
+      ],
+      "selectedFields": []
+    },
+    {
+      "source": "https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/overseas-price/v1/quotations/rights-by-ice",
+      "retrieval": "https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=/uapi/overseas-price/v1/quotations/rights-by-ice",
+      "savedAt": "2026-10-19T05:26:54.600003+00:00",
+      "responseSha256": "07feeb8a4338b6dd6e393abb1f864f628515956e035b0e7c2a70659fe6f02211",
+      "name": "해외주식 권리종합 [해외주식-050]",
+      "path": "/uapi/overseas-price/v1/quotations/rights-by-ice",
+      "trId": "HHDFS78330900",
+      "requestFields": [
+        "NCOD",
+        "SYMB",
+        "ST_YMD",
+        "ED_YMD"
+      ],
+      "responseFields": [
+        "rt_cd",
+        "msg_cd",
+        "msg1",
+        "output1",
+        "anno_dt",
+        "ca_title",
+        "div_lock_dt",
+        "pay_dt",
+        "record_dt",
+        "validity_dt",
+        "local_end_dt",
+        "lock_dt",
+        "delist_dt",
+        "redempt_dt",
+        "early_redempt_dt",
+        "effective_dt"
+      ],
+      "selectedFields": [
+        {
+          "bodyType": "res_b",
+          "propertyCd": "ca_title",
+          "propertyNm": "권리유형",
+          "description": " "
+        },
+        {
+          "bodyType": "req_b",
+          "propertyCd": "ST_YMD",
+          "propertyNm": "일자 시작일",
+          "description": "미입력 시, 오늘-3개월\r\n기간지정 시, 종료일 입력(ex. 20240514)\r\n\r\n※ 조회기간 기준일 입력시 참고\r\n- 상환: 상환일자, 조기상환: 조기상환일자, 티커변경: 적용일, 그 외: 발표일"
+        },
+        {
+          "bodyType": "req_b",
+          "propertyCd": "ED_YMD",
+          "propertyNm": "일자 종료일",
+          "description": "미입력 시, 오늘+3개월\r\n기간지정 시, 종료일 입력(ex. 20240514)\r\n\r\n※ 조회기간 기준일 입력시 참고\r\n- 상환: 상환일자, 조기상환: 조기상환일자, 티커변경: 적용일, 그 외: 발표일"
+        }
+      ]
+    },
+    {
+      "source": "https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/overseas-price/v1/quotations/period-rights",
+      "retrieval": "https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=/uapi/overseas-price/v1/quotations/period-rights",
+      "savedAt": "2026-10-19T05:26:54.812942+00:00",
+      "responseSha256": "f08f19a691d6f9731bd574db5b57180047282074cb9b77cef8ad32f3e9d4431e",
+      "name": "해외주식 기간별권리조회 [해외주식-052]",
+      "path": "/uapi/overseas-price/v1/quotations/period-rights",
+      "trId": "CTRGT011R",
+      "requestFields": [
+        "RGHT_TYPE_CD",
+        "INQR_DVSN_CD",
+        "INQR_STRT_DT",
+        "INQR_END_DT",
+        "PDNO",
+        "PRDT_TYPE_CD",
+        "CTX_AREA_NK50",
+        "CTX_AREA_FK50"
+      ],
+      "responseFields": [
+        "rt_cd",
+        "msg_cd",
+        "msg1",
+        "output",
+        "bass_dt",
+        "rght_type_cd",
+        "pdno",
+        "prdt_name",
+        "prdt_type_cd",
+        "std_pdno",
+        "acpl_bass_dt",
+        "sbsc_strt_dt",
+        "sbsc_end_dt",
+        "cash_alct_rt",
+        "stck_alct_rt",
+        "crcy_cd",
+        "crcy_cd2",
+        "crcy_cd3",
+        "crcy_cd4",
+        "alct_frcr_unpr",
+        "stkp_dvdn_frcr_amt2",
+        "stkp_dvdn_frcr_amt3",
+        "stkp_dvdn_frcr_amt4",
+        "dfnt_yn"
+      ],
+      "selectedFields": [
+        {
+          "bodyType": "res_b",
+          "propertyCd": "rght_type_cd",
+          "propertyNm": "권리유형코드",
+          "description": " "
+        },
+        {
+          "bodyType": "req_b",
+          "propertyCd": "RGHT_TYPE_CD",
+          "propertyNm": "권리유형코드",
+          "description": "'%%(전체), 01(유상), 02(무상), 03(배당), 11(합병), \r\n14(액면분할), 15(액면병합), 17(감자), 54(WR청구),\r\n61(원리금상환), 71(WR소멸), 74(배당옵션), 75(특별배당), 76(ISINCODE변경), 77(실권주청약)'"
+        }
+      ]
+    }
+  ],
+  "officialFiles": [
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/stocks_info/overseas_stock_code.py",
+      "receivedAt": "2026-10-19T05:25:59.757184+00:00",
+      "sha256": "063be09b764645ac0a99a559c4324ba2c22436f0eb88acf71d78d3c998c393a8"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/stocks_info/%ED%95%B4%EC%99%B8%EC%A2%85%EB%AA%A9%EC%BD%94%EB%93%9C%EC%A0%95%EB%B3%B4%28%EB%AF%B8%EA%B5%AD%2C%EC%A4%91%EA%B5%AD%2C%EC%9D%BC%EB%B3%B8%2C%ED%99%8D%EC%BD%A9%2C%EB%B2%A0%ED%8A%B8%EB%82%A8%29.h",
+      "receivedAt": "2026-10-19T05:25:59.777780+00:00",
+      "sha256": "f865e24e9943e893dbee21e71c0fd27576afec0af10528fa13208070d0c85a3f"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/search_info/chk_search_info.py",
+      "receivedAt": "2026-10-19T05:25:59.757716+00:00",
+      "sha256": "114e3495a735794e1300d9d5e6fae4bcfdb23924440ee0c0e9e58bd0cab8bf0a"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/search_info/search_info.py",
+      "receivedAt": "2026-10-19T05:25:59.746872+00:00",
+      "sha256": "e6519d841d83f211cb1406eaa3759ae5c5a2d37f0e9e316588360ea50a2748dc"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/price_detail/chk_price_detail.py",
+      "receivedAt": "2026-10-19T05:26:00.018687+00:00",
+      "sha256": "f28ef80e6a4b9d6d4e5af309c1fbb4f6cae16d6b93849e8e3af34d3398fcbba3"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/price_detail/price_detail.py",
+      "receivedAt": "2026-10-19T05:26:00.013107+00:00",
+      "sha256": "b994631f938b88c4805edc2c8bf29251c110dc1eaaa55b9e215cbc42c0689c12"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/inquire_search/chk_inquire_search.py",
+      "receivedAt": "2026-10-19T05:26:00.040027+00:00",
+      "sha256": "2603339bc58533288617071363343e0b25e29bc0d99e69fe7717ff34caa2834f"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/inquire_search/inquire_search.py",
+      "receivedAt": "2026-10-19T05:26:00.046925+00:00",
+      "sha256": "30264e21e6f273fd39a71dc71be4c274de45318dcf4b0b88f243cc7a7a961d4c"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/rights_by_ice/rights_by_ice.py",
+      "receivedAt": "2026-10-19T05:26:40.904832+00:00",
+      "sha256": "1212001ce95942fd4673dfb26541c358f4b7ddc1265d30798346ee351798aedd"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/koreainvestment/open-trading-api/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/period_rights/period_rights.py",
+      "receivedAt": "2026-10-19T05:26:41.183144+00:00",
+      "sha256": "12149c7954292587d829aca2c0f4a380cd4a217551f5f655ecee2ba217bea96c"
+    }
+  ]
+}
