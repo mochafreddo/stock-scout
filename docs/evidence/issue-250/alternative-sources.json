@@ -1,0 +1,192 @@
+{
+  "issue": 250,
+  "observedOn": "2026-10-19",
+  "scope": "고정한 세 공식 경로의 무료·무로그인 반복 자동 이용 조건을 먼저 평가한다.",
+  "decision": "채택 보류",
+  "decisionLimit": "이번 프로젝트의 수집 경로 채택 판단이며 영구적인 이용 불가나 법률 판단이 아니다.",
+  "selection": "기존 보고서와 공식 안내에서 거래소 목록 경로 Cboe와 ADR 권리 보완 경로 BNY·Citi를 세 후보로 고정했다. 정책을 먼저 확인하고 통과한 경우에만 표본을 수집한다. 같은 목록의 형식·주소는 하나로 세고 실패한 후보를 교체하지 않는다. 세 경로의 평가를 마쳐 이번 탐색을 종료한다.",
+  "sources": [
+    {
+      "id": "cboe-us-equities-symbols-traded-reference",
+      "decision": "채택 보류",
+      "reviewedSources": [
+        {
+          "url": "https://cdn.cboe.com/resources/release_notes/2024/Cboe-Updates-Options-Symbol-Reference-and-Equities-Symbols-Traded-File-URLs.pdf",
+          "method": "web PDF text extraction",
+          "section": "Technical Details; US Equities Links, pages 1–2",
+          "finding": "자동 다운로드와 네 시장의 CSV/XML 주소를 안내한다. 옵션용 reference와 주식용 symbols-traded를 구분한다."
+        },
+        {
+          "url": "https://www.cboe.com/terms",
+          "method": "web text extraction",
+          "section": "1. Consent; 2. Copyrights, Trademarks, Service Marks, And Proprietary Rights",
+          "finding": "별도 조건 우선, 개인 비상업 사본과 그 밖의 저장·다른 데이터 검증 사용을 구분한다."
+        }
+      ],
+      "datasetCollection": {
+        "run": false,
+        "reason": "자동 다운로드 공지가 이 프로젝트의 반복 유형 검증 목적을 허용하는지 일반 약관과의 적용 관계가 미해결이다."
+      },
+      "gaps": ["실제 필드와 표본 대응", "ADR 기초 권리", "현재 적용 범위와 갱신 조건", "반복 검증 이용 권한"],
+      "resumptionCondition": "해당 파일의 개인 비상업 반복 수집·증권 유형 검증에 적용되는 공식 허용 범위를 확인한다."
+    },
+    {
+      "id": "bny-dr-directory",
+      "decision": "채택 보류",
+      "reviewedSources": [
+        {
+          "url": "https://www.adrbny.com/",
+          "method": "web text extraction",
+          "section": "Directory navigation; DR Legal Disclaimer; CUSIP Disclaimer; Terms of Use links",
+          "finding": "directory와 연결 약관을 확인했다. CUSIP 자료의 청산·결제 외 이용에는 별도 라이선스 안내가 있고, 갱신 의무를 보장하지 않는다."
+        },
+        {
+          "url": "https://www.bny.com/corporate/global/en/terms-of-use.html",
+          "discoveredFrom": "https://www.adrbny.com/ footer Terms of Use; legal disclaimer의 bnymellon.com 약관 링크도 같은 URL로 이동",
+          "method": "web text extraction",
+          "section": "Authorized Use; Intellectual Property",
+          "finding": "별도 명시나 서면 허용 외 자동 시스템을 통한 검색·감시·복사를 제한한다."
+        }
+      ],
+      "datasetCollection": {
+        "run": false,
+        "reason": "directory에 적용되는 자동 이용 예외와 필요한 식별 자료의 사용 권한을 확보하지 못했다. 검색·다운로드·표본 상세 조회를 하지 않았다."
+      },
+      "gaps": ["BBD/BBDO·TSM의 개별 증권·기초 권리", "비CUSIP 식별 경로와 허용 범위", "변경 반영 범위"],
+      "resumptionCondition": "해당 directory의 자동 이용 허용과 필요한 식별 자료의 사용 권한을 확인한다."
+    },
+    {
+      "id": "citi-global-dr-directory",
+      "decision": "채택 보류",
+      "reviewedSources": [
+        {
+          "url": "https://depositaryreceipts.citi.com/adr/guides/uig.aspx?pageId=8&subpageid=34",
+          "method": "web text extraction",
+          "section": "Global DR Directory; DR Programs Search/Filter Options",
+          "finding": "공개 검색 화면과 상태·적용일·거래소·예탁기관·DR/기초 주식 식별자 필터를 확인했다. 반복 자동 이용 근거는 확인하지 못했다."
+        },
+        {
+          "url": "https://depositaryreceipts.citi.com/adr/include/footernoframe.aspx?pageid=8&subpageid=34&cusip=",
+      "method": "public-fetch.py capture; saved source read without execution",
+          "section": "directory landing HTML line 1317 script src; footer Terms & Conditions href",
+          "finding": "검색 화면이 지정한 footer 소스가 https://www.citigroup.com/global/terms 를 약관으로 연결한다."
+        },
+        {
+          "url": "https://www.citigroup.com/global/terms",
+      "method": "public-fetch.py capture; saved HTML text inspected",
+          "section": "Copyrights; Use of Information and Materials",
+          "finding": "명시된 예외·사전 서면 동의 없이 복사·저장·후속 이용 등을 제한하고 데이터 스크래핑을 포함한 무단 이용을 금지한다. directory의 반복 자동 이용에 대한 별도 허용은 확인하지 못했다."
+        },
+        {
+          "url": "https://depositaryreceipts.citi.com/",
+      "method": "public-fetch.py capture; saved HTML read",
+          "section": "client redirect target /adr/home/home.asp",
+          "finding": "root 자체는 486-byte 이동 안내 HTML이며 directory 이용 약관이 아니다."
+        },
+        {
+          "url": "https://depositaryreceipts.citi.com/adr/home/home.asp",
+          "method": "web extraction following observed root destination",
+          "section": "redirect destination",
+          "resolvedUrl": "https://citiadr.factsetdigitalsolutions.com/www/drfront_page.idms",
+          "finding": "콘텐츠 화면으로 이동했다. 시세·뉴스 값은 유형 판정이나 자동 이용 허용 근거로 사용하지 않았다."
+        }
+      ],
+      "datasetCollection": {
+        "run": false,
+        "reason": "연결 약관의 제한과 directory 반복 자동 이용에 대한 별도 허용 관계가 미해결이다. 검색 제출·목록 다운로드·표본 상세 조회는 하지 않았다. 정책 탐색 중 화면에 포함된 콘텐츠를 받은 결과와 구분한다."
+      },
+      "gaps": ["directory 반복 자동 이용의 허용 범위", "허용된 자동 수집 경로", "개별 증권의 기초 권리", "자료 기준일·갱신·후속 변경"],
+      "resumptionCondition": "directory의 반복 자동 수집·이용에 적용되는 공식 허용 범위를 확인한다."
+    }
+  ],
+  "directDocumentCaptures": [
+    {
+      "url": "https://www.bny.com/corporate/global/en/terms-of-use.html",
+      "method": "public-fetch.py anonymous HTTPS GET",
+      "exitCode": 0,
+      "httpStatus": 200,
+      "httpDate": "2026-10-19T11:00:09Z",
+      "bytes": 377164,
+      "sha256": "b9fbea738e90ec0cde0f9711298cce4b7bb44d16641f09739916997554752e43"
+    },
+    {
+      "url": "https://www.cboe.com/terms",
+      "method": "public-fetch.py anonymous HTTPS GET",
+      "exitCode": 0,
+      "httpStatus": 200,
+      "httpDate": "2026-10-19T11:00:11Z",
+      "bytes": 404147,
+      "sha256": "0cbf80b0c2fdac3a19fe9ae0ba0466f5dfb5bc8cb71a5e0ece8aeefaf3af6872"
+    },
+    {
+      "url": "https://cdn.cboe.com/resources/release_notes/2024/Cboe-Updates-Options-Symbol-Reference-and-Equities-Symbols-Traded-File-URLs.pdf",
+      "method": "public-fetch.py anonymous HTTPS GET",
+      "exitCode": 0,
+      "httpStatus": 200,
+      "httpDate": "2026-10-19T11:00:10Z",
+      "bytes": 193858,
+      "sha256": "3111d32aefde462dfd185b68540f299379d002f5972bb72884d396850e635be2"
+    },
+    {
+      "url": "https://depositaryreceipts.citi.com/",
+      "method": "public-fetch.py anonymous HTTPS GET",
+      "exitCode": 0,
+      "httpStatus": 200,
+      "httpDate": "2026-10-19T11:00:28Z",
+      "bytes": 486,
+      "sha256": "fad48b0adef7ebe5d19330098ef904039fb7ead7cdf119c245ffe88114310a99"
+    },
+    {
+      "url": "https://depositaryreceipts.citi.com/adr/home/home.asp",
+      "method": "public-fetch.py anonymous HTTPS GET",
+      "exitCode": 1,
+      "httpStatus": 302,
+      "bodyRetained": false,
+      "meaning": "cross-origin redirect에서 수집기 중단. web extraction의 다른 호스트 콘텐츠 화면과 구분한다."
+    },
+    {
+      "url": "https://depositaryreceipts.citi.com/adr/guides/uig.aspx?pageId=8&subpageid=34",
+      "method": "public-fetch.py anonymous HTTPS GET for policy-link discovery only",
+      "exitCode": 0,
+      "httpStatus": 200,
+      "httpDate": "2026-10-19T11:01:13Z",
+      "bytes": 85647,
+      "sha256": "e6f08ebdac6a23dcee4c0f0f323f3d4ae4592591db0eecfaf38ca53bc6770bfe"
+    },
+    {
+      "url": "https://depositaryreceipts.citi.com/adr/include/footernoframe.aspx?pageid=8&subpageid=34&cusip=",
+      "method": "public-fetch.py anonymous HTTPS GET; source read without execution",
+      "exitCode": 0,
+      "httpStatus": 200,
+      "httpDate": "2026-10-19T11:01:27Z",
+      "bytes": 2048,
+      "sha256": "1e1dc595e8f70cfa3d4b2de7a5d573e8f4210923ade30a2e93d8237e6ec92eba"
+    },
+    {
+      "url": "https://www.citigroup.com/global/terms",
+      "method": "parent public-fetch.py anonymous HTTPS GET",
+      "exitCode": 0,
+      "httpStatus": 200,
+      "httpDate": "2026-10-19T11:01:38Z",
+      "bytes": 565360,
+      "sha256": "8b7e2d3e5ba65b7458881269b8586c82c61082222b73edf482f6d1694a76645b"
+    },
+    {
+      "url": "https://www.adrbny.com/",
+      "method": "public-fetch.py anonymous HTTPS GET for policy-link discovery only",
+      "exitCode": 0,
+      "httpStatus": 200,
+      "httpDate": "2026-10-19T11:02:46Z",
+      "bytes": 72291,
+      "sha256": "d04c1101da94da66c231049c870add069800ff2477dc0b5da8c8a80b4c0e9d99"
+    }
+  ],
+  "captureLimit": "수집기 실행 기록과 메타데이터를 읽었다. BNY·Cboe 약관은 web 추출과 저장 HTML의 해당 절을, Citi 약관과 footer 연결은 저장 원문의 해당 절을 검토했다. BNY 홈페이지는 web 추출로, Cboe 공지는 web PDF 텍스트로 읽었다. HTTP Date는 서버 응답 시각이며 자료 기준일이 아니다. web 추출에는 raw hash나 HTTP 성공을 부여하지 않는다.",
+  "sampleValidation": {
+    "run": false,
+    "samples": ["AAPL", "SHOP", "GOOG", "GOOGL", "BBD", "BBDO", "TSM", "ACONW", "ADSEW", "SPY", "VXX", "BAC/B", "BAC/L"],
+    "reason": "정책 단계를 통과한 경로가 없어 표본 대조를 진행하지 않았다. 조회 후 불일치나 부재를 관측한 결과가 아니다."
+  },
+  "downstreamBlocksMaintained": [250, 243, 239, 245],
+  "notPerformed": ["KIS 호출", "로그인", "새 자격 증명", "공급자 문의", "접근 제한 우회", "파서·분류기·테스트 개발", "GitHub 게시", "푸시"]
+}
