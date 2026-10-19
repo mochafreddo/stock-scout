@@ -1,0 +1,151 @@
+{
+  "issue": "https://github.com/mochafreddo/stock-scout/issues/250",
+  "date": "2026-10-19",
+  "scope": "SEC·NYSE의 현재 수집 경로 채택 판정. 유형·권리·현재성 검증 완료가 아니다.",
+  "decisions": [
+    {
+      "source": "SEC",
+      "decision": "채택 보류",
+      "basis": "기존 CLI의 첫 SEC 목록 요청이 HTTP 403으로 실패했다. 거부 원인은 미확인이다.",
+      "resumeWhen": "공식 접근 정책에 맞는 식별·요청 조건을 확정하고 최소 목록 요청의 정상 접근을 검증한다."
+    },
+    {
+      "source": "NYSE Pillar 공개 매핑",
+      "decision": "채택 보류",
+      "basis": "공개 배포 안내와 ICE 자동 추출 제한의 적용 관계를 해소하지 못했다. 데이터 파일 재수집은 수행하지 않았다.",
+      "resumeWhen": "해당 매핑의 개인 비상업 반복 자동 수집·추출에 적용되는 별도 공식 허용 근거를 확인한다."
+    }
+  ],
+  "secLiveProbe": {
+    "command": [
+      "node",
+      "scripts/security-type-probe.ts",
+      "docs/evidence/issue-250/info-NYS-BBDO.json"
+    ],
+    "startedAt": "2026-10-19T10:06:01.594798+00:00",
+    "finishedAt": "2026-10-19T10:06:02.439976+00:00",
+    "exitCode": 1,
+    "stdoutBytes": 0,
+    "nodeVersion": "v26.11.1",
+    "sourceSha256": "84a073c2160aeba776739c435b856a08536a865b8a5acecf02788d00d04b89a2",
+    "sourceUnchanged": true,
+    "diagnostic": {
+      "error": "SOURCE_HTTP_FAILURE",
+      "validation": "unverified",
+      "runtimeEligible": false,
+      "sources": [],
+      "failedSource": {
+        "url": "https://www.sec.gov/files/company_tickers_exchange.json",
+        "status": 403
+      },
+      "limits": {
+        "maxInputFiles": 20,
+        "maxInputFileBytes": 2000000,
+        "maxSecurities": 1000,
+        "maxRequests": 40,
+        "maxResponseBytes": 32000000,
+        "maxTotalBytes": 64000000,
+        "maxRunMs": 120000,
+        "requestTimeoutMs": 15000,
+        "requestIntervalMs": 150
+      }
+    },
+    "scope": "Existing saved KIS BBDO input; unchanged SEC-only CLI; no KIS request, credential access, identity change, proxy or retry."
+  },
+  "publicDocumentCollection": [
+    {
+      "url": "https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data",
+      "collector": "public-fetch.py",
+      "exitCode": 1,
+      "error": "http_error",
+      "httpStatus": 403,
+      "bodyRetained": false
+    },
+    {
+      "url": "https://www.ice.com/privacy-security-center/terms-of-use",
+      "collector": "public-fetch.py",
+      "exitCode": 1,
+      "error": "http_error",
+      "httpStatus": 403,
+      "bodyRetained": false
+    },
+    {
+      "url": "https://www.nyse.com/market-data/technical-documents",
+      "collector": "public-fetch.py",
+      "exitCode": 0,
+      "metadata": {
+        "status": 200,
+        "date": "2026-10-19T10:05:23Z",
+        "contentType": "text/html",
+        "bytes": 976015
+      },
+      "sha256": "2fe382a5496d0e56590c039d5c3d47f6630943e54d5843d5010c02c484f11233"
+    },
+    {
+      "url": "https://www.ice.com/publicdocs/nyse/data/NYSE_Pillar_Equities_Common_Client_Specification_v2.4r.pdf",
+      "collector": "public-fetch.py",
+      "exitCode": 1,
+      "error": "http_error",
+      "httpStatus": 403,
+      "bodyRetained": false
+    }
+  ],
+  "policyReview": [
+    {
+      "url": "https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data",
+      "method": "웹 본문 추출",
+      "sections": [
+        "Fair access"
+      ],
+      "fact": "User-Agent 식별과 효율적인 스크립트 사용, 현재 초당 10요청 상한을 안내한다. 연락처를 포함한 헤더 예시는 저장소 URL 허용이나 특정 403 원인을 입증하지 않는다."
+    },
+    {
+      "url": "https://www.sec.gov/about/privacy-information",
+      "method": "웹 본문 추출",
+      "sections": [
+        "Internet Security Policy"
+      ],
+      "fact": "여러 기계의 요청을 합산한 초당 10요청 상한과 미분류 자동 도구 관리 정책을 설명한다. 초과 호출 뒤의 10분 조건을 모든 403의 해제 조건으로 확대하지 않는다."
+    },
+    {
+      "url": "https://www.ice.com/privacy-security-center/terms-of-use",
+      "method": "웹 본문 추출",
+      "sections": [
+        "Additional Terms",
+        "Trademark & Copyright",
+        "Permissible Use"
+      ],
+      "fact": "개인 비상업 다운로드 허용과 자동 수집·추출 제한이 구분되며 특별 조건이 충돌하는 일반 조건보다 우선할 수 있다. 공개 매핑에 대한 예외 적용은 미확인이다."
+    },
+    {
+      "url": "https://www.ice.com/publicdocs/nyse/data/NYSE_Pillar_Equities_Common_Client_Specification_v2.4r.pdf",
+      "method": "웹 PDF 텍스트 추출",
+      "version": "2.4r",
+      "pages": [
+        32,
+        33
+      ],
+      "sections": [
+        "9. Symbol Index Mapping File",
+        "9.2 Symbol Index Mapping File Availability"
+      ],
+      "fact": "구독자·고객 문맥에서 공개 FTP의 날짜별 매핑 파일 배포를 설명한다. 반복 자동 수집에 대한 일반 약관 예외를 입증하지 못했다."
+    },
+    {
+      "url": "https://www.nyse.com/market-data/pricing-policies-contracts-guidelines",
+      "method": "웹 본문 추출",
+      "sections": [
+        "Policy Documentation",
+        "Contracts"
+      ],
+      "fact": "정책·계약 링크 목록을 확인했다. 연결된 모든 계약을 검토한 것은 아니며 이 목록 자체에서 무료 공개 매핑의 자동 이용 예외를 확인하지 못했다."
+    }
+  ],
+  "limits": [
+    "이번 판정은 수집 경로에 한정한다.",
+    "웹 본문 추출 성공은 로컬 CLI 수집 성공이 아니다.",
+    "HTTP Date는 수집 프로세스의 시작·종료 시각이나 데이터 기준일이 아니다.",
+    "전체 시장·증권 연결·권리·현재성 검증과 후속 차단은 유지한다.",
+    "연락처 변경·프록시·신원 변경·자동 재시도·공급자 문의·새 출처·KIS 호출·자격 증명 접근은 수행하지 않았다."
+  ]
+}
