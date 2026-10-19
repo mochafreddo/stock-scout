@@ -1,0 +1,106 @@
+{
+  "command": [
+    "node",
+    "scripts/security-type-probe.ts",
+    "docs/evidence/issue-250/info-NYS-BBDO.json"
+  ],
+  "startedAt": "2026-10-19T08:39:31.008677+00:00",
+  "finishedAt": "2026-10-19T08:39:31.347419+00:00",
+  "durationMs": 339,
+  "exitCode": 1,
+  "stdoutBytes": 0,
+  "sourceSha256": "12ba4bc396d3a1c8cc85835fdc5916e55729d038c4303dd563d8aec9891760b6",
+  "sourceUnchanged": true,
+  "diagnostic": {
+    "error": "SOURCE_HTTP_FAILURE",
+    "validation": "unverified",
+    "runtimeEligible": false,
+    "sources": [],
+    "failedSource": {
+      "url": "https://www.sec.gov/files/company_tickers_exchange.json",
+      "status": 403
+    },
+    "limits": {
+      "maxInputFiles": 20,
+      "maxInputFileBytes": 2000000,
+      "maxSecurities": 1000,
+      "maxRequests": 40,
+      "maxResponseBytes": 32000000,
+      "maxTotalBytes": 64000000,
+      "maxRunMs": 120000,
+      "requestTimeoutMs": 15000,
+      "requestIntervalMs": 150
+    }
+  },
+  "scope": "One live SEC ticker-directory request using a saved KIS BBDO observation; no KIS request, no credential access; issuer discovery and XML extraction were not reached.",
+  "finalSourceRerun": {
+    "command": [
+      "node",
+      "scripts/security-type-probe.ts",
+      "docs/evidence/issue-250/info-NYS-BBDO.json"
+    ],
+    "startedAt": "2026-10-19T08:51:25.435920+00:00",
+    "finishedAt": "2026-10-19T08:51:25.735752+00:00",
+    "durationMs": 300,
+    "exitCode": 1,
+    "stdoutBytes": 0,
+    "sourceSha256": "01edc1d7ae7802d35d57c14c7dc79f171daca70b44bedf2803ec92bc7a95f975",
+    "sourceUnchanged": true,
+    "diagnostic": {
+      "error": "SOURCE_HTTP_FAILURE",
+      "validation": "unverified",
+      "runtimeEligible": false,
+      "sources": [],
+      "failedSource": {
+        "url": "https://www.sec.gov/files/company_tickers_exchange.json",
+        "status": 403
+      },
+      "limits": {
+        "maxInputFiles": 20,
+        "maxInputFileBytes": 2000000,
+        "maxSecurities": 1000,
+        "maxRequests": 40,
+        "maxResponseBytes": 32000000,
+        "maxTotalBytes": 64000000,
+        "maxRunMs": 120000,
+        "requestTimeoutMs": 15000,
+        "requestIntervalMs": 150
+      }
+    }
+  },
+  "identityGuardRerun": {
+    "command": [
+      "node",
+      "scripts/security-type-probe.ts",
+      "docs/evidence/issue-250/info-NYS-BBDO.json"
+    ],
+    "startedAt": "2026-10-19T08:54:31.738203+00:00",
+    "finishedAt": "2026-10-19T08:54:31.959521+00:00",
+    "durationMs": 221,
+    "exitCode": 1,
+    "stdoutBytes": 0,
+    "sourceSha256": "84a073c2160aeba776739c435b856a08536a865b8a5acecf02788d00d04b89a2",
+    "sourceUnchanged": true,
+    "diagnostic": {
+      "error": "SOURCE_HTTP_FAILURE",
+      "validation": "unverified",
+      "runtimeEligible": false,
+      "sources": [],
+      "failedSource": {
+        "url": "https://www.sec.gov/files/company_tickers_exchange.json",
+        "status": 403
+      },
+      "limits": {
+        "maxInputFiles": 20,
+        "maxInputFileBytes": 2000000,
+        "maxSecurities": 1000,
+        "maxRequests": 40,
+        "maxResponseBytes": 32000000,
+        "maxTotalBytes": 64000000,
+        "maxRunMs": 120000,
+        "requestTimeoutMs": 15000,
+        "requestIntervalMs": 150
+      }
+    }
+  }
+}
