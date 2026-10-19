@@ -1,0 +1,37 @@
+{
+  "receivedAt": "2026-10-19T04:20:40.013379+00:00",
+  "source": "https://new.real.download.dws.co.kr/common/master/amsmst.cod.zip",
+  "definition": "https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/stocks_info/overseas_stock_code.py",
+  "encoding": "cp949",
+  "columns": 24,
+  "totalLines": 4765,
+  "securityType4Count": 0,
+  "rows": [
+    {
+      "nationalCode": "US",
+      "exchangeId": "23",
+      "exchangeCode": "AMS",
+      "symbol": "SPY",
+      "realtimeSymbol": "AMSSPY",
+      "englishName": "STATE STREET SPDR S&P 500 ETF",
+      "securityType": "3",
+      "currency": "USD",
+      "dr": "N",
+      "drCountry": "",
+      "etpType": "001"
+    },
+    {
+      "nationalCode": "US",
+      "exchangeId": "23",
+      "exchangeCode": "AMS",
+      "symbol": "VXX",
+      "realtimeSymbol": "AMSVXX",
+      "englishName": "IPATH SERIES B S&P 500 VIX SHORT-TERM FUTURES ETN",
+      "securityType": "3",
+      "currency": "USD",
+      "dr": "N",
+      "drCountry": "",
+      "etpType": "006"
+    }
+  ]
+}

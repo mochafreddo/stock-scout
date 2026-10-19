@@ -1,0 +1,122 @@
+[
+  {
+    "receivedAt": "2026-10-19T04:20:59.386761+00:00",
+    "source": "https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/overseas-price/v1/quotations/search-info",
+    "retrieval": "https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=/uapi/overseas-price/v1/quotations/search-info",
+    "name": "해외주식 상품기본정보[v1_해외주식-034]",
+    "path": "/uapi/overseas-price/v1/quotations/search-info",
+    "trId": "CTPF1702R",
+    "fields": [
+      {
+        "bodyType": "res_b",
+        "propertyCd": "std_pdno",
+        "propertyNm": "표준상품번호",
+        "description": " "
+      },
+      {
+        "bodyType": "res_b",
+        "propertyCd": "tr_mket_cd",
+        "propertyNm": "거래시장코드",
+        "description": " "
+      },
+      {
+        "bodyType": "res_b",
+        "propertyCd": "ovrs_excg_cd",
+        "propertyNm": "해외거래소코드",
+        "description": " "
+      },
+      {
+        "bodyType": "res_b",
+        "propertyCd": "ovrs_stck_dvsn_cd",
+        "propertyNm": "해외주식구분코드",
+        "description": "01.주식\r\n02.WARRANT\r\n03.ETF\r\n04.우선주"
+      },
+      {
+        "bodyType": "res_b",
+        "propertyCd": "istt_usge_isin_cd",
+        "propertyNm": "기관용도ISIN코드",
+        "description": " "
+      },
+      {
+        "bodyType": "req_b",
+        "propertyCd": "PRDT_TYPE_CD",
+        "propertyNm": "상품유형코드",
+        "description": "512  미국 나스닥 / 513  미국 뉴욕 / 529  미국 아멕스 \r\n515  일본\r\n501  홍콩 / 543  홍콩CNY / 558  홍콩USD\r\n507  베트남 하노이 / 508  베트남 호치민\r\n551  중국 상해A / 552  중국 심천A"
+      },
+      {
+        "bodyType": "req_b",
+        "propertyCd": "PDNO",
+        "propertyNm": "상품번호",
+        "description": "예) AAPL (애플)"
+      }
+    ]
+  },
+  {
+    "receivedAt": "2026-10-19T04:21:22.324350+00:00",
+    "source": "https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/overseas-stock/v1/ranking/trade-vol",
+    "retrieval": "https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=/uapi/overseas-stock/v1/ranking/trade-vol",
+    "name": "해외주식 거래량순위[해외주식-043]",
+    "path": "/uapi/overseas-stock/v1/ranking/trade-vol",
+    "trId": "HHDFS76310010",
+    "fields": [
+      {
+        "bodyType": "res_b",
+        "propertyCd": "rsym",
+        "propertyNm": "실시간조회심볼",
+        "description": " "
+      },
+      {
+        "bodyType": "res_b",
+        "propertyCd": "excd",
+        "propertyNm": "거래소코드",
+        "description": " "
+      },
+      {
+        "bodyType": "res_b",
+        "propertyCd": "symb",
+        "propertyNm": "종목코드",
+        "description": " "
+      },
+      {
+        "bodyType": "req_b",
+        "propertyCd": "EXCD",
+        "propertyNm": "거래소코드",
+        "description": "'NYS : 뉴욕, NAS : 나스닥,  AMS : 아멕스 \r\nHKS : 홍콩, SHS : 상해 , SZS : 심천\r\nHSX : 호치민, HNX : 하노이\r\nTSE : 도쿄 '"
+      }
+    ]
+  },
+  {
+    "receivedAt": "2026-10-19T04:21:22.507611+00:00",
+    "source": "https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/overseas-stock/v1/ranking/trade-pbmn",
+    "retrieval": "https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=/uapi/overseas-stock/v1/ranking/trade-pbmn",
+    "name": "해외주식 거래대금순위[해외주식-044]",
+    "path": "/uapi/overseas-stock/v1/ranking/trade-pbmn",
+    "trId": "HHDFS76320010",
+    "fields": [
+      {
+        "bodyType": "res_b",
+        "propertyCd": "rsym",
+        "propertyNm": "실시간조회심볼",
+        "description": " "
+      },
+      {
+        "bodyType": "res_b",
+        "propertyCd": "excd",
+        "propertyNm": "거래소코드",
+        "description": " "
+      },
+      {
+        "bodyType": "res_b",
+        "propertyCd": "symb",
+        "propertyNm": "종목코드",
+        "description": " "
+      },
+      {
+        "bodyType": "req_b",
+        "propertyCd": "EXCD",
+        "propertyNm": "거래소코드",
+        "description": "'NYS : 뉴욕, NAS : 나스닥,  AMS : 아멕스 \r\nHKS : 홍콩, SHS : 상해 , SZS : 심천\r\nHSX : 호치민, HNX : 하노이\r\nTSE : 도쿄 '"
+      }
+    ]
+  }
+]

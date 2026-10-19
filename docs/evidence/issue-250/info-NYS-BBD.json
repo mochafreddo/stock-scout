@@ -1,0 +1,38 @@
+{
+  "requestedAt": "2026-10-19T04:22:07.591Z",
+  "receivedAt": "2026-10-19T04:22:08.074Z",
+  "request": {
+    "path": "/uapi/overseas-price/v1/quotations/search-info",
+    "trId": "CTPF1702R",
+    "params": {
+      "PRDT_TYPE_CD": "513",
+      "PDNO": "BBD"
+    }
+  },
+  "source": "https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/search_info/search_info.py",
+  "validation": "unverified",
+  "dataSession": null,
+  "scope": "one-page observation; not a candidate universe or verified premarket session",
+  "continuation": "",
+  "rowCount": 1,
+  "summary": {},
+  "rows": [
+    {
+      "std_pdno": "US0594603039",
+      "prdt_eng_name": "BANCO BRADESCO SA SPONS ADR EACH REPR 1 PRF NPV",
+      "natn_cd": "840",
+      "tr_mket_cd": "02",
+      "ovrs_excg_cd": "NYSE",
+      "tr_crcy_cd": "USD",
+      "ovrs_stck_dvsn_cd": "01",
+      "prdt_clsf_cd": "101210",
+      "prdt_clsf_name": "해외주식",
+      "prdt_type_cd_2": "",
+      "ovrs_item_name": "",
+      "sedol_no": "B00FSK0",
+      "istt_usge_isin_cd": "US0594603039",
+      "lstg_yn": "Y",
+      "last_rcvg_dtime": "20261017103025"
+    }
+  ]
+}

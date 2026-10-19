@@ -24,6 +24,7 @@ Node.js 24 이상과 npm이 필요합니다. [처음 실행하고 검증하기](
 - [KIS 인증과 복구](docs/kis-auth.md): 캐시, 발급 간격, 수동 복구와 검증 범위
 - [KIS 관측 CLI 레퍼런스](docs/kis-probe-reference.md): 인수, 환경 변수, 출력, 오류
 - [KIS 데이터 검증](docs/kis-data-validation.md): 실제 관측 근거, 자동 검사 범위와 한계, 후속 차단 조건
+- [KIS 종목 유형과 식별 검증](docs/kis-security-identification.md): 공식 코드 정의, 실제 워런트·우선주 ADR 반례와 후속 차단 조건
 - [작업 이슈](https://github.com/mochafreddo/stock-scout/issues)
 
 ## 문서 생성 스킬
