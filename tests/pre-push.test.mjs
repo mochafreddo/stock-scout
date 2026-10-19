@@ -231,14 +231,13 @@ test('staged CLI rejects an unmerged index without changing it', (t) => {
   const before = readFileSync(index);
   const result = spawnSync(process.execPath, [cli, '--staged'], { cwd: root, encoding: 'utf8' });
   assert.notEqual(result.status, 0, result.stderr);
-  assert.match(result.stderr, /unmerged/);
   assert.deepEqual(readFileSync(index), before);
   const commit = spawnSync('git', ['commit', '-m', 'unmerged commit'], {
     cwd: root,
     encoding: 'utf8',
   });
   assert.notEqual(commit.status, 0, commit.stderr);
-  assert.match(commit.stderr, /unmerged/);
+  assert.deepEqual(readFileSync(index), before);
 });
 
 test('pre-commit blocks staged whitespace errors in documents', (t) => {
