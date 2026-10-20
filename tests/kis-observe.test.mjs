@@ -17,7 +17,7 @@ import { test } from 'node:test';
 import { fixture } from './kis-cli-helper.mjs';
 
 const source = new URL('../', import.meta.url);
-const files = ['kis-observe.ts', 'kis-probe.ts', 'kis-auth.ts'];
+const files = ['kis-observe.ts', 'kis-probe.ts', 'kis-query.ts', 'kis-auth.ts'];
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 function setup(t) {
   const f = fixture();
@@ -123,7 +123,7 @@ test('observer collects one invocation per mode with linked private response and
     assert.equal(result.launches[0].timeout, 90_000);
     assert.equal(result.launches[0].killSignal, 'SIGKILL');
     assert.equal(result.launches[0].snapshotMode, 0o700);
-    for (const name of ['kis-probe.ts', 'kis-auth.ts'])
+    for (const name of ['kis-probe.ts', 'kis-query.ts', 'kis-auth.ts'])
       assert.deepEqual(result.launches[0].snapshotFiles[name], {
         sha256: receipt.source.files[`scripts/${name}`],
         mode: 0o600,

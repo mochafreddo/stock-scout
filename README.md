@@ -9,7 +9,8 @@
 | KIS 관측 CLI | 구현됨. NAS·NYS·AMS에서 한 페이지를 조회하고 선택한 필드를 JSON으로 출력합니다. |
 | KIS 자동 토큰 발급·캐시 | [#247](https://github.com/mochafreddo/stock-scout/issues/247)에서 발급·캐시 재사용을, [#248](https://github.com/mochafreddo/stock-scout/issues/248)에서 명시적 만료의 한 번 복구를 구현했습니다. 첫 실행은 5분 대기를 기록하며 복구에도 같은 발급 제한을 적용합니다. 실제 만료 복구는 미검증입니다. |
 | 장전 후보군 조회 | [#239](https://github.com/mochafreddo/stock-scout/issues/239)의 계획입니다. 데이터 의미·종목 유형·지원 시간 검증이 남아 있습니다. |
-| AI 매수 후보 추천 | #237의 계획입니다. Vercel AI SDK·OpenAI 인증·모델 호출·비용 제한은 아직 구현하지 않았습니다. |
+| LLM 종목 유형 검증 | [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 작은 검증 흐름을 구현했습니다. KIS 순위와 읽기 전용 도구·검색을 연결하며 실제 정확도와 미검증 조건은 별도로 기록합니다. |
+| AI 매수 후보 추천 | #237의 계획입니다. 유형 검증 흐름을 추천·장전 보고서에 연결하는 작업은 남아 있습니다. |
 
 ## 시작하기
 
@@ -28,6 +29,7 @@ Node.js 24 이상과 npm이 필요합니다. [처음 실행하고 검증하기](
 - [KIS 종목 유형과 식별 검증](docs/kis-security-identification.md): 공식 코드 정의, 실제 워런트·우선주 ADR 반례와 후속 차단 조건
 - [외부 공식 종목 유형 자료 조사](docs/official-security-type-validation.md): 공개 구조화 목록·증권별 공시의 실제 수집 결과와 자동 판별의 남은 조건
 - [제3자 종목 유형 자료 조사](docs/third-party-security-type-sources.md#2026-10-20-자동-이용보관-차단-범위-재검토): Massive 자동 이용·보관·공개의 차단 범위와 공급자 채택의 남은 조건
+- [KIS 순위에서 LLM으로 종목 유형 확인하기](docs/llm-security-probe.md): 공식 구독 로그인, 유형 판단 CLI, 오류·비용 제한과 검증 범위
 - [외부 공식 종목 유형 관측하기](docs/security-type-probe.md): 저장된 KIS 자료에서 SEC 공시를 찾고 구조화 문맥과 미검증 조건을 확인하기
 - [작업 이슈](https://github.com/mochafreddo/stock-scout/issues)
 

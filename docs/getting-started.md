@@ -21,7 +21,7 @@
    npm ci
    ```
 
-   패키지 다운로드가 발생하며 기존 `node_modules/`를 다시 구성합니다. TypeScript·Biome·Node.js 타입 정의를 설치하며 AI SDK는 아직 포함되어 있지 않습니다.
+   패키지 다운로드가 발생하며 기존 `node_modules/`를 다시 구성합니다. TypeScript·Biome·Node.js 타입 정의와 Vercel AI SDK·OpenAI 공급자를 설치합니다.
 
 3. CLI 프로세스 테스트를 실행하세요.
 
@@ -85,6 +85,10 @@ npm test
 ```
 
 `check`는 `scripts/`, `tests/`와 지정된 JSON 설정 파일에 Biome 형식·린트 검사를 적용합니다. Markdown은 이 명령의 대상이 아니므로 문서의 내용과 링크는 별도로 확인하세요. `typecheck`는 `scripts/*.ts`를 검사하며 출력 파일을 만들지 않습니다. 검사 설정은 [biome.json](../biome.json)과 [tsconfig.json](../tsconfig.json)을 참고하세요. 저장소 방침에 따라 Actions는 비활성 상태를 유지하고 필요한 검사는 로컬에서 실행합니다.
+
+## LLM 유형 검증 흐름 실행하기
+
+[KIS 순위에서 LLM으로 종목 유형 확인하기](llm-security-probe.md)에서 Stock Scout 전용 공식 구독 인증과 자동 순위 기반 검증 흐름을 확인하세요. 기존 KIS 관측과 별도 단계이며 매수 추천은 생성하지 않습니다.
 
 ## 실제 KIS 응답 관측하기
 

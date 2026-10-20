@@ -19,7 +19,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const sourceNames = ['kis-observe.ts', 'kis-probe.ts', 'kis-auth.ts'];
+const sourceNames = ['kis-observe.ts', 'kis-probe.ts', 'kis-query.ts', 'kis-auth.ts'];
 const childCodes = [
   'USAGE',
   'CREDENTIALS_MISSING',
@@ -171,7 +171,8 @@ try {
     directory = destination;
     secureDirectory(directory);
     snapshot = mkdtempSync(join(directory, '.source-'));
-    for (const name of ['kis-probe.ts', 'kis-auth.ts']) save(snapshot, name, bytes[name]);
+    for (const name of ['kis-probe.ts', 'kis-query.ts', 'kis-auth.ts'])
+      save(snapshot, name, bytes[name]);
   } catch {
     throw new Error('OBSERVATION_STORAGE');
   }
