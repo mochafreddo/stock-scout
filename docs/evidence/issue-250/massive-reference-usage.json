@@ -102,5 +102,73 @@
   ],
   "actual_security_responses_requested": false,
   "inquiry_status": "draft_only_not_sent",
-  "downstream_blockers_retained": [250, 243, 239, 245]
+  "downstream_blockers_retained": [
+    250,
+    243,
+    239,
+    245
+  ],
+  "reassessment": {
+    "recorded_at": "2026-10-20T02:11:48.346805+00:00",
+    "scope": "One pass over automated reference use and necessary private response retention; publication assessed separately, no authenticated API requests.",
+    "sources": [
+      {
+        "id": "individuals",
+        "url": "https://massive.com/legal/individuals-terms-of-service",
+        "method": "anonymous_https_get",
+        "exit_code": 0,
+        "http_status": 200,
+        "http_date": "2026-10-20T02:10:15Z",
+        "content_type": "text/html",
+        "bytes": 256551,
+        "sha256": "3d7f56ea411a39463c6b55c87c375b66c7290b7c084d22be5715233e3f8fe4f3",
+        "matches_previous_sha256": true
+      },
+      {
+        "id": "market",
+        "url": "https://massive.com/legal/market-data-terms-of-service",
+        "method": "anonymous_https_get",
+        "exit_code": 0,
+        "http_status": 200,
+        "http_date": "2026-10-20T02:10:14Z",
+        "content_type": "text/html",
+        "bytes": 248902,
+        "sha256": "abf08be1a63c6b44e39131f94ff42b97a3479eb670822df67a62f73e641dcff5",
+        "matches_previous_sha256": true
+      },
+      {
+        "id": "personal-app",
+        "url": "https://massive.com/knowledge-base/article/which-plan-do-i-need-to-show-massive-data-in-my-app",
+        "method": "anonymous_https_get",
+        "exit_code": 0,
+        "http_status": 200,
+        "http_date": "2026-10-20T02:10:14Z",
+        "content_type": "text/html",
+        "bytes": 189538,
+        "sha256": "72a54644b01edcac4f4e7345e90b8cd2abff1c4a2aed22f3f0525b20709d12c6",
+        "matches_previous_sha256": true
+      }
+    ],
+    "document_last_updated": {
+      "individuals": "2025-07-18",
+      "market": "2025-08-28"
+    },
+    "assessment": {
+      "general_personal_scripts_basis": "present_in_official_guidance",
+      "display_and_unlicensed_non_display_restrictions": "explicit",
+      "reference_automated_classification_applicability": "unresolved",
+      "private_storage_blanket_prohibition": "not_established_by_reviewed_clauses",
+      "missing_numeric_retention_period": "explanation_gap_not_independent_stop_condition",
+      "termination_restriction_suspension_deletion": "explicit_market_terms_section_8",
+      "public_result_permission": "separate_unresolved_not_a_private_validation_gate",
+      "automated_validation_and_adoption": "on_hold",
+      "inquiry_or_reply_wait_required": false
+    },
+    "limits": [
+      "No new permission or terms change was observed in these three captured bodies.",
+      "Storage interpretation is not confirmation of indefinite retention rights or permission for the underlying automated use.",
+      "No authenticated requests, real taxonomy, ADR rights, KIS mapping or currentness validation.",
+      "This is a project evidence assessment, not a definitive legal prohibition or permission finding."
+    ]
+  }
 }
