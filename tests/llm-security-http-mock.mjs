@@ -194,11 +194,21 @@ globalThis.fetch = async (url, init = {}) => {
           : [completed]),
     ]);
   }
-  assert.equal(modelRequests, 2);
+  const repairing = scenario.startsWith('repair-');
+  const canCorrect =
+    repairing ||
+    ['unobserved-source', 'unknown-unobserved-source', 'search-only'].includes(scenario);
+  assert.ok(modelRequests === 2 || (canCorrect && modelRequests === 3));
+  if (modelRequests === 3 && repairing) {
+    const correction = JSON.parse(body.input.find((item) => item.role === 'user').content[0].text);
+    assert.deepEqual(correction.unreadSources, ['https://www.sec.gov/sample']);
+    assert.deepEqual(correction.consultedSources, ['kis:NAS:AAPL']);
+    assert.equal(correction.previousAssessment.judgments[0].symbol, 'AAPL');
+  }
   const toolResult = body.input.find((item) => item.type === 'function_call_output');
-  assert.ok(toolResult, 'Full tool history must reach the next request');
+  if (modelRequests === 2) assert.ok(toolResult, 'Full tool history must reach the next request');
   if (scenario === 'individual-lookup') assert.match(toolResult.output, /SECURITY_LOOKUP_FAILED/);
-  else if (scenario !== 'global-lookup' && scenario !== 'types')
+  else if (modelRequests === 2 && scenario !== 'global-lookup' && scenario !== 'types')
     assert.match(toolResult.output, /Common stock/);
   if (['unknown', 'individual-lookup'].includes(scenario)) {
     assessment.judgments[0].type = 'unknown';
@@ -229,19 +239,41 @@ globalThis.fetch = async (url, init = {}) => {
   if (scenario === 'duplicate-result') assessment.judgments.push(assessment.judgments[0]);
   if (['search-only', 'opened-source'].includes(scenario))
     assessment.judgments[0].evidence[0].source = 'https://www.sec.gov/sample';
+  if (repairing) {
+    assessment.judgments[0].evidence[0].source = 'https://www.sec.gov/sample';
+    if (modelRequests === 3 && ['repair-drop', 'repair-unknown'].includes(scenario))
+      assessment.judgments[0].evidence[0].source = 'kis:NAS:AAPL';
+    if (modelRequests === 3 && scenario === 'repair-unknown') {
+      assessment.judgments[0].type = 'unknown';
+      assessment.judgments[0].applicable = false;
+      assessment.judgments[0].evidence = [];
+    }
+  }
+  if (modelRequests === 2) {
+    if (scenario === 'repair-ambiguous') assessment.judgments[0].identity = 'ambiguous';
+    if (scenario === 'repair-off-ranking') assessment.judgments[0].symbol = 'MSFT';
+    if (scenario === 'repair-other-kis')
+      assessment.judgments[0].evidence.push({
+        ...assessment.judgments[0].evidence[0],
+        source: 'kis:NAS:MSFT',
+      });
+    if (scenario === 'repair-duplicate') assessment.judgments.push({ ...assessment.judgments[0] });
+  }
   const webItem = {
     type: 'web_search_call',
     id: 'ws_source',
     status: ['search-failed', 'search-service-failed', 'search-scope-unknown'].includes(scenario)
       ? 'failed'
       : 'completed',
-    action: ['opened-source', 'search-failed'].includes(scenario)
-      ? { type: 'open_page', url: 'https://www.sec.gov/sample' }
-      : {
-          type: 'search',
-          queries: ['AAPL security type'],
-          sources: [{ type: 'url', url: 'https://www.sec.gov/sample' }],
-        },
+    action:
+      ['opened-source', 'search-failed'].includes(scenario) ||
+      (scenario === 'repair-open' && modelRequests === 3)
+        ? { type: 'open_page', url: 'https://www.sec.gov/sample' }
+        : {
+            type: 'search',
+            queries: ['AAPL security type'],
+            sources: [{ type: 'url', url: 'https://www.sec.gov/sample' }],
+          },
   };
   if (scenario === 'search-scope-unknown') delete webItem.action;
   const text = JSON.stringify(assessment);
@@ -258,7 +290,8 @@ globalThis.fetch = async (url, init = {}) => {
       'search-failed',
       'search-service-failed',
       'search-scope-unknown',
-    ].includes(scenario)
+    ].includes(scenario) ||
+    (repairing && modelRequests === 3 && scenario === 'repair-open')
       ? [
           {
             type: 'response.output_item.added',

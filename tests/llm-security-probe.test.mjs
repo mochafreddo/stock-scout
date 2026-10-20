@@ -290,3 +290,47 @@ test('CLI refuses unbounded paid search even when an API key exists after subscr
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
   assert.doesNotMatch(result.stderr, /synthetic-paid/);
 });
+
+test('CLI repairs unread web evidence once and cannot pass by deleting it from a confirmed judgment', (t) => {
+  for (const scenario of ['repair-open', 'repair-unread', 'repair-drop', 'repair-unknown']) {
+    const result = run(t, scenario);
+    assert.equal(
+      result.requests.filter((r) => r.url.endsWith('/responses')).length,
+      3,
+      scenario + result.stderr,
+    );
+    if (scenario === 'repair-open') {
+      assert.equal(result.status, 0, result.stderr);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.securities[0].included, true);
+      assert.equal(output.webSources[0].url, 'https://www.sec.gov/sample');
+      assert.equal(output.model.requests, 3);
+      assert.equal(output.model.completions, 3);
+    } else if (scenario === 'repair-unknown') {
+      assert.equal(result.status, 2, result.stderr);
+      assert.equal(JSON.parse(result.stdout).status, 'analysis_insufficient');
+    } else {
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(result.stdout, '');
+      assert.equal(JSON.parse(result.stderr).error, 'MODEL_OUTPUT');
+    }
+  }
+});
+
+test('CLI never repairs identity or input-contract failures hidden beside unread web evidence', (t) => {
+  for (const scenario of [
+    'repair-ambiguous',
+    'repair-off-ranking',
+    'repair-other-kis',
+    'repair-duplicate',
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(
+      JSON.parse(result.stderr).error,
+      scenario === 'repair-ambiguous' ? 'IDENTITY_AMBIGUOUS' : 'MODEL_OUTPUT',
+    );
+    assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 2, scenario);
+  }
+});
