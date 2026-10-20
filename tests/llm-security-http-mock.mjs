@@ -7,21 +7,32 @@ const usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
 const completed = { type: 'response.completed', response: { usage } };
 let modelRequests = 0;
 const scenario = process.env.SCENARIO;
-const samples =
-  scenario === 'types'
-    ? [
-        { exchange: 'NAS', symbol: 'AAPL', kind: 'volume', rank: 1, type: 'common' },
-        { exchange: 'NAS', symbol: 'GOOG', kind: 'volume', rank: 2, type: 'common' },
-        { exchange: 'NAS', symbol: 'ACONW', kind: 'amount', rank: 1, type: 'warrant' },
-        { exchange: 'NAS', symbol: 'GOOGL', kind: 'amount', rank: 2, type: 'common' },
-        { exchange: 'NYS', symbol: 'BBD', kind: 'volume', rank: 1, type: 'preferred_adr' },
-        { exchange: 'NYS', symbol: 'BAC/B', kind: 'volume', rank: 2, type: 'preferred' },
-        { exchange: 'NYS', symbol: 'BBDO', kind: 'amount', rank: 1, type: 'common_adr' },
-        { exchange: 'NYS', symbol: 'BAC/L', kind: 'amount', rank: 2, type: 'preferred' },
-        { exchange: 'AMS', symbol: 'SPY', kind: 'volume', rank: 1, type: 'etf' },
-        { exchange: 'AMS', symbol: 'VXX', kind: 'amount', rank: 1, type: 'etn' },
-      ]
-    : [{ exchange: 'NAS', symbol: 'AAPL', type: 'common' }];
+if (['retrieval-blocked', 'judgment-blocked'].includes(scenario)) {
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback, delay, ...args) =>
+    originalSetTimeout(
+      callback,
+      (scenario === 'retrieval-blocked' && delay === 120_000) ||
+        (scenario === 'judgment-blocked' && delay === 180_000)
+        ? 10
+        : delay,
+      ...args,
+    );
+}
+const samples = scenario.startsWith('types')
+  ? [
+      { exchange: 'NAS', symbol: 'AAPL', kind: 'volume', rank: 1, type: 'common' },
+      { exchange: 'NAS', symbol: 'GOOG', kind: 'volume', rank: 2, type: 'common' },
+      { exchange: 'NAS', symbol: 'ACONW', kind: 'amount', rank: 1, type: 'warrant' },
+      { exchange: 'NAS', symbol: 'GOOGL', kind: 'amount', rank: 2, type: 'common' },
+      { exchange: 'NYS', symbol: 'BBD', kind: 'volume', rank: 1, type: 'preferred_adr' },
+      { exchange: 'NYS', symbol: 'BAC/B', kind: 'volume', rank: 2, type: 'preferred' },
+      { exchange: 'NYS', symbol: 'BBDO', kind: 'amount', rank: 1, type: 'common_adr' },
+      { exchange: 'NYS', symbol: 'BAC/L', kind: 'amount', rank: 2, type: 'preferred' },
+      { exchange: 'AMS', symbol: 'SPY', kind: 'volume', rank: 1, type: 'etf' },
+      { exchange: 'AMS', symbol: 'VXX', kind: 'amount', rank: 1, type: 'etn' },
+    ]
+  : [{ exchange: 'NAS', symbol: 'AAPL', type: 'common' }];
 const assessment = {
   judgments: [
     {
@@ -42,7 +53,7 @@ const assessment = {
     },
   ],
 };
-if (scenario === 'types')
+if (scenario.startsWith('types'))
   assessment.judgments = samples.map((sample) => ({
     exchange: sample.exchange,
     symbol: sample.symbol,
@@ -74,6 +85,10 @@ globalThis.fetch = async (url, init = {}) => {
     assert.equal(init.headers.authorization, 'Bearer test-token');
     const body = { rt_cd: '0', msg_cd: 'MCA00000', output1: { nrec: '0' }, output2: [] };
     if (request.pathname.endsWith('search-info')) {
+      if (scenario === 'retrieval-blocked') {
+        setTimeout(() => {}, 30);
+        return new Promise(() => {});
+      }
       const sample = samples.find((sample) => sample.symbol === request.searchParams.get('PDNO'));
       assert.ok(sample);
       if (scenario === 'individual-lookup')
@@ -89,7 +104,7 @@ globalThis.fetch = async (url, init = {}) => {
         ovrs_stck_dvsn_cd: '01',
         prdt_clsf_name: 'Common stock',
       };
-      if (scenario === 'types')
+      if (scenario.startsWith('types'))
         body.output = { prdt_clsf_name: sample.type, ovrs_item_name: sample.symbol };
     } else if (request.searchParams.get('EXCD') === 'NAS') {
       body.output1.nrec = '1';
@@ -105,7 +120,7 @@ globalThis.fetch = async (url, init = {}) => {
         },
       ];
     }
-    if (scenario === 'types' && request.pathname.includes('/ranking/')) {
+    if (scenario.startsWith('types') && request.pathname.includes('/ranking/')) {
       const kind = request.pathname.endsWith('trade-vol') ? 'volume' : 'amount';
       body.output2 = samples
         .filter(
@@ -163,10 +178,21 @@ globalThis.fetch = async (url, init = {}) => {
   ])
     assert.ok(!(key in body), key);
   assert.ok(body.input.every((item) => item.role !== 'system'));
-  assert.ok(body.tools.some((item) => item.type === 'web_search'));
-  assert.ok(body.tools.some((item) => item.type === 'namespace' && item.name === 'stock_scout'));
-  assert.ok(body.tools.every((item) => ['namespace', 'web_search'].includes(item.type)));
-  if (++modelRequests === 1) {
+  const prompt = JSON.parse(body.input.find((item) => item.role === 'user').content[0].text);
+  const judging = prompt.stage === 'judgment';
+  if (judging && scenario === 'judgment-blocked') {
+    setTimeout(() => {}, 30);
+    return new Promise(() => {});
+  }
+  if (judging) {
+    assert.equal(body.tools?.length ?? 0, 0);
+    assert.ok(prompt.evidenceRecords);
+  } else {
+    assert.ok(body.tools.some((item) => item.type === 'web_search'));
+    assert.ok(body.tools.some((item) => item.type === 'namespace' && item.name === 'stock_scout'));
+    assert.ok(body.tools.every((item) => ['namespace', 'web_search'].includes(item.type)));
+  }
+  if (++modelRequests === 1 || (scenario === 'model-limit' && modelRequests < 12)) {
     const callSamples =
       scenario === 'info-limit' ? Array.from({ length: 33 }, () => samples[0]) : samples;
     const calls = callSamples.map((sample, index) => ({
@@ -194,23 +220,27 @@ globalThis.fetch = async (url, init = {}) => {
           : [completed]),
     ]);
   }
-  const repairing = scenario.startsWith('repair-');
-  const canCorrect =
-    repairing ||
-    ['unobserved-source', 'unknown-unobserved-source', 'search-only'].includes(scenario);
-  assert.ok(modelRequests === 2 || (canCorrect && modelRequests === 3));
-  if (modelRequests === 3 && repairing) {
-    const correction = JSON.parse(body.input.find((item) => item.role === 'user').content[0].text);
-    assert.deepEqual(correction.unreadSources, ['https://www.sec.gov/sample']);
-    assert.deepEqual(correction.consultedSources, ['kis:NAS:AAPL']);
-    assert.equal(correction.previousAssessment.judgments[0].symbol, 'AAPL');
-  }
+  assert.ok(
+    modelRequests === 2 ||
+      (judging && modelRequests === 3) ||
+      (scenario === 'model-limit' && modelRequests === 12),
+  );
   const toolResult = body.input.find((item) => item.type === 'function_call_output');
-  if (modelRequests === 2) assert.ok(toolResult, 'Full tool history must reach the next request');
-  if (scenario === 'individual-lookup') assert.match(toolResult.output, /SECURITY_LOOKUP_FAILED/);
-  else if (modelRequests === 2 && scenario !== 'global-lookup' && scenario !== 'types')
-    assert.match(toolResult.output, /Common stock/);
-  if (['unknown', 'individual-lookup'].includes(scenario)) {
+  if (!judging) {
+    assert.ok(toolResult, 'Full tool history must reach the next request');
+    if (scenario === 'individual-lookup') assert.match(toolResult.output, /SECURITY_LOOKUP_FAILED/);
+    else if (scenario !== 'global-lookup' && !scenario.startsWith('types'))
+      assert.match(toolResult.output, /Common stock/);
+  }
+  if (
+    [
+      'unknown',
+      'individual-lookup',
+      'search-failed',
+      'search-service-failed',
+      'search-scope-unknown',
+    ].includes(scenario)
+  ) {
     assessment.judgments[0].type = 'unknown';
     assessment.judgments[0].evidence = [];
     assessment.judgments[0].reason = 'Insufficient source evidence.';
@@ -218,65 +248,79 @@ globalThis.fetch = async (url, init = {}) => {
   if (scenario === 'excluded') assessment.judgments[0].type = 'etf';
   if (scenario === 'unobserved-source')
     assessment.judgments[0].evidence[0].source = 'https://example.invalid/invented';
-  if (scenario === 'off-ranking') assessment.judgments[0].symbol = 'MSFT';
-  if (scenario === 'ambiguous') assessment.judgments[0].identity = 'ambiguous';
   if (scenario === 'unknown-unobserved-source') {
     assessment.judgments[0].type = 'unknown';
     assessment.judgments[0].evidence[0].source = 'https://example.invalid/unread';
   }
-  if (['search-failed', 'search-service-failed', 'search-scope-unknown'].includes(scenario)) {
-    assessment.judgments[0].type = 'unknown';
+  if (scenario === 'no-evidence-excluded') assessment.judgments[0].type = 'etf';
+  if (['no-evidence', 'no-evidence-excluded'].includes(scenario))
     assessment.judgments[0].evidence = [];
-  }
-  if (scenario === 'no-evidence-excluded') {
-    assessment.judgments[0].type = 'etf';
-    assessment.judgments[0].evidence = [];
-  }
-  if (scenario === 'no-evidence') assessment.judgments[0].evidence = [];
-  if (scenario === 'malformed-judgment') assessment.judgments[0].applicable = 'true';
   if (scenario === 'not-current') assessment.judgments[0].applicable = false;
-  if (scenario === 'missing-result') assessment.judgments = [];
-  if (scenario === 'duplicate-result') assessment.judgments.push(assessment.judgments[0]);
   if (['search-only', 'opened-source'].includes(scenario))
     assessment.judgments[0].evidence[0].source = 'https://www.sec.gov/sample';
-  if (repairing) {
-    assessment.judgments[0].evidence[0].source = 'https://www.sec.gov/sample';
-    if (modelRequests === 3 && ['repair-drop', 'repair-unknown'].includes(scenario))
-      assessment.judgments[0].evidence[0].source = 'kis:NAS:AAPL';
-    if (modelRequests === 3 && scenario === 'repair-unknown') {
-      assessment.judgments[0].type = 'unknown';
-      assessment.judgments[0].applicable = false;
-      assessment.judgments[0].evidence = [];
-    }
-  }
-  if (modelRequests === 2) {
-    if (scenario === 'repair-ambiguous') assessment.judgments[0].identity = 'ambiguous';
-    if (scenario === 'repair-off-ranking') assessment.judgments[0].symbol = 'MSFT';
-    if (scenario === 'repair-other-kis')
-      assessment.judgments[0].evidence.push({
-        ...assessment.judgments[0].evidence[0],
-        source: 'kis:NAS:MSFT',
-      });
-    if (scenario === 'repair-duplicate') assessment.judgments.push({ ...assessment.judgments[0] });
-  }
   const webItem = {
     type: 'web_search_call',
     id: 'ws_source',
     status: ['search-failed', 'search-service-failed', 'search-scope-unknown'].includes(scenario)
       ? 'failed'
       : 'completed',
-    action:
-      ['opened-source', 'search-failed'].includes(scenario) ||
-      (scenario === 'repair-open' && modelRequests === 3)
-        ? { type: 'open_page', url: 'https://www.sec.gov/sample' }
-        : {
-            type: 'search',
-            queries: ['AAPL security type'],
-            sources: [{ type: 'url', url: 'https://www.sec.gov/sample' }],
-          },
+    action: ['opened-source', 'search-failed'].includes(scenario)
+      ? { type: 'open_page', url: 'https://www.sec.gov/sample' }
+      : {
+          type: 'search',
+          queries: ['AAPL security type'],
+          sources: [{ type: 'url', url: 'https://www.sec.gov/sample' }],
+        },
   };
   if (scenario === 'search-scope-unknown') delete webItem.action;
-  const text = JSON.stringify(assessment);
+  let value;
+  if (judging) {
+    value = {
+      judgments: assessment.judgments.map((judgment) => ({
+        ...judgment,
+        evidence: prompt.evidenceRecords
+          .filter(
+            (record) => record.exchange === judgment.exchange && record.symbol === judgment.symbol,
+          )
+          .map((record) => record.id),
+      })),
+    };
+    if (scenario === 'off-ranking') value.judgments[0].symbol = 'MSFT';
+    if (scenario === 'ambiguous') value.judgments[0].identity = 'ambiguous';
+    if (scenario === 'malformed-judgment') value.judgments[0].applicable = 'true';
+    if (scenario === 'missing-result') value.judgments = [];
+    if (scenario === 'duplicate-result') value.judgments.push(value.judgments[0]);
+    if (scenario === 'forged-provenance') {
+      value.judgments[0].rsym = 'FORGED';
+      value.judgments[0].rankings = [];
+    }
+    if (scenario === 'invented-id') value.judgments[0].evidence = ['e999'];
+    if (scenario === 'url-instead-of-id') value.judgments[0].evidence = ['kis:NAS:AAPL'];
+    if (scenario === 'types-cross-id') value.judgments[0].evidence = ['e2'];
+    if (scenario === 'malformed-context-identity') value.judgments[0].evidence = ['e1'];
+  } else {
+    value = {
+      evidence: assessment.judgments.flatMap((judgment) =>
+        judgment.evidence.map((evidence) => ({
+          exchange: judgment.exchange,
+          symbol: judgment.symbol,
+          source: evidence.source,
+          excerpt: evidence.detail,
+          identityLink: 'Matched individual NAS/AAPL exchange and symbol.',
+          asOf: evidence.asOf,
+          effectiveDate: '2026-10-18',
+          subsequentChanges: 'Controlled subsequent-change check found no change.',
+          currentness: evidence.currentness,
+        })),
+      ),
+    };
+    if (scenario === 'missing-context') delete value.evidence[0].subsequentChanges;
+    if (scenario === 'malformed-context-identity') value.evidence[0].exchange = ['NAS'];
+  }
+  if (['within-deadlines', 'judgment-overrun'].includes(scenario))
+    mock.timers.tick(judging ? (scenario === 'judgment-overrun' ? 61_000 : 59_000) : 119_000);
+  if (scenario === 'retrieval-overrun' && !judging) mock.timers.tick(120_000);
+  const text = JSON.stringify(value);
   return sse([
     { type: 'response.created', response: { id: 'resp_result', model: body.model, created_at: 1 } },
     {
@@ -284,14 +328,14 @@ globalThis.fetch = async (url, init = {}) => {
       output_index: 0,
       item: { type: 'message', id: 'msg_result' },
     },
-    ...([
+    ...(!judging &&
+    [
       'search-only',
       'opened-source',
       'search-failed',
       'search-service-failed',
       'search-scope-unknown',
-    ].includes(scenario) ||
-    (repairing && modelRequests === 3 && scenario === 'repair-open')
+    ].includes(scenario)
       ? [
           {
             type: 'response.output_item.added',
@@ -301,7 +345,7 @@ globalThis.fetch = async (url, init = {}) => {
           { type: 'response.output_item.done', output_index: 1, item: webItem },
         ]
       : []),
-    ...(scenario === 'web-limit'
+    ...(!judging && scenario === 'web-limit'
       ? Array.from({ length: 33 }, (_, index) => [
           {
             type: 'response.output_item.added',
@@ -326,7 +370,7 @@ globalThis.fetch = async (url, init = {}) => {
         content: [{ type: 'output_text', text, annotations: [] }],
       },
     },
-    ...(['missing-final-completion', 'duplicate-completion'].includes(scenario)
+    ...(judging && scenario === 'missing-final-completion'
       ? []
       : [
           scenario === 'incomplete'

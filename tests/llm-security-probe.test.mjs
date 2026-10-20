@@ -16,7 +16,7 @@ test('type assessment CLI rejects missing arguments without credentials or netwo
   assert.deepEqual(JSON.parse(result.stderr), { error: 'USAGE' });
 });
 
-function run(t, scenario = 'ok', extraEnv = {}) {
+function run(t, scenario = 'ok', extraEnv = {}, evaluationInput) {
   const f = fixture();
   t.after(f.close);
   putToken(f, 'test-token');
@@ -50,6 +50,9 @@ function run(t, scenario = 'ok', extraEnv = {}) {
   );
   const trace = join(f.home, 'trace');
   writeFileSync(trace, '', { mode: 0o600 });
+  const inputFile = join(f.home, 'case.json');
+  if (evaluationInput !== undefined)
+    writeFileSync(inputFile, JSON.stringify(evaluationInput), { mode: 0o600 });
   const result = spawnSync(
     process.execPath,
     [
@@ -58,7 +61,9 @@ function run(t, scenario = 'ok', extraEnv = {}) {
       'scripts/llm-security-probe.ts',
       directory,
       'gpt-6.1-sol',
-      scenario === 'types' ? '2' : '1',
+      ...(evaluationInput === undefined
+        ? [scenario.startsWith('types') ? '2' : '1']
+        : ['--evaluation-input', inputFile]),
     ],
     {
       encoding: 'utf8',
@@ -102,11 +107,157 @@ test('CLI assesses a deduplicated KIS ranking security through namespaced tools 
   );
   assert.equal(output.securities[0].evidence[0].source, 'kis:NAS:AAPL');
   assert.equal(result.requests.filter((r) => r.url.includes('/ranking/')).length, 6);
-  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 2);
+  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 3);
   assert.doesNotMatch(
     result.stdout + result.stderr,
     /test-token|test-secret|synthetic-subscription|synthetic-refresh/,
   );
+});
+
+test('CLI gives final judgment only code-assigned evidence IDs and no lookup tools', (t) => {
+  const result = run(t);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const finalRequest = result.requests.filter((r) => r.url.endsWith('/responses')).at(-1).body;
+  assert.equal(finalRequest.tools?.length ?? 0, 0);
+  const prompt = JSON.parse(
+    finalRequest.input.find((item) => item.role === 'user').content[0].text,
+  );
+  assert.equal(prompt.evidenceRecords[0].id, 'e1');
+  assert.equal(prompt.evidenceRecords[0].excerpt, 'Common stock, matched to NAS/AAPL.');
+  assert.equal(prompt.evidenceRecords[0].excerptOrigin, 'model_extracted');
+  assert.equal(output.securities[0].evidence[0].id, 'e1');
+});
+
+test('CLI stops a blocked retrieval or final judgment at its deadline without partial output', (t) => {
+  for (const scenario of ['retrieval-blocked', 'judgment-blocked']) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, scenario + result.stderr);
+    assert.equal(result.stdout, '', scenario);
+    assert.equal(JSON.parse(result.stderr).error, 'MODEL_INCOMPLETE', scenario);
+    assert.equal(
+      result.requests.filter((r) => r.url.endsWith('/responses')).length,
+      scenario === 'retrieval-blocked' ? 1 : 3,
+    );
+  }
+});
+
+test('CLI refuses model fields that could overwrite original ranking identity', (t) => {
+  const result = run(t, 'forged-provenance');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.equal(JSON.parse(result.stderr).error, 'MODEL_OUTPUT');
+});
+
+test('CLI shares the model request ceiling between retrieval and judgment', (t) => {
+  const result = run(t, 'model-limit');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.equal(JSON.parse(result.stderr).error, 'MODEL_LIMIT');
+  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 12);
+});
+
+test('CLI rejects malformed evaluation input before reading credentials or sending requests', (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const inputFile = join(f.home, 'case.json');
+  writeFileSync(inputFile, JSON.stringify({ securities: [], expected: 'common' }), { mode: 0o600 });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/llm-security-probe.ts',
+      join(f.home, 'missing'),
+      'gpt-6.1-sol',
+      '--evaluation-input',
+      inputFile,
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { PATH: process.env.PATH },
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr), { error: 'USAGE' });
+});
+
+test('CLI evaluates fixed inputs through the same evidence path without inventing rankings', (t) => {
+  const result = run(t, 'ok', {}, { securities: [{ exchange: 'NAS', symbol: 'AAPL' }] });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.inputMode, 'evaluation');
+  assert.match(output.purpose, /evaluation-only/);
+  assert.deepEqual(output.observations, []);
+  assert.equal(output.securities[0].included, true);
+  assert.equal(output.securities[0].rsym, undefined);
+  assert.equal(output.securities[0].rankings, undefined);
+  assert.equal(output.securities[0].evidence[0].id, 'e1');
+  assert.equal(result.requests.filter((r) => r.url.includes('/ranking/')).length, 0);
+  assert.equal(result.requests.filter((r) => r.url.includes('/search-info?')).length, 1);
+  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 3);
+});
+
+test('CLI rejects empty, excessive, duplicate, malformed or answer-bearing evaluation inputs', (t) => {
+  for (const input of [
+    {},
+    { securities: [] },
+    { securities: null },
+    { securities: [{ exchange: 'LON', symbol: 'AAPL' }] },
+    { securities: [{ exchange: 'NAS', symbol: 'aapl' }] },
+    { securities: [{ exchange: 'NAS', symbol: 'AAPL', expected: 'common' }] },
+    { securities: [{ exchange: 'NAS', symbol: 'AAPL' }], expected: ['common'] },
+    {
+      securities: [
+        { exchange: 'NAS', symbol: 'AAPL' },
+        { exchange: 'NAS', symbol: 'AAPL' },
+      ],
+    },
+    {
+      securities: Array.from({ length: 61 }, (_, index) => ({
+        exchange: 'NAS',
+        symbol: `S${index}`,
+      })),
+    },
+  ]) {
+    const result = run(t, 'ok', {}, input);
+    assert.equal(result.status, 1, JSON.stringify(input));
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), { error: 'USAGE' });
+    assert.deepEqual(result.requests, []);
+  }
+});
+
+test('CLI binds final IDs to the observed context of the same individual security', (t) => {
+  for (const scenario of [
+    'invented-id',
+    'url-instead-of-id',
+    'types-cross-id',
+    'missing-context',
+    'malformed-context-identity',
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, scenario + result.stderr);
+    assert.equal(result.stdout, '', scenario);
+    assert.deepEqual(JSON.parse(result.stderr), { error: 'MODEL_OUTPUT' }, scenario);
+  }
+});
+
+test('CLI reserves final judgment time inside the original total deadline', (t) => {
+  const within = run(t, 'within-deadlines');
+  assert.equal(within.status, 0, within.stderr);
+  assert.equal(JSON.parse(within.stdout).limits.retrievalTimeoutSeconds, 120);
+  assert.equal(JSON.parse(within.stdout).limits.timeoutSeconds, 180);
+  for (const scenario of ['retrieval-overrun', 'judgment-overrun']) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, scenario + result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), { error: 'MODEL_INCOMPLETE' });
+    assert.equal(
+      result.requests.filter((r) => r.url.endsWith('/responses')).length,
+      scenario === 'retrieval-overrun' ? 2 : 3,
+    );
+  }
 });
 
 test('CLI treats model authentication failure as global failure without paid fallback', (t) => {
@@ -289,48 +440,4 @@ test('CLI refuses unbounded paid search even when an API key exists after subscr
   assert.equal(JSON.parse(result.stderr).error, 'PAID_BUDGET_UNPROVABLE');
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
   assert.doesNotMatch(result.stderr, /synthetic-paid/);
-});
-
-test('CLI repairs unread web evidence once and cannot pass by deleting it from a confirmed judgment', (t) => {
-  for (const scenario of ['repair-open', 'repair-unread', 'repair-drop', 'repair-unknown']) {
-    const result = run(t, scenario);
-    assert.equal(
-      result.requests.filter((r) => r.url.endsWith('/responses')).length,
-      3,
-      scenario + result.stderr,
-    );
-    if (scenario === 'repair-open') {
-      assert.equal(result.status, 0, result.stderr);
-      const output = JSON.parse(result.stdout);
-      assert.equal(output.securities[0].included, true);
-      assert.equal(output.webSources[0].url, 'https://www.sec.gov/sample');
-      assert.equal(output.model.requests, 3);
-      assert.equal(output.model.completions, 3);
-    } else if (scenario === 'repair-unknown') {
-      assert.equal(result.status, 2, result.stderr);
-      assert.equal(JSON.parse(result.stdout).status, 'analysis_insufficient');
-    } else {
-      assert.equal(result.status, 1, result.stderr);
-      assert.equal(result.stdout, '');
-      assert.equal(JSON.parse(result.stderr).error, 'MODEL_OUTPUT');
-    }
-  }
-});
-
-test('CLI never repairs identity or input-contract failures hidden beside unread web evidence', (t) => {
-  for (const scenario of [
-    'repair-ambiguous',
-    'repair-off-ranking',
-    'repair-other-kis',
-    'repair-duplicate',
-  ]) {
-    const result = run(t, scenario);
-    assert.equal(result.status, 1, result.stderr);
-    assert.equal(result.stdout, '');
-    assert.equal(
-      JSON.parse(result.stderr).error,
-      scenario === 'repair-ambiguous' ? 'IDENTITY_AMBIGUOUS' : 'MODEL_OUTPUT',
-    );
-    assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 2, scenario);
-  }
 });
