@@ -2,6 +2,8 @@
 
 2026-10-19 [이용 범위 확인 설계](security-type-probe-design.md#massive-이용-범위-확인의-후속-설계-인터뷰)에 따른 초안이다. [제3자 공급자 조사](third-party-security-type-sources.md)의 후속 확인을 위한 문서이며 전송하지 않았다. 공개 자료만으로 해소하지 못한 적용 관계를 질문으로 남긴다.
 
+2026-10-20의 현재 차단 범위는 [재검토 보고서](third-party-security-type-sources.md#2026-10-20-자동-이용보관-차단-범위-재검토)를 따른다. 아래 질문은 당시 초안이며 전송할 필수 확인 목록이 아니다. 자동 이용의 미해결 적용 관계, 보관·삭제 방법, 결과 공개 범위를 분리하고 보관 기간 설명 부족이나 결과 공개 미확정만으로 비공개 검증을 차단하지 않는다. 문의 전송과 답변 대기를 다음 필수 단계로 두지 않는다.
+
 ## 확인한 근거와 남은 질문
 
 [Individuals Terms §1–§2](https://massive.com/legal/individuals-terms-of-service)는 개인·비상업·비사업 목적의 사용권과 Market Data Terms의 추가 적용을 명시한다. [개인 앱 안내](https://massive.com/knowledge-base/article/which-plan-do-i-need-to-show-massive-data-in-my-app)는 본인만 사용하는 개인 앱·연구·스크립트·거래를 개인 요금제 범위에 포함한다. 따라서 개인 스크립트에 관한 안내가 없다는 전제로 문의하지 않는다.

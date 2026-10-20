@@ -27,6 +27,7 @@ Node.js 24 이상과 npm이 필요합니다. [처음 실행하고 검증하기](
 - [KIS 데이터 검증](docs/kis-data-validation.md): 실제 관측 근거, 자동 검사 범위와 한계, 후속 차단 조건
 - [KIS 종목 유형과 식별 검증](docs/kis-security-identification.md): 공식 코드 정의, 실제 워런트·우선주 ADR 반례와 후속 차단 조건
 - [외부 공식 종목 유형 자료 조사](docs/official-security-type-validation.md): 공개 구조화 목록·증권별 공시의 실제 수집 결과와 자동 판별의 남은 조건
+- [제3자 종목 유형 자료 조사](docs/third-party-security-type-sources.md#2026-10-20-자동-이용보관-차단-범위-재검토): Massive 자동 이용·보관·공개의 차단 범위와 공급자 채택의 남은 조건
 - [외부 공식 종목 유형 관측하기](docs/security-type-probe.md): 저장된 KIS 자료에서 SEC 공시를 찾고 구조화 문맥과 미검증 조건을 확인하기
 - [작업 이슈](https://github.com/mochafreddo/stock-scout/issues)
 
