@@ -231,7 +231,7 @@ function qualityChecks(root: string, source: string, staged = false) {
   const env = {
     PATH: process.env.PATH,
     HOME: root,
-    TMPDIR: root,
+    TMPDIR: dirname(root),
     npm_config_offline: 'true',
     npm_config_audit: 'false',
     npm_config_update_notifier: 'false',
@@ -356,15 +356,17 @@ try {
       .toString()
       .split('\0')
       .filter(Boolean);
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-push-')));
+    const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-push-')));
+    const root = join(temporary, 'snapshot');
     try {
+      mkdirSync(root);
       const files = snapshot(commit, root);
       checkSkills(root, files);
       checkLinks(root, files);
       if (changed.some((file) => !file.endsWith('.md'))) qualityChecks(root, source);
       process.stderr.write(`Verified ${commit}\n`);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(temporary, { recursive: true, force: true });
     }
   }
 } catch (error) {

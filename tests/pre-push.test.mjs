@@ -374,6 +374,31 @@ test('pre-push rejects a broken committed link even when the working copy fixes 
   assert.equal(readFileSync(join(root, 'README.md'), 'utf8'), '# Working copy fixes the link\n');
 });
 
+test('pre-push gives quality checks a temporary directory outside the source snapshot', (t) => {
+  const { root, base } = fixture(t);
+  writeFileSync(
+    join(root, 'temporary.mjs'),
+    `
+import assert from 'node:assert/strict';
+import { realpathSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, relative, isAbsolute } from 'node:path';
+const directory = mkdtempSync(join(tmpdir(), 'credentials-'));
+try {
+  const path = relative(realpathSync(process.cwd()), realpathSync(directory));
+  assert.ok(path === '..' || path.startsWith('../') || isAbsolute(path), 'credentials must be outside source');
+} finally { rmSync(directory, { recursive: true, force: true }); }
+`,
+  );
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  manifest.scripts.test = 'node temporary.mjs';
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'temporary directory boundary');
+  const result = run(root, git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('pre-push blocks code changes on a failing quality command', (t) => {
   const { root, base } = fixture(t);
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
