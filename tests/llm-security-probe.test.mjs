@@ -129,6 +129,19 @@ test('CLI gives final judgment only code-assigned evidence IDs and no lookup too
   assert.equal(output.securities[0].evidence[0].id, 'e1');
 });
 
+test('CLI rejects unsolicited final web calls and sensitive judgment output without partial success', (t) => {
+  for (const [scenario, code] of [
+    ['judgment-web-call', 'MODEL_OUTPUT'],
+    ['sensitive-judgment', 'SENSITIVE_OUTPUT'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, scenario + result.stderr);
+    assert.equal(result.stdout, '', scenario);
+    assert.deepEqual(JSON.parse(result.stderr), { error: code }, scenario);
+    assert.doesNotMatch(result.stdout + result.stderr, /synthetic-subscription/);
+  }
+});
+
 test('CLI stops a blocked retrieval or final judgment at its deadline without partial output', (t) => {
   for (const scenario of ['retrieval-blocked', 'judgment-blocked']) {
     const result = run(t, scenario);

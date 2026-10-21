@@ -290,6 +290,7 @@ globalThis.fetch = async (url, init = {}) => {
     };
     if (scenario === 'off-ranking') value.judgments[0].symbol = 'MSFT';
     if (scenario === 'ambiguous') value.judgments[0].identity = 'ambiguous';
+    if (scenario === 'sensitive-judgment') value.judgments[0].reason = 'synthetic-subscription';
     if (scenario === 'malformed-judgment') value.judgments[0].applicable = 'true';
     if (scenario === 'missing-result') value.judgments = [];
     if (scenario === 'duplicate-result') value.judgments.push(value.judgments[0]);
@@ -331,6 +332,9 @@ globalThis.fetch = async (url, init = {}) => {
       output_index: 0,
       item: { type: 'message', id: 'msg_result' },
     },
+    ...(judging && scenario === 'judgment-web-call'
+      ? [{ type: 'response.output_item.done', output_index: 1, item: webItem }]
+      : []),
     ...(!judging &&
     [
       'search-only',
