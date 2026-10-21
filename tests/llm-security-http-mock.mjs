@@ -145,7 +145,10 @@ globalThis.fetch = async (url, init = {}) => {
     return Response.json(body, { headers: { tr_cont: 'D' } });
   }
   assert.equal(request.origin, 'https://api.openai.com');
-  assert.equal(new Headers(init.headers).get('authorization'), 'Bearer synthetic-subscription');
+  assert.equal(
+    new Headers(init.headers).get('authorization'),
+    `Bearer ${process.env.TEST_MODEL_TOKEN ?? 'synthetic-subscription'}`,
+  );
   if (request.pathname === '/v1/models')
     return Response.json({ models: [{ slug: 'gpt-6.1-sol', visibility: 'list' }] });
   assert.equal(request.pathname, '/v1/responses');

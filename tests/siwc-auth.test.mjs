@@ -16,6 +16,8 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
+import { fixture as kisFixture, now, putToken } from './kis-cli-helper.mjs';
 
 const script = new URL('../scripts/siwc-auth.ts', import.meta.url).pathname;
 function fixture(t) {
@@ -29,7 +31,7 @@ function fixture(t) {
     auth: join(root, 'authorization'),
   };
 }
-async function login(t, f, mode = '', callback = {}) {
+async function login(t, f, mode = '', callback = {}, beforeCallback) {
   writeFileSync(f.trace, '', { mode: 0o600 });
   const child = spawn(process.execPath, [script, 'login', f.directory], {
     env: {
@@ -69,6 +71,7 @@ async function login(t, f, mode = '', callback = {}) {
   });
   const authorization = new URL(JSON.parse(line).authorizationUrl);
   writeFileSync(f.auth, authorization.href, { mode: 0o600 });
+  await beforeCallback?.(authorization);
   const redirect = new URL(authorization.searchParams.get('redirect_uri'));
   if (mode === 'malformed-callback') {
     await new Promise((resolve, reject) => {
@@ -139,7 +142,14 @@ function reader(directory, expiry = false) {
       directory,
       expiry ? 'expiry' : 'summary',
     ],
-    { encoding: 'utf8' },
+    {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        NODE_OPTIONS: `--import=${new URL('./siwc-auth-http-mock.mjs', import.meta.url).pathname}`,
+        TEST_MODE: 'reader-block-network',
+      },
+    },
   );
 }
 
@@ -253,7 +263,7 @@ test('token, identity, account and permission failures preserve the previously s
   }
 });
 
-test('public credential reader rejects expired, unsafe and mismatched local records', async (t) => {
+test('public credential reader fails closed for unsafe or mismatched records and unavailable refresh', async (t) => {
   const f = fixture(t);
   assert.equal((await login(t, f)).status, 0);
   const path = join(f.directory, 'credentials.json');
@@ -342,4 +352,123 @@ test('tokens that expire during identity validation are never installed', async 
     if (returning) assert.equal(readFileSync(path, 'utf8'), before);
     else assert.equal(existsSync(path), false);
   }
+});
+
+test('explicit login reuses the account, issued client and host after unusable tokens were cleared', async (t) => {
+  const f = fixture(t);
+  assert.equal((await login(t, f)).status, 0);
+  const { schemaVersion, issuer, subject, clientId, hostId } = JSON.parse(
+    readFileSync(join(f.directory, 'credentials.json')),
+  );
+  writeFileSync(
+    join(f.directory, 'credentials.json'),
+    JSON.stringify({ schemaVersion, issuer, subject, clientId, hostId }),
+  );
+  const result = await login(t, f);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.authorization.searchParams.get('client_id'), clientId);
+  assert.equal(result.authorization.searchParams.get('ext_agent_host_id'), hostId);
+  assert.equal(result.authorization.searchParams.has('agent_name_hint'), false);
+  assert.equal(reader(f.directory).status, 0);
+});
+
+test('login persists the server refresh time for the next CLI process', async (t) => {
+  const f = fixture(t);
+  const result = await login(t, f, 'earliest');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    JSON.parse(readFileSync(join(f.directory, 'credentials.json'))).earliestRefreshAt,
+    1792285200,
+  );
+});
+
+function probe(t, f, mode, extraEnv = {}) {
+  const home = kisFixture();
+  t.after(home.close);
+  putToken(home, 'test-token');
+  const trace = join(f.root, 'probe-trace');
+  writeFileSync(trace, '', { mode: 0o600 });
+  const child = spawn(
+    process.execPath,
+    [
+      '--import',
+      new URL('./siwc-refresh-http-mock.mjs', import.meta.url).pathname,
+      new URL('../scripts/llm-security-probe.ts', import.meta.url).pathname,
+      f.directory,
+      'gpt-6.1-sol',
+      '1',
+    ],
+    {
+      env: {
+        PATH: process.env.PATH,
+        HOME: home.home,
+        KIS_APP_KEY: 'test-key',
+        KIS_APP_SECRET: 'test-secret',
+        TEST_NOW: String(now),
+        TEST_TRACE: trace,
+        SCENARIO: 'ok',
+        TEST_REFRESH_MODE: mode,
+        TEST_MODEL_TOKEN: 'synthetic-refreshed',
+        ...extraEnv,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  t.after(() => child.kill());
+  let stdout = '',
+    stderr = '';
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  const requests = () =>
+    readFileSync(trace, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  const done = once(child, 'close').then(([status, signal]) => ({
+    status,
+    signal,
+    stdout,
+    stderr,
+    requests: requests(),
+  }));
+  return { child, done, requests };
+}
+
+test('a CLI with a valid old token waits for login and reloads its completed state', async (t) => {
+  const f = fixture(t);
+  assert.equal((await login(t, f)).status, 0);
+  let running;
+  const signedIn = await login(t, f, '', {}, async () => {
+    running = probe(t, f, 'ok', { TEST_MODEL_TOKEN: 'PRIVATE_ACCESS_TOKEN' });
+    await delay(250);
+    assert.equal(running.requests().length, 0);
+  });
+  assert.equal(signedIn.status, 0, signedIn.stderr);
+  const result = await running.done;
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.requests.every((request) => !request.url.startsWith('https://auth.openai.com')));
+  assert.equal(existsSync(join(f.directory, '.login.lock')), false);
+});
+
+test('login waits for an in-flight refresh and then reuses its account and registration', async (t) => {
+  const f = fixture(t);
+  assert.equal((await login(t, f)).status, 0);
+  const credentials = JSON.parse(readFileSync(join(f.directory, 'credentials.json')));
+  credentials.expiresAt = 1;
+  writeFileSync(join(f.directory, 'credentials.json'), JSON.stringify(credentials));
+  const gate = join(f.root, 'refresh-gate');
+  const running = probe(t, f, 'hold', { TEST_REFRESH_GATE: gate });
+  for (let count = 0; count < 500 && running.requests().length === 0; count++) await delay(10);
+  assert.equal(running.requests().length, 1);
+  const signingIn = login(t, f);
+  await delay(250);
+  assert.equal(readFileSync(f.trace, 'utf8'), '');
+  writeFileSync(gate, '', { mode: 0o600 });
+  const [refreshed, signedIn] = await Promise.all([running.done, signingIn]);
+  assert.equal(refreshed.status, 0, refreshed.stderr);
+  assert.equal(signedIn.status, 0, signedIn.stderr);
+  assert.equal(signedIn.authorization.searchParams.get('client_id'), credentials.clientId);
+  assert.equal(signedIn.authorization.searchParams.get('ext_agent_host_id'), credentials.hostId);
+  assert.equal(existsSync(join(f.directory, '.login.lock')), false);
 });

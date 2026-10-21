@@ -234,7 +234,7 @@ try {
     }
   }
   const { readSiwcCredentials } = await import('./siwc-auth.ts');
-  const credentials = readSiwcCredentials(directory);
+  const credentials = await readSiwcCredentials(directory);
   const secrets = [
     credentials.accessToken,
     credentials.idToken,
@@ -622,6 +622,14 @@ try {
     (safeCodes.includes(error.message) || error.message.startsWith('siwc_'))
       ? error.message
       : 'MODEL_FAILED';
-  console.error(JSON.stringify({ error: code }));
+  console.error(
+    JSON.stringify({
+      error: code,
+      ...(code === 'siwc_refresh_not_allowed' && error instanceof Error && 'retryAt' in error
+        ? { retryAt: error.retryAt }
+        : {}),
+      ...(code === 'siwc_relogin_required' ? { action: 'login' } : {}),
+    }),
+  );
   process.exitCode = 1;
 }

@@ -22,6 +22,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
+import { setTimeout as delay, setImmediate as yieldTurn } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const issuer = 'https://auth.openai.com';
@@ -29,8 +30,11 @@ const resource = 'https://api.openai.com/v1';
 const requestedScopes =
   'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 const repository = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
-function fail(code: string): never {
-  throw new Error(code);
+function fail(code: string, retryAt?: number): never {
+  throw Object.assign(
+    new Error(code),
+    retryAt === undefined ? {} : { retryAt: new Date(retryAt).toISOString() },
+  );
 }
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('siwc_invalid_response');
@@ -61,7 +65,46 @@ export type SiwcCredentials = {
   tokenType: 'Bearer';
   scopes: string[];
   expiresAt: number;
+  earliestRefreshAt?: number | string;
 };
+type SiwcRegistration = Pick<
+  SiwcCredentials,
+  'schemaVersion' | 'issuer' | 'subject' | 'clientId' | 'hostId'
+>;
+
+function refreshTime(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const at =
+    typeof value === 'number'
+      ? value * 1000
+      : typeof value === 'string' &&
+          /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value)
+        ? Date.parse(value)
+        : NaN;
+  if (!Number.isSafeInteger(at) || at <= 0 || at > 8_640_000_000_000_000)
+    fail('siwc_invalid_refresh_time');
+  if (
+    typeof value === 'string' &&
+    new Date(`${value.slice(0, 10)}T00:00:00Z`).toISOString().slice(0, 10) !== value.slice(0, 10)
+  )
+    fail('siwc_invalid_refresh_time');
+  return at;
+}
+
+function tokenScopes(value: unknown): string[] {
+  if (typeof value !== 'string') fail('siwc_plan_permission_missing');
+  const scopes = value.trim().split(/\s+/);
+  if (
+    !['openid', 'resource.invoke', 'chatgpt.tokens.use.direct'].every((scope) =>
+      scopes.includes(scope),
+    ) ||
+    scopes.length > 32 ||
+    new Set(scopes).size !== scopes.length ||
+    !scopes.every((scope) => /^[A-Za-z0-9._:-]{1,100}$/.test(scope))
+  )
+    fail('siwc_plan_permission_missing');
+  return scopes;
+}
 
 function directoryPath(directory: string, create: boolean) {
   if (!isAbsolute(directory) || normalize(directory) !== directory) fail('siwc_unsafe_directory');
@@ -144,7 +187,37 @@ function atomicWrite(directory: string, filename: string, data: unknown) {
   }
 }
 
-function loadCredentials(directory: string): SiwcCredentials {
+async function sessionLock(directory: string, signal?: AbortSignal) {
+  const lock = join(directory, '.login.lock');
+  const deadline = AbortSignal.timeout(30_000);
+  const waiting = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  for (;;) {
+    signal?.throwIfAborted();
+    directoryPath(directory, false);
+    try {
+      const descriptor = openSync(
+        lock,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o600,
+      );
+      return () => {
+        closeSync(descriptor);
+        unlinkSync(lock);
+      };
+    } catch (error) {
+      if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST')
+        fail('siwc_session_locked');
+    }
+    try {
+      await delay(50, undefined, { signal: waiting });
+    } catch {
+      signal?.throwIfAborted();
+      fail('siwc_session_locked');
+    }
+  }
+}
+
+function loadSession(directory: string): SiwcRegistration | SiwcCredentials {
   const host = object(readPrivate(join(directory, 'host.json')));
   const data = object(readPrivate(join(directory, 'credentials.json')));
   const scopes = data.scopes;
@@ -154,7 +227,22 @@ function loadCredentials(directory: string): SiwcCredentials {
     !text(data.subject) ||
     !clientId(data.clientId) ||
     !hostId(data.hostId) ||
-    data.hostId !== host.hostId ||
+    data.hostId !== host.hostId
+  )
+    fail('siwc_invalid_credentials');
+  if (
+    ![
+      'accessToken',
+      'idToken',
+      'refreshToken',
+      'tokenType',
+      'scopes',
+      'expiresAt',
+      'earliestRefreshAt',
+    ].some((key) => key in data)
+  )
+    return data as SiwcRegistration;
+  if (
     !text(data.accessToken) ||
     !text(data.idToken) ||
     !text(data.refreshToken) ||
@@ -174,19 +262,101 @@ function loadCredentials(directory: string): SiwcCredentials {
   return data as SiwcCredentials;
 }
 
-export function readSiwcCredentials(directory: string): SiwcCredentials {
+export async function readSiwcCredentials(directory: string): Promise<SiwcCredentials> {
+  const cancellation = new AbortController();
+  const stop = () => cancellation.abort(new Error('siwc_refresh_cancelled'));
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  let unlock: (() => void) | undefined;
   try {
+    try {
+      directoryPath(directory, false);
+    } catch {
+      fail('siwc_invalid_credentials');
+    }
+    unlock = await sessionLock(directory, cancellation.signal);
+    const credentials = loadSession(directory);
+    if (!('accessToken' in credentials)) fail('siwc_relogin_required');
+    const refreshedEarliest = refreshTime(credentials.earliestRefreshAt);
+    if (credentials.expiresAt - Date.now() > 300_000) return credentials;
+    if (refreshedEarliest !== undefined && refreshedEarliest > Date.now())
+      fail('siwc_refresh_not_allowed', refreshedEarliest);
+    const signal = AbortSignal.any([cancellation.signal, AbortSignal.timeout(30_000)]);
+    let tokens: Record<string, unknown>;
+    try {
+      tokens = await request(
+        `${issuer}/api/accounts/oauth/token`,
+        {
+          method: 'POST',
+          signal,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: credentials.clientId,
+            refresh_token: credentials.refreshToken,
+            resource,
+          }),
+        },
+        true,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message === 'siwc_relogin_required') {
+        const { schemaVersion, issuer, subject, clientId, hostId } = credentials;
+        directoryPath(directory, false);
+        atomicWrite(directory, 'credentials.json', {
+          schemaVersion,
+          issuer,
+          subject,
+          clientId,
+          hostId,
+        });
+      }
+      throw error;
+    }
+    const receivedAt = Date.now();
+    if (
+      !text(tokens.access_token) ||
+      !text(tokens.refresh_token) ||
+      tokens.token_type !== 'Bearer' ||
+      typeof tokens.expires_in !== 'number' ||
+      !Number.isSafeInteger(tokens.expires_in) ||
+      tokens.expires_in <= 0 ||
+      tokens.expires_in > 31_536_000
+    )
+      fail('siwc_invalid_response');
+    const refreshed = {
+      ...credentials,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: receivedAt + tokens.expires_in * 1000,
+      earliestRefreshAt: tokens.earliest_refresh_at as number | string | undefined,
+    };
+    refreshTime(refreshed.earliestRefreshAt);
+    if ('scope' in tokens) refreshed.scopes = tokenScopes(tokens.scope);
+    if ('id_token' in tokens) {
+      if (!text(tokens.id_token)) fail('siwc_invalid_identity');
+      const subject = await identity(tokens.id_token, credentials.clientId, undefined, signal);
+      if (subject !== credentials.subject) fail('siwc_account_mismatch');
+      refreshed.idToken = tokens.id_token;
+    }
+    if (refreshed.expiresAt <= Date.now()) fail('siwc_credentials_expired');
     directoryPath(directory, false);
-    const credentials = loadCredentials(directory);
-    if (credentials.expiresAt <= Date.now()) fail('siwc_credentials_expired');
-    return credentials;
+    atomicWrite(directory, 'credentials.json', refreshed);
+    await yieldTurn();
+    signal.throwIfAborted();
+    return refreshed;
   } catch (error) {
-    if (error instanceof Error && error.message === 'siwc_credentials_expired') throw error;
-    fail('siwc_invalid_credentials');
+    if (cancellation.signal.aborted) fail('siwc_refresh_cancelled');
+    if (error instanceof Error && /^siwc_[a-z_]+$/.test(error.message)) throw error;
+    return fail('siwc_refresh_failed');
+  } finally {
+    unlock?.();
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
   }
 }
 
-async function request(url: string, options: RequestInit = {}) {
+async function request(url: string, options: RequestInit = {}, refresh = false) {
   options.signal?.throwIfAborted();
   const response = await fetch(url, {
     ...options,
@@ -195,14 +365,43 @@ async function request(url: string, options: RequestInit = {}) {
       ? AbortSignal.any([options.signal, AbortSignal.timeout(15_000)])
       : AbortSignal.timeout(15_000),
   });
-  if (!response.ok) fail('siwc_authentication_failed');
   const body = await response.text();
   options.signal?.throwIfAborted();
   if (body.length > 131_072) fail('siwc_invalid_response');
-  return object(JSON.parse(body));
+  if (!response.ok) {
+    if (refresh && response.status >= 400 && response.status < 500 && response.status !== 429) {
+      let code: unknown;
+      try {
+        code = object(JSON.parse(body)).error;
+      } catch {}
+      if (
+        [
+          'invalid_grant',
+          'invalid_refresh_token',
+          'token_expired',
+          'refresh_token_expired',
+          'refresh_token_invalidated',
+          'refresh_token_reused',
+        ].includes(code as string)
+      )
+        fail('siwc_relogin_required');
+      if (code === 'invalid_client') fail('siwc_client_configuration');
+    }
+    fail('siwc_authentication_failed');
+  }
+  try {
+    return object(JSON.parse(body));
+  } catch {
+    fail('siwc_invalid_response');
+  }
 }
 
-async function identity(idToken: string, issuedClient: string, nonce: string, signal: AbortSignal) {
+async function identity(
+  idToken: string,
+  issuedClient: string,
+  nonce: string | undefined,
+  signal: AbortSignal,
+) {
   const parts = idToken.split('.');
   if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part)))
     fail('siwc_invalid_identity');
@@ -251,7 +450,7 @@ async function identity(idToken: string, issuedClient: string, nonce: string, si
     typeof claims.exp !== 'number' ||
     !Number.isFinite(claims.exp) ||
     claims.exp <= Date.now() / 1000 ||
-    claims.nonce !== nonce ||
+    (nonce !== undefined && claims.nonce !== nonce) ||
     !text(claims.sub)
   )
     fail('siwc_invalid_identity');
@@ -260,25 +459,18 @@ async function identity(idToken: string, issuedClient: string, nonce: string, si
 
 async function login(directory: string) {
   directoryPath(directory, true);
-  const lock = join(directory, '.login.lock');
-  let lockDescriptor: number;
-  try {
-    lockDescriptor = openSync(
-      lock,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o600,
-    );
-  } catch {
-    fail('siwc_login_locked');
-  }
   const server = createServer();
   const cancellation = new AbortController();
-  let stop: (() => void) | undefined;
+  const stop = () => cancellation.abort(new Error('siwc_login_cancelled'));
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  let unlock: (() => void) | undefined;
   let callbackTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    let saved: SiwcCredentials | undefined;
+    unlock = await sessionLock(directory, cancellation.signal);
+    let saved: SiwcRegistration | SiwcCredentials | undefined;
     if (lstatSync(join(directory, 'credentials.json'), { throwIfNoEntry: false }))
-      saved = loadCredentials(directory);
+      saved = loadSession(directory);
     let host: string;
     if (lstatSync(join(directory, 'host.json'), { throwIfNoEntry: false })) {
       const data = object(readPrivate(join(directory, 'host.json')));
@@ -295,19 +487,21 @@ async function login(directory: string) {
       server.once('error', () => reject(new Error('siwc_listener_failed')));
       server.listen(0, '127.0.0.1', resolve);
     });
+    cancellation.signal.throwIfAborted();
     const address = server.address();
     if (!address || typeof address === 'string') fail('siwc_callback_failed');
     const redirectUri = `http://127.0.0.1:${address.port}/auth/callback`;
     const callback = new Promise<URL>((resolve, reject) => {
       let received = false;
       callbackTimer = setTimeout(() => reject(new Error('siwc_login_timeout')), 300_000);
-      stop = () => {
-        clearTimeout(callbackTimer);
-        cancellation.abort(new Error('siwc_login_cancelled'));
-        reject(new Error('siwc_login_cancelled'));
-      };
-      process.once('SIGINT', stop);
-      process.once('SIGTERM', stop);
+      cancellation.signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(callbackTimer);
+          reject(new Error('siwc_login_cancelled'));
+        },
+        { once: true },
+      );
       server.on('request', (incoming, response) => {
         let url: URL;
         try {
@@ -398,6 +592,7 @@ async function login(directory: string) {
       fail('siwc_invalid_response');
     const subject = await identity(tokens.id_token, issued, nonce, cancellation.signal);
     if (saved && subject !== saved.subject) fail('siwc_account_mismatch');
+    refreshTime(tokens.earliest_refresh_at);
     const credentials: SiwcCredentials = {
       schemaVersion: 1,
       issuer,
@@ -408,18 +603,10 @@ async function login(directory: string) {
       idToken: tokens.id_token,
       refreshToken: tokens.refresh_token,
       tokenType: 'Bearer',
-      scopes: tokens.scope.trim().split(/\s+/),
+      scopes: tokenScopes(tokens.scope),
       expiresAt: receivedAt + tokens.expires_in * 1000,
+      earliestRefreshAt: tokens.earliest_refresh_at as number | string | undefined,
     };
-    if (
-      !['openid', 'resource.invoke', 'chatgpt.tokens.use.direct'].every((scope) =>
-        credentials.scopes.includes(scope),
-      ) ||
-      credentials.scopes.length > 32 ||
-      new Set(credentials.scopes).size !== credentials.scopes.length ||
-      !credentials.scopes.every((scope) => /^[A-Za-z0-9._:-]{1,100}$/.test(scope))
-    )
-      fail('siwc_plan_permission_missing');
     directoryPath(directory, false);
     if (credentials.expiresAt <= Date.now()) fail('siwc_credentials_expired');
     atomicWrite(directory, 'credentials.json', credentials);
@@ -429,14 +616,11 @@ async function login(directory: string) {
     throw error;
   } finally {
     clearTimeout(callbackTimer);
-    if (stop) {
-      process.removeListener('SIGINT', stop);
-      process.removeListener('SIGTERM', stop);
-    }
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
     server.close();
     server.closeAllConnections();
-    closeSync(lockDescriptor);
-    unlinkSync(lock);
+    unlock?.();
   }
 }
 

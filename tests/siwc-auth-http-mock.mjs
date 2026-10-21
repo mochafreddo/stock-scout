@@ -8,6 +8,7 @@ const mode = process.env.TEST_MODE;
 let clock = 2_000_000_000_000;
 if (mode?.startsWith('validation-')) Date.now = () => clock;
 globalThis.fetch = async (url, options = {}) => {
+  if (mode === 'reader-block-network') throw new Error('Reader HTTP disabled');
   const address = String(url);
   const body = options.body ? String(options.body) : null;
   appendFileSync(
@@ -73,6 +74,7 @@ globalThis.fetch = async (url, options = {}) => {
     id_token: `${payload}.${mode === 'signature' ? 'bad' : signature}`,
     token_type: 'Bearer',
     expires_in: mode === 'validation-delay' ? 120 : mode === 'validation-stale' ? 30 : 3600,
+    ...(mode === 'earliest' ? { earliest_refresh_at: 1792285200 } : {}),
     scope:
       mode === 'scope'
         ? 'openid profile email resource.invoke'
