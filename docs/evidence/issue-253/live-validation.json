@@ -325,11 +325,9 @@
   "acceptance": {
     "originalSourceRefreshObserved": true,
     "finalSourceCatalogAndSeparateProcessReuseObserved": true,
-    "finalSourceContinuousRefreshAndReuseConfirmed": false,
-    "reason": "Catalog size fix changed the source after the actual refresh; no fresh refresh on the final source yet.",
-    "nextRefreshThreshold": "2026-10-21T06:01:25.706Z",
-    "serverEarliestRefreshAt": "2026-10-21T06:00:27Z",
-    "resume": "At or after both times, recheck the approved store and unchanged runtime source, then run check twice in separate processes.",
+    "finalSourceContinuousRefreshAndReuseConfirmed": true,
+    "reason": "On unchanged runtime source from 222b9d3, a live refresh and catalog query succeeded, followed immediately by a separate process reusing the stored credentials without another refresh.",
+    "resume": "Continuous live acceptance completed; historical attempts and unexercised live conditions remain recorded separately.",
     "notExercisedLive": [
       "concurrent rotation",
       "refresh-token invalidation",
@@ -347,5 +345,148 @@
     "checkedAt": "2026-10-21T05:13:44.225775+00:00",
     "expiresAt": "2026-10-21T06:06:25.706000+00:00",
     "earliestRefreshAt": "2026-10-21T06:00:27+00:00"
+  },
+  "finalSourceContinuousRefreshAndReuse": {
+    "repository": "<repository-root>",
+    "cwd": "<repository-root>",
+    "base": "21a40607ac59638375bbca88c7b97505c4e48cd4",
+    "implementationHead": "222b9d3c35c5781327d0453e3eb6964fefc993b6",
+    "runtime": "v26.11.1",
+    "inferenceModel": null,
+    "request": "GET https://api.openai.com/v1/models",
+    "sourceFingerprints": {
+      "scripts/siwc-auth.ts": "33f1b6a95513b67ba6bb7df272b604e5b925ee6415a260a3797b644cfff010f5",
+      "package.json": "a6a98ce207487454e5ec6dec06cbfbcae76a719bb1df9bd58fa5b9454d6c22df",
+      "package-lock.json": "97e075d474240fa1633aa5839dcd835a392e783966e09de8fe9d6e73aeb211da",
+      "tsconfig.json": "40dd9032c82d008cfff3a839ebec4ab6572a7e41e9aeb68c91cbbbc328b1dc65",
+      "biome.json": "8bd60abeced1ddd40c3779d073e2d28da33f3c9539eb105cd15c72130931b086",
+      "tests/siwc-refresh.test.mjs": "63d90bfa1759f77d90203f440c4d0645bc52fdc6d9556d81e1bd77c82e9e5835",
+      "tests/siwc-refresh-http-mock.mjs": "a9bbe0cf74585b83b1765951a464a3e024f46bf3c53dba79f6808fd95e2777ad",
+      "docs/siwc-refresh-live-validation-design.md": "e701f3729a9bf6f9fe78bcad2f5b36861ad54ab4c1c51b7d6603e3a19cb62e8e"
+    },
+    "startedAt": "2026-10-21T07:09:44.144Z",
+    "sourceMatchedBefore": true,
+    "beforeExpiresAt": "2026-10-21T06:06:25.706Z",
+    "earliestRefreshAt": "2026-10-21T06:00:27.000Z",
+    "runs": [
+      {
+        "command": "node scripts/siwc-auth.ts check <approved-auth-dir>",
+        "cwd": "<repository-root>",
+        "startedAt": "2026-10-21T07:09:44.146Z",
+        "finishedAt": "2026-10-21T07:09:48.184Z",
+        "exitCode": 0,
+        "signal": null,
+        "executionError": null,
+        "stdoutBytes": 613,
+        "stderrBytes": 0,
+        "stdout": {
+          "status": "connected",
+          "auth": {
+            "status": "refreshed",
+            "refreshRequests": 1,
+            "expiresAt": "2026-10-21T08:09:46.476Z",
+            "responseValidated": true,
+            "accessTokenChanged": true,
+            "refreshTokenChanged": true,
+            "credentialsStored": true,
+            "storedCredentialsMatch": true
+          },
+          "models": [
+            {
+              "slug": "gpt-6.1-sol",
+              "displayName": "GPT-6.1-Sol"
+            },
+            {
+              "slug": "gpt-6-astra",
+              "displayName": "GPT-6-Astra"
+            },
+            {
+              "slug": "gpt-6-sol",
+              "displayName": "GPT-6-Sol"
+            },
+            {
+              "slug": "gpt-6-luna",
+              "displayName": "GPT-6-Luna"
+            },
+            {
+              "slug": "gpt-5.6-sol",
+              "displayName": "GPT-5.6-Sol"
+            },
+            {
+              "slug": "gpt-5.6-terra",
+              "displayName": "GPT-5.6-Terra"
+            },
+            {
+              "slug": "gpt-5.6-luna",
+              "displayName": "GPT-5.6-Luna"
+            }
+          ]
+        },
+        "stderr": null
+      },
+      {
+        "command": "node scripts/siwc-auth.ts check <approved-auth-dir>",
+        "cwd": "<repository-root>",
+        "startedAt": "2026-10-21T07:09:48.184Z",
+        "finishedAt": "2026-10-21T07:09:49.324Z",
+        "exitCode": 0,
+        "signal": null,
+        "executionError": null,
+        "stdoutBytes": 477,
+        "stderrBytes": 0,
+        "stdout": {
+          "status": "connected",
+          "auth": {
+            "status": "reused",
+            "refreshRequests": 0,
+            "expiresAt": "2026-10-21T08:09:46.476Z"
+          },
+          "models": [
+            {
+              "slug": "gpt-6.1-sol",
+              "displayName": "GPT-6.1-Sol"
+            },
+            {
+              "slug": "gpt-6-astra",
+              "displayName": "GPT-6-Astra"
+            },
+            {
+              "slug": "gpt-6-sol",
+              "displayName": "GPT-6-Sol"
+            },
+            {
+              "slug": "gpt-6-luna",
+              "displayName": "GPT-6-Luna"
+            },
+            {
+              "slug": "gpt-5.6-sol",
+              "displayName": "GPT-5.6-Sol"
+            },
+            {
+              "slug": "gpt-5.6-terra",
+              "displayName": "GPT-5.6-Terra"
+            },
+            {
+              "slug": "gpt-5.6-luna",
+              "displayName": "GPT-5.6-Luna"
+            }
+          ]
+        },
+        "stderr": null
+      }
+    ],
+    "firstStoredComparison": {
+      "accessTokenChanged": true,
+      "refreshTokenChanged": true,
+      "expiryChanged": true
+    },
+    "nextStoredComparison": {
+      "accessTokenSame": true,
+      "refreshTokenSame": true,
+      "expirySame": true
+    },
+    "sourceMatchedAfter": true,
+    "finishedAt": "2026-10-21T07:09:49.325Z",
+    "outcome": "refresh_and_reuse_confirmed"
   }
 }
