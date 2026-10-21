@@ -393,6 +393,7 @@ test('CLI reuses tokens above the five-minute boundary, refreshes expired tokens
     assert.equal(result.status, 1);
     assert.deepEqual(JSON.parse(result.stderr), {
       error: 'siwc_refresh_not_allowed',
+      diagnostic: { stage: 'unknown', reason: 'siwc_refresh_not_allowed', location: null },
       retryAt: '2026-10-18T00:01:00.000Z',
     });
     assert.equal(result.stdout, '');
@@ -411,7 +412,10 @@ test('CLI reuses tokens above the five-minute boundary, refreshes expired tokens
     const f = session(t, { earliestRefreshAt });
     const result = run(f);
     assert.equal(result.status, 1, String(earliestRefreshAt));
-    assert.deepEqual(JSON.parse(result.stderr), { error: 'siwc_invalid_refresh_time' });
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'siwc_invalid_refresh_time',
+      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    });
     assert.equal(result.requests.length, 0);
   }
   const f = session(t);
@@ -492,7 +496,10 @@ test('CLI waits at most thirty seconds for a shared login lock and preserves an 
   const before = readFileSync(f.path, 'utf8');
   const result = run(f, 'locked');
   assert.equal(result.status, 1);
-  assert.deepEqual(JSON.parse(result.stderr), { error: 'siwc_session_locked' });
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'siwc_session_locked',
+    diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+  });
   assert.equal(result.stdout, '');
   assert.equal(result.requests.length, 0);
   assert.equal(readFileSync(f.path, 'utf8'), before);
@@ -515,6 +522,7 @@ test('official refresh invalidation clears tokens but retains registration while
     assert.equal(result.status, 1, error);
     assert.deepEqual(JSON.parse(result.stderr), {
       error: 'siwc_relogin_required',
+      diagnostic: { stage: 'unknown', reason: 'siwc_relogin_required', location: null },
       action: 'login',
     });
     assert.deepEqual(JSON.parse(readFileSync(f.path, 'utf8')), {
@@ -526,7 +534,11 @@ test('official refresh invalidation clears tokens but retains registration while
     });
     assert.equal(result.requests.length, 1);
     const again = run(f);
-    assert.deepEqual(JSON.parse(again.stderr), { error: 'siwc_relogin_required', action: 'login' });
+    assert.deepEqual(JSON.parse(again.stderr), {
+      error: 'siwc_relogin_required',
+      action: 'login',
+      diagnostic: { stage: 'unknown', reason: 'siwc_relogin_required', location: null },
+    });
     assert.equal(again.requests.length, 0);
   }
   for (const mode of [
@@ -602,7 +614,10 @@ test('cancellation while waiting for another session preserves its lock and star
     const result = await running.done;
     assert.equal(result.status, 1);
     assert.equal(result.signal, null);
-    assert.deepEqual(JSON.parse(result.stderr), { error: 'siwc_refresh_cancelled' });
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'siwc_refresh_cancelled',
+      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    });
     assert.equal(result.requests.length, 0);
     assert.equal(readFileSync(lock, 'utf8'), 'other-session');
     assert.equal(readFileSync(f.path, 'utf8'), before);
@@ -646,7 +661,10 @@ test('SIGINT and SIGTERM cancel refresh and identity phases while preserving cre
       const result = await running.done;
       assert.equal(result.status, 1, phase + signal);
       assert.equal(result.signal, null);
-      assert.deepEqual(JSON.parse(result.stderr), { error: 'siwc_refresh_cancelled' });
+      assert.deepEqual(JSON.parse(result.stderr), {
+        error: 'siwc_refresh_cancelled',
+        diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+      });
       assert.equal(result.stdout, '');
       assert.equal(readFileSync(f.path, 'utf8'), before);
       assert.equal(existsSync(join(f.directory, '.login.lock')), false);
@@ -663,7 +681,10 @@ test('validated rotation is stored before cancellation is honored and no data re
     const result = run(f, `postvalidation-${signal}`);
     assert.equal(result.status, 1);
     assert.equal(result.signal, null);
-    assert.deepEqual(JSON.parse(result.stderr), { error: 'siwc_refresh_cancelled' });
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'siwc_refresh_cancelled',
+      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    });
     assert.equal(JSON.parse(readFileSync(f.path, 'utf8')).refreshToken, 'synthetic-rotated');
     assert.equal(existsSync(join(f.directory, '.login.lock')), false);
     assert.equal(result.requests.length, 1);

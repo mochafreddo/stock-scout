@@ -120,6 +120,16 @@ stdout에는 완성된 결과 JSON 한 줄만 출력합니다. `securities`에�
 
 구독 한도 소진의 명시적 오류는 `SUBSCRIPTION_LIMIT`로 구분합니다. 기존 유료 API 키가 있어도 이 도구의 서버 실행 웹 검색을 포함한 최대 과금액을 보장할 수 없으면 `PAID_BUDGET_UNPROVABLE`로 중단하고 유료 요청을 보내지 않습니다. 인증 실패·검색 미지원·일반적인 429·사용량 확인 불가에서는 유료 요청을 보내지 않습니다. 비용 상한을 보장할 수 있는 유료 경로는 후속 구현 대상입니다.
 
+### 기본 실패 진단 읽기
+
+[#270](https://github.com/mochafreddo/stock-scout/issues/270)의 기본 진단은 유형 판단 CLI가 처리할 수 있는 실패의 기존 stderr JSON에 별도 옵션 없이 `diagnostic`을 추가합니다. `stage`·`reason`·`location`은 항상 제공하며 기존 `error`·인증 재시도 시각·로그인 안내와 종료 코드는 유지합니다. 성공 결과와 정상적인 분석 불충분에는 진단을 추가하지 않습니다. 독립된 인증·KIS 관측 CLI의 출력 계약도 유지합니다.
+
+인수 오류와 인수 처리 중 예상하지 못한 예외는 `stage: input`, `reason: unknown`, `location: null`입니다. 평가 모드의 파일 인수 개수·절대 경로 형식 검사까지 인수에 포함합니다. 평가 파일 읽기·JSON 파싱·내용 검사와 초기 인증·순위·조회·판단·출력은 실제 단계 전달 전까지 `stage: unknown`입니다. 이번 구현의 모든 실패는 `location: null`이며 응답 위치는 후속 상세 진단에서 연결합니다.
+
+단계와 원인의 확인 여부는 독립적입니다. 코드가 직접 확인한 `RANKING_INCOMPLETE`·`IDENTITY_AMBIGUOUS`·`SENSITIVE_OUTPUT`·`siwc_refresh_not_allowed`·`siwc_relogin_required`는 해당 내부 오류가 전달된 경우 같은 철자의 `reason`으로 제공합니다. 여러 조건을 묶는 `RANKING_FAILED`·`MODEL_OUTPUT` 등의 오류와 미등록 예외는 `reason: unknown`입니다. 기존 `error`는 호환을 위해 예외 메시지로 결정하는 동작을 유지하므로 진단 원인과 다를 수 있습니다. 개별 KIS 조회 결과에서 민감값을 발견한 경우에도 기존 `error: QUERY_FAILED`를 유지하고 `reason: SENSITIVE_OUTPUT`을 전달합니다. 알려진 식별자나 `siwc_` 접두사를 흉내 낸 외부 예외 메시지만으로 `reason`을 확정하지 않습니다.
+
+진단에는 모델 원문·외부 메시지·인증 값·개인 경로를 추가하지 않으며 추가 조회·모델 호출·재시도를 하지 않습니다. 실행 전 런타임·정적 모듈 로딩 실패·강제 종료·진단 출력 자체의 실패는 JSON 진단 보장 범위 밖입니다. 기본 진단 구현은 실제 실패 진단·고정 표본 평가·실제 KIS·OpenAI 검증이나 상위 티켓 완료를 뜻하지 않습니다.
+
 ## 로컬 검증과 실제 평가
 
 ```sh

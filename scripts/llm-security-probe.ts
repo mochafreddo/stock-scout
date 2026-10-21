@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
+import { DiagnosticError } from './diagnostic-error.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 import { assessSecurityTypes, type Security } from './security-type-assessment.ts';
 
@@ -24,6 +25,7 @@ const safeCodes = [
   'ANALYSIS_INSUFFICIENT',
 ];
 const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
+let stage: 'input' | 'unknown' = 'input';
 try {
   const [directory, model, top, ...extra] = process.argv.slice(2);
   const evaluation = top === '--evaluation-input';
@@ -35,6 +37,7 @@ try {
       : !/^[1-9]$|^10$/.test(top ?? '') || extra.length)
   )
     throw new Error('USAGE');
+  stage = 'unknown';
   const securities = new Map<string, Security>();
   const identities = new Map<string, string>();
   const observations: unknown[] = [];
@@ -115,7 +118,7 @@ try {
             (existing && existing.rsym !== row.rsym) ||
             (identities.has(row.rsym) && identities.get(row.rsym) !== key)
           )
-            throw new Error('IDENTITY_AMBIGUOUS');
+            throw new DiagnosticError('IDENTITY_AMBIGUOUS');
           identities.set(row.rsym, key);
           const security: Security = existing ?? {
             exchange,
@@ -133,7 +136,7 @@ try {
         }
         const selected = [...ranks].filter((rank) => rank <= Number(top));
         if (selected.length < Number(top) && ['F', 'M'].includes(record.continuation))
-          throw new Error('RANKING_INCOMPLETE');
+          throw new DiagnosticError('RANKING_INCOMPLETE');
         observations.push({
           exchange,
           kind,
@@ -167,6 +170,11 @@ try {
   console.error(
     JSON.stringify({
       error: code,
+      diagnostic: {
+        stage,
+        reason: error instanceof DiagnosticError ? error.reason : 'unknown',
+        location: null,
+      },
       ...(code === 'siwc_refresh_not_allowed' && error instanceof Error && 'retryAt' in error
         ? { retryAt: error.retryAt }
         : {}),

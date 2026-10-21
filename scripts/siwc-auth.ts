@@ -24,6 +24,7 @@ import { createServer } from 'node:http';
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { setTimeout as delay, setImmediate as yieldTurn } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DiagnosticError } from './diagnostic-error.ts';
 
 const issuer = 'https://auth.openai.com';
 const resource = 'https://api.openai.com/v1';
@@ -32,7 +33,9 @@ const requestedScopes =
 const repository = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 function fail(code: string, retryAt?: number): never {
   throw Object.assign(
-    new Error(code),
+    code === 'siwc_refresh_not_allowed' || code === 'siwc_relogin_required'
+      ? new DiagnosticError(code)
+      : new Error(code),
     retryAt === undefined ? {} : { retryAt: new Date(retryAt).toISOString() },
   );
 }

@@ -1,5 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, isStepCount, jsonSchema, Output, streamText, tool } from 'ai';
+import { DiagnosticError } from './diagnostic-error.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 
@@ -109,7 +110,7 @@ const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
 function safe(value: unknown, secrets: (string | undefined)[]) {
   const text = JSON.stringify(value);
   if (secrets.some((secret) => secret && text.includes(secret)))
-    throw new Error('SENSITIVE_OUTPUT');
+    throw new DiagnosticError('SENSITIVE_OUTPUT');
   return text;
 }
 
@@ -193,7 +194,7 @@ export async function assessSecurityTypes({
   const webCalls = new Set<string>();
   const webSources: { action: string; url: string }[] = [];
   const webFailures: { action: string; url: string | null; status: string }[] = [];
-  let failure: string | undefined;
+  let failure: Error | undefined;
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), 180_000);
   deadline.unref();
@@ -201,8 +202,8 @@ export async function assessSecurityTypes({
     apiKey: accessToken,
     fetch: async (url, init) => {
       if (String(url) !== 'https://api.openai.com/v1/responses' || ++requests > 12) {
-        failure = 'MODEL_LIMIT';
-        throw new Error('MODEL_LIMIT');
+        failure = new Error('MODEL_LIMIT');
+        throw failure;
       }
       return fetch(url, init);
     },
@@ -234,14 +235,14 @@ export async function assessSecurityTypes({
         },
       },
       execute: async ({ exchange, symbol }) => {
-        if (failure) throw new Error(failure);
+        if (failure) throw failure;
         if (!securities.has(keyOf(exchange, symbol))) {
-          failure = 'MODEL_OUTPUT';
-          throw new Error(failure);
+          failure = new Error('MODEL_OUTPUT');
+          throw failure;
         }
         if (++queryCount > 32) {
-          failure = 'MODEL_LIMIT';
-          throw new Error(failure);
+          failure = new Error('MODEL_LIMIT');
+          throw failure;
         }
         const source = `kis:${keyOf(exchange, symbol)}`;
         try {
@@ -258,9 +259,12 @@ export async function assessSecurityTypes({
             lookups.push(output);
             return output;
           }
-          failure = error instanceof AuthError ? 'AUTH_FAILED' : 'QUERY_FAILED';
+          failure =
+            error instanceof DiagnosticError
+              ? new DiagnosticError(error.reason, 'QUERY_FAILED')
+              : new Error(error instanceof AuthError ? 'AUTH_FAILED' : 'QUERY_FAILED');
           controller.abort();
-          throw new Error(failure);
+          throw failure;
         }
       },
     }),
@@ -305,7 +309,7 @@ export async function assessSecurityTypes({
     );
     for await (const part of result.stream) {
       if (stage === 'judgment' && part.type === 'tool-call') throw new Error('MODEL_OUTPUT');
-      if (part.type === 'error') failure ??= modelFailure(part.error);
+      if (part.type === 'error') failure ??= new Error(modelFailure(part.error));
       if (part.type === 'raw') {
         const raw = part.rawValue as {
           type?: string;
@@ -323,7 +327,7 @@ export async function assessSecurityTypes({
           if (stage === 'judgment') throw new Error('MODEL_OUTPUT');
           if (raw.item.id) webCalls.add(raw.item.id);
           if (webCalls.size > 32) {
-            failure = 'MODEL_LIMIT';
+            failure = new Error('MODEL_LIMIT');
             controller.abort();
           }
           if (raw.type === 'response.output_item.done') {
@@ -332,7 +336,7 @@ export async function assessSecurityTypes({
                 !['open_page', 'find_in_page'].includes(raw.item.action?.type ?? '') ||
                 !raw.item.action?.url
               ) {
-                failure = 'SEARCH_FAILED';
+                failure = new Error('SEARCH_FAILED');
                 controller.abort();
               }
               webFailures.push({
@@ -356,23 +360,24 @@ export async function assessSecurityTypes({
           }
         }
         if (raw.type === 'response.completed') {
-          if (completedRequests.has(requests)) failure = 'MODEL_INCOMPLETE';
+          if (completedRequests.has(requests)) failure = new Error('MODEL_INCOMPLETE');
           completedRequests.add(requests);
           completions = completedRequests.size;
         }
         if (['response.failed', 'response.incomplete', 'error'].includes(raw.type ?? '')) {
           const code = raw.response?.error?.code ?? raw.error?.code ?? raw.code;
-          failure =
+          failure = new Error(
             code === 'subscription_sharing_usage_limit_exceeded'
               ? process.env.OPENAI_API_KEY
                 ? 'PAID_BUDGET_UNPROVABLE'
                 : 'SUBSCRIPTION_LIMIT'
-              : 'MODEL_INCOMPLETE';
+              : 'MODEL_INCOMPLETE',
+          );
         }
       }
     }
     const parsed = await output;
-    if (failure) throw new Error(failure);
+    if (failure) throw failure;
     if (
       controller.signal.aborted ||
       Date.now() - startedAt >= 180_000 ||
@@ -431,7 +436,7 @@ export async function assessSecurityTypes({
       const security = securities.get(key);
       if (!security || seen.has(key)) throw new Error('MODEL_OUTPUT');
       seen.add(key);
-      if (judgment.identity === 'ambiguous') throw new Error('IDENTITY_AMBIGUOUS');
+      if (judgment.identity === 'ambiguous') throw new DiagnosticError('IDENTITY_AMBIGUOUS');
       if (judgment.type !== 'unknown' && !judgment.evidence.length) throw new Error('MODEL_OUTPUT');
       const evidence = judgment.evidence.map((id) => {
         const record = evidenceById.get(id);

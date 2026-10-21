@@ -13,10 +13,13 @@ test('type assessment CLI rejects missing arguments without credentials or netwo
   });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), { error: 'USAGE' });
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'USAGE',
+    diagnostic: { stage: 'input', reason: 'unknown', location: null },
+  });
 });
 
-function run(t, scenario = 'ok', extraEnv = {}, evaluationInput) {
+function run(t, scenario = 'ok', extraEnv = {}, evaluationInput, credentialOverrides = {}) {
   const f = fixture();
   t.after(f.close);
   putToken(f, 'test-token');
@@ -45,6 +48,7 @@ function run(t, scenario = 'ok', extraEnv = {}, evaluationInput) {
         'chatgpt.tokens.use.direct',
       ],
       expiresAt: now + 3600_000,
+      ...credentialOverrides,
     }),
     { mode: 0o600 },
   );
@@ -137,7 +141,18 @@ test('CLI rejects unsolicited final web calls and sensitive judgment output with
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '', scenario);
-    assert.deepEqual(JSON.parse(result.stderr), { error: code }, scenario);
+    assert.deepEqual(
+      JSON.parse(result.stderr),
+      {
+        error: code,
+        diagnostic: {
+          stage: 'unknown',
+          reason: code === 'SENSITIVE_OUTPUT' ? 'SENSITIVE_OUTPUT' : 'unknown',
+          location: null,
+        },
+      },
+      scenario,
+    );
     assert.doesNotMatch(result.stdout + result.stderr, /synthetic-subscription/);
   }
 });
@@ -192,7 +207,10 @@ test('CLI rejects malformed evaluation input before reading credentials or sendi
   );
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), { error: 'USAGE' });
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'USAGE',
+    diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+  });
 });
 
 test('CLI evaluates fixed inputs through the same evidence path without inventing rankings', (t) => {
@@ -236,7 +254,10 @@ test('CLI rejects empty, excessive, duplicate, malformed or answer-bearing evalu
     const result = run(t, 'ok', {}, input);
     assert.equal(result.status, 1, JSON.stringify(input));
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), { error: 'USAGE' });
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'USAGE',
+      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    });
     assert.deepEqual(result.requests, []);
   }
 });
@@ -252,7 +273,14 @@ test('CLI binds final IDs to the observed context of the same individual securit
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '', scenario);
-    assert.deepEqual(JSON.parse(result.stderr), { error: 'MODEL_OUTPUT' }, scenario);
+    assert.deepEqual(
+      JSON.parse(result.stderr),
+      {
+        error: 'MODEL_OUTPUT',
+        diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+      },
+      scenario,
+    );
   }
 });
 
@@ -265,7 +293,10 @@ test('CLI reserves final judgment time inside the original total deadline', (t) 
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), { error: 'MODEL_INCOMPLETE' });
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'MODEL_INCOMPLETE',
+      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    });
     assert.equal(
       result.requests.filter((r) => r.url.endsWith('/responses')).length,
       scenario === 'retrieval-overrun' ? 2 : 3,
@@ -453,4 +484,165 @@ test('CLI refuses unbounded paid search even when an API key exists after subscr
   assert.equal(JSON.parse(result.stderr).error, 'PAID_BUDGET_UNPROVABLE');
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
   assert.doesNotMatch(result.stderr, /synthetic-paid/);
+});
+
+test('CLI reports a confirmed ranking incompleteness reason independently of its unknown stage', (t) => {
+  const result = run(t, 'ranking-incomplete');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'RANKING_INCOMPLETE',
+    diagnostic: { stage: 'unknown', reason: 'RANKING_INCOMPLETE', location: null },
+  });
+  assert.equal(result.requests.length, 1);
+  const url = new URL(result.requests[0].url);
+  assert.equal(url.pathname, '/uapi/overseas-stock/v1/ranking/trade-vol');
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    EXCD: 'NAS',
+    NDAY: '0',
+    VOL_RANG: '0',
+    KEYB: '',
+    AUTH: '',
+    PRC1: '',
+    PRC2: '',
+  });
+});
+
+test('CLI carries confirmed identity and sensitive-output reasons from their internal failure sites', (t) => {
+  for (const [scenario, reason] of [
+    ['identity-conflict', 'IDENTITY_AMBIGUOUS'],
+    ['ambiguous', 'IDENTITY_AMBIGUOUS'],
+    ['sensitive-judgment', 'SENSITIVE_OUTPUT'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: reason,
+      diagnostic: { stage: 'unknown', reason, location: null },
+    });
+    assert.doesNotMatch(result.stderr, /synthetic-subscription/);
+  }
+});
+
+test('CLI preserves retry time and login guidance with confirmed authentication reasons and an unknown stage', (t) => {
+  const retryAt = '2026-10-18T00:10:00.000Z';
+  const blocked = run(t, 'ok', {}, undefined, {
+    expiresAt: now + 300_000,
+    earliestRefreshAt: retryAt,
+  });
+  assert.equal(blocked.status, 1, blocked.stderr);
+  assert.equal(blocked.stdout, '');
+  assert.deepEqual(JSON.parse(blocked.stderr), {
+    error: 'siwc_refresh_not_allowed',
+    retryAt,
+    diagnostic: { stage: 'unknown', reason: 'siwc_refresh_not_allowed', location: null },
+  });
+  assert.deepEqual(blocked.requests, []);
+  const registration = Object.fromEntries(
+    ['accessToken', 'idToken', 'refreshToken', 'tokenType', 'scopes', 'expiresAt'].map((key) => [
+      key,
+      undefined,
+    ]),
+  );
+  const relogin = run(t, 'ok', {}, undefined, registration);
+  assert.equal(relogin.status, 1, relogin.stderr);
+  assert.equal(relogin.stdout, '');
+  assert.deepEqual(JSON.parse(relogin.stderr), {
+    error: 'siwc_relogin_required',
+    action: 'login',
+    diagnostic: { stage: 'unknown', reason: 'siwc_relogin_required', location: null },
+  });
+  assert.deepEqual(relogin.requests, []);
+});
+
+test('CLI keeps argument failures and unexpected input exceptions in input without requests', (t) => {
+  for (const args of [
+    [],
+    ['ignored', 'bad model', '1'],
+    ['ignored', 'gpt-6.1-sol', '0'],
+    ['ignored', 'gpt-6.1-sol', '1', 'extra'],
+    ['ignored', 'gpt-6.1-sol', '--evaluation-input', 'relative.json'],
+    ['ignored', 'gpt-6.1-sol', '--evaluation-input'],
+  ]) {
+    const result = run(t, 'ok', { TEST_ARGUMENTS: JSON.stringify(args) });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'USAGE',
+      diagnostic: { stage: 'input', reason: 'unknown', location: null },
+    });
+    assert.deepEqual(result.requests, []);
+  }
+  for (const [message, error] of [
+    ['private-sentinel', 'MODEL_FAILED'],
+    ['RANKING_INCOMPLETE', 'RANKING_INCOMPLETE'],
+    ['siwc_relogin_required', 'siwc_relogin_required'],
+  ]) {
+    const result = run(t, 'ok', { TEST_ARGUMENT_EXCEPTION: message });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error,
+      diagnostic: { stage: 'input', reason: 'unknown', location: null },
+      ...(error === 'siwc_relogin_required' ? { action: 'login' } : {}),
+    });
+    assert.doesNotMatch(result.stderr, /private-sentinel/);
+    assert.deepEqual(result.requests, []);
+  }
+});
+
+test('CLI does not trust known identifiers, prefixes or reason properties on external exceptions', (t) => {
+  for (const [message, error] of [
+    ['RANKING_INCOMPLETE', 'siwc_refresh_failed'],
+    ['siwc_private_sentinel', 'siwc_private_sentinel'],
+    ['siwc_relogin_required', 'siwc_relogin_required'],
+    ['siwc_refresh_not_allowed', 'siwc_refresh_not_allowed'],
+  ]) {
+    const result = run(t, 'ok', { TEST_STORAGE_EXCEPTION: message });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error,
+      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+      ...(error === 'siwc_relogin_required' ? { action: 'login' } : {}),
+      ...(error === 'siwc_refresh_not_allowed' ? { retryAt: '2026-10-18T00:10:00.000Z' } : {}),
+    });
+    assert.deepEqual(result.requests, []);
+  }
+});
+
+test('CLI keeps aggregated ranking, lookup and model errors at an unknown reason', (t) => {
+  for (const [scenario, error] of [
+    ['rank-failure', 'RANKING_FAILED'],
+    ['global-lookup', 'QUERY_FAILED'],
+    ['malformed-judgment', 'MODEL_OUTPUT'],
+    ['auth-failure', 'AUTH_FAILED'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error,
+      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    });
+  }
+});
+
+test('CLI preserves a confirmed sensitive lookup reason while keeping its legacy query error', (t) => {
+  const result = run(t, 'sensitive-lookup');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'QUERY_FAILED',
+    diagnostic: { stage: 'unknown', reason: 'SENSITIVE_OUTPUT', location: null },
+  });
+  assert.doesNotMatch(result.stderr, /synthetic-subscription/);
+  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
+  const lookup = result.requests.filter((r) => r.url.includes('/search-info?'));
+  assert.equal(lookup.length, 1);
+  assert.deepEqual(Object.fromEntries(new URL(lookup[0].url).searchParams), {
+    PRDT_TYPE_CD: '512',
+    PDNO: 'AAPL',
+  });
 });

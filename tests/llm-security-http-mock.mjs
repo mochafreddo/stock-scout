@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { appendFileSync } from 'node:fs';
+import fs, { appendFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { mock } from 'node:test';
 
 mock.timers.enable({ apis: ['Date'], now: Number(process.env.TEST_NOW) });
@@ -7,6 +8,26 @@ const usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
 const completed = { type: 'response.completed', response: { usage } };
 let modelRequests = 0;
 const scenario = process.env.SCENARIO;
+if (process.env.TEST_ARGUMENTS)
+  process.argv.splice(2, process.argv.length, ...JSON.parse(process.env.TEST_ARGUMENTS));
+if (process.env.TEST_ARGUMENT_EXCEPTION)
+  Object.defineProperty(process.argv, '2', {
+    get() {
+      throw new Error(process.env.TEST_ARGUMENT_EXCEPTION);
+    },
+  });
+if (process.env.TEST_STORAGE_EXCEPTION) {
+  const open = fs.openSync;
+  fs.openSync = (path, ...args) => {
+    if (typeof path === 'string' && path.endsWith('/credentials.json'))
+      throw Object.assign(new Error(process.env.TEST_STORAGE_EXCEPTION), {
+        reason: 'RANKING_INCOMPLETE',
+        retryAt: '2026-10-18T00:10:00.000Z',
+      });
+    return open(path, ...args);
+  };
+  syncBuiltinESMExports();
+}
 if (['retrieval-blocked', 'judgment-blocked'].includes(scenario)) {
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, delay, ...args) =>
@@ -104,6 +125,7 @@ globalThis.fetch = async (url, init = {}) => {
         ovrs_stck_dvsn_cd: '01',
         prdt_clsf_name: 'Common stock',
       };
+      if (scenario === 'sensitive-lookup') body.output.prdt_clsf_name = 'synthetic-subscription';
       if (scenario.startsWith('types'))
         body.output = { prdt_clsf_name: sample.type, ovrs_item_name: sample.symbol };
     } else if (request.searchParams.get('EXCD') === 'NAS') {
@@ -142,6 +164,11 @@ globalThis.fetch = async (url, init = {}) => {
       body.output2[0]
     )
       body.output2[0].rsym = 'DIFFERENT';
+    if (scenario === 'ranking-incomplete') {
+      body.output1.nrec = '0';
+      body.output2 = [];
+      return Response.json(body, { headers: { tr_cont: 'F' } });
+    }
     return Response.json(body, { headers: { tr_cont: 'D' } });
   }
   assert.equal(request.origin, 'https://api.openai.com');
