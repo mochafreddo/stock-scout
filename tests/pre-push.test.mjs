@@ -5,13 +5,15 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
 const cli = new URL('../scripts/pre-push.ts', import.meta.url).pathname;
@@ -65,6 +67,55 @@ function installCommitHook(root) {
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
+}
+
+for (const mode of ['staged', 'push']) {
+  for (const failure of [false, true]) {
+    test(`${mode} CLI removes its observed runner workspace after ${failure ? 'failed' : 'successful'} checks`, (t) => {
+      const { root, base } = fixture(t);
+      const temporary = join(root, 'runner-temporary');
+      mkdirSync(temporary);
+      const observed = join(root, 'observed.json');
+      writeFileSync(
+        join(root, 'observe.mjs'),
+        `import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+writeFileSync(${JSON.stringify(observed)}, JSON.stringify({ snapshot: process.cwd(), temporary: tmpdir() }));
+process.exit(${failure ? 23 : 0});
+`,
+      );
+      const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+      manifest.scripts.check = 'node observe.mjs';
+      writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+      git(root, 'add', 'observe.mjs', 'package.json');
+      if (mode === 'push') git(root, 'commit', '-m', 'observe runner workspace');
+      const result = spawnSync(
+        process.execPath,
+        [cli, ...(mode === 'staged' ? ['--staged'] : [])],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          input: `refs/heads/main ${git(root, 'rev-parse', 'HEAD')} refs/heads/main ${base}\n`,
+          env: { PATH: process.env.PATH, HOME: root, TMPDIR: temporary },
+        },
+      );
+      assert.equal(result.status, failure ? 1 : 0, result.stderr);
+      if (failure) {
+        assert.match(result.stderr, /npm run check failed/);
+        assert.doesNotMatch(result.stderr, /fixture typecheck|fixture test|Verified/);
+      } else {
+        assert.match(result.stderr, /fixture typecheck/);
+        assert.match(result.stderr, /Verified/);
+        if (mode === 'staged') assert.doesNotMatch(result.stderr, /fixture test/);
+        else assert.match(result.stderr, /fixture test/);
+      }
+      const paths = JSON.parse(readFileSync(observed, 'utf8'));
+      assert.equal(dirname(paths.temporary), realpathSync(temporary));
+      assert.equal(dirname(paths.snapshot), paths.temporary);
+      assert.equal(existsSync(paths.temporary), false, 'runner workspace must be removed');
+      assert.deepEqual(readdirSync(temporary), []);
+    });
+  }
 }
 
 test('pre-commit checks the staged document and preserves an unstaged repair', (t) => {

@@ -287,39 +287,53 @@ function installHook(staged = false) {
   process.stderr.write(`Installed ${destination}\n`);
 }
 
-function checkStaged(source: string) {
-  const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-commit-')));
+function checkSnapshot(
+  source: string,
+  selection: { mode: 'staged' } | { mode: 'push'; commit: string; changed: string[] },
+) {
+  const staged = selection.mode === 'staged';
+  const temporary = realpathSync(
+    mkdtempSync(join(tmpdir(), staged ? 'stock-scout-commit-' : 'stock-scout-push-')),
+  );
   const root = join(temporary, 'snapshot');
   try {
     mkdirSync(root);
-    const index = resolve(git(['rev-parse', '--git-path', 'index']).toString().trim());
-    const copiedIndex = join(temporary, 'index');
-    const stagedTree = () => {
-      cpSync(index, copiedIndex);
-      return git(['write-tree'], source, undefined, copiedIndex).toString().trim();
-    };
-    const tree = stagedTree();
-    const head = spawnSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
-      cwd: source,
-    });
-    if (head.error) throw head.error;
-    if (head.status !== 0 && head.status !== 1) throw new Error(head.stderr.toString());
-    const base =
-      head.status === 0
-        ? head.stdout.toString().trim()
-        : git(['hash-object', '-t', 'tree', '--stdin'], source, '').toString().trim();
-    git(['diff', '--check', base, tree], source);
-    const changed = git(['diff', '--name-only', '-z', base, tree], source)
-      .toString()
-      .split('\0')
-      .filter(Boolean);
+    let tree: string;
+    let changed: string[];
+    let stagedTree: (() => string) | undefined;
+    if (selection.mode === 'staged') {
+      const index = resolve(git(['rev-parse', '--git-path', 'index']).toString().trim());
+      const copiedIndex = join(temporary, 'index');
+      stagedTree = () => {
+        cpSync(index, copiedIndex);
+        return git(['write-tree'], source, undefined, copiedIndex).toString().trim();
+      };
+      tree = stagedTree();
+      const head = spawnSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
+        cwd: source,
+      });
+      if (head.error) throw head.error;
+      if (head.status !== 0 && head.status !== 1) throw new Error(head.stderr.toString());
+      const base =
+        head.status === 0
+          ? head.stdout.toString().trim()
+          : git(['hash-object', '-t', 'tree', '--stdin'], source, '').toString().trim();
+      git(['diff', '--check', base, tree], source);
+      changed = git(['diff', '--name-only', '-z', base, tree], source)
+        .toString()
+        .split('\0')
+        .filter(Boolean);
+    } else {
+      tree = selection.commit;
+      changed = selection.changed;
+    }
     const files = snapshot(tree, root);
     checkSkills(root, files);
     checkLinks(root, files);
-    if (changed.some((file) => !file.endsWith('.md'))) qualityChecks(root, source, true);
-    if (stagedTree() !== tree)
+    if (changed.some((file) => !file.endsWith('.md'))) qualityChecks(root, source, staged);
+    if (stagedTree && stagedTree() !== tree)
       throw new Error('Index changed during staged checks; retry the commit');
-    process.stderr.write(`Verified staged tree ${tree}\n`);
+    process.stderr.write(`Verified ${staged ? 'staged tree ' : ''}${tree}\n`);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
@@ -332,7 +346,7 @@ try {
   }
   const source = git(['rev-parse', '--show-toplevel']).toString().trim();
   if (process.argv.includes('--staged')) {
-    checkStaged(source);
+    checkSnapshot(source, { mode: 'staged' });
     process.exit(0);
   }
   const input = readFileSync(0, 'utf8');
@@ -356,18 +370,7 @@ try {
       .toString()
       .split('\0')
       .filter(Boolean);
-    const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-push-')));
-    const root = join(temporary, 'snapshot');
-    try {
-      mkdirSync(root);
-      const files = snapshot(commit, root);
-      checkSkills(root, files);
-      checkLinks(root, files);
-      if (changed.some((file) => !file.endsWith('.md'))) qualityChecks(root, source);
-      process.stderr.write(`Verified ${commit}\n`);
-    } finally {
-      rmSync(temporary, { recursive: true, force: true });
-    }
+    checkSnapshot(source, { mode: 'push', commit, changed });
   }
 } catch (error) {
   process.stderr.write(
