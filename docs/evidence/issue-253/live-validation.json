@@ -1,0 +1,351 @@
+{
+  "schemaVersion": 1,
+  "reviewBase": "21a40607ac59638375bbca88c7b97505c4e48cd4",
+  "implementationStart": "bbaa157ecc66b7b8313c57aecbf29f8dc146cc34",
+  "initialAttemptBeforeCatalogFix": {
+    "repository": "<repository-root>",
+    "cwd": "<repository-root>",
+    "base": "21a40607ac59638375bbca88c7b97505c4e48cd4",
+    "implementationHead": "bbaa157ecc66b7b8313c57aecbf29f8dc146cc34",
+    "runtime": "v26.11.1",
+    "inferenceModel": null,
+    "request": "GET https://api.openai.com/v1/models",
+    "sourceFingerprints": {
+      "scripts/siwc-auth.ts": "d30e41fc85de2300ecf982d563a129500afd39d6884329d65bebfee38e5c46e8",
+      "tests/siwc-refresh.test.mjs": "212d6706bda44a5a80b7760cf7afd63dd6b50e4a2e6a20b208acca1bbfead697",
+      "tests/siwc-refresh-http-mock.mjs": "65f3322eb43d9e5add6d684eba95f8d1e002e31b4f0566477dfabd731afbe9a0",
+      "docs/llm-security-probe.md": "9bef409b4c22ce6ca7658f35862d0adfdc0944a20235b379185a3300248bb096",
+      "docs/siwc-refresh-live-validation-design.md": "2c3f485bf8f810cdac43ebc9aa90876c3be2e6772216895990d8f920c1da3583",
+      "package.json": "a6a98ce207487454e5ec6dec06cbfbcae76a719bb1df9bd58fa5b9454d6c22df",
+      "package-lock.json": "97e075d474240fa1633aa5839dcd835a392e783966e09de8fe9d6e73aeb211da",
+      "tsconfig.json": "40dd9032c82d008cfff3a839ebec4ab6572a7e41e9aeb68c91cbbbc328b1dc65",
+      "biome.json": "8bd60abeced1ddd40c3779d073e2d28da33f3c9539eb105cd15c72130931b086"
+    },
+    "startedAt": "2026-10-21T05:06:23.415Z",
+    "sourceMatchedBefore": true,
+    "beforeExpiresAt": "2026-10-20T15:35:59.604Z",
+    "earliestRefreshAt": null,
+    "runs": [
+      {
+        "command": "node scripts/siwc-auth.ts check <approved-auth-dir>",
+        "cwd": "<repository-root>",
+        "startedAt": "2026-10-21T05:06:23.417Z",
+        "finishedAt": "2026-10-21T05:06:27.415Z",
+        "exitCode": 1,
+        "signal": null,
+        "executionError": null,
+        "stdoutBytes": 0,
+        "stderrBytes": 256,
+        "stdout": null,
+        "stderr": {
+          "error": "siwc_invalid_response",
+          "auth": {
+            "status": "refreshed",
+            "refreshRequests": 1,
+            "expiresAt": "2026-10-21T06:06:25.706Z",
+            "responseValidated": true,
+            "accessTokenChanged": true,
+            "refreshTokenChanged": true,
+            "credentialsStored": true,
+            "storedCredentialsMatch": true
+          }
+        }
+      }
+    ],
+    "firstStoredComparison": {
+      "accessTokenChanged": true,
+      "refreshTokenChanged": true,
+      "expiryChanged": true
+    },
+    "sourceMatchedAfter": true,
+    "finishedAt": "2026-10-21T05:06:27.416Z",
+    "outcome": "first_failed_or_no_refresh"
+  },
+  "separateCatalogDiagnostic": {
+    "timestamp": "2026-10-21T05:07:01.497Z",
+    "httpStatus": 200,
+    "bodyBytes": 567356,
+    "modelsArray": true,
+    "dataArray": false,
+    "modelCount": 9,
+    "recordShapes": [
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": true,
+        "slugType": "string",
+        "slugLength": 11,
+        "displayNameType": "string",
+        "displayNameLength": 11
+      },
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": true,
+        "slugType": "string",
+        "slugLength": 11,
+        "displayNameType": "string",
+        "displayNameLength": 11
+      },
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": true,
+        "slugType": "string",
+        "slugLength": 9,
+        "displayNameType": "string",
+        "displayNameLength": 9
+      },
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": false,
+        "slugType": "string",
+        "slugLength": 11,
+        "displayNameType": "string",
+        "displayNameLength": 11
+      },
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": true,
+        "slugType": "string",
+        "slugLength": 10,
+        "displayNameType": "string",
+        "displayNameLength": 10
+      },
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": true,
+        "slugType": "string",
+        "slugLength": 11,
+        "displayNameType": "string",
+        "displayNameLength": 11
+      },
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": true,
+        "slugType": "string",
+        "slugLength": 13,
+        "displayNameType": "string",
+        "displayNameLength": 13
+      },
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": true,
+        "slugType": "string",
+        "slugLength": 12,
+        "displayNameType": "string",
+        "displayNameLength": 12
+      },
+      {
+        "object": true,
+        "visibilityType": "string",
+        "displayed": false,
+        "slugType": "string",
+        "slugLength": 17,
+        "displayNameType": "string",
+        "displayNameLength": 17
+      }
+    ]
+  },
+  "finalSourceReuse": {
+    "repository": "<repository-root>",
+    "runtime": "v26.11.1",
+    "inferenceModel": null,
+    "request": "GET https://api.openai.com/v1/models",
+    "sourceFingerprints": {
+      "scripts/siwc-auth.ts": "33f1b6a95513b67ba6bb7df272b604e5b925ee6415a260a3797b644cfff010f5",
+      "tests/siwc-refresh.test.mjs": "63d90bfa1759f77d90203f440c4d0645bc52fdc6d9556d81e1bd77c82e9e5835",
+      "tests/siwc-refresh-http-mock.mjs": "a9bbe0cf74585b83b1765951a464a3e024f46bf3c53dba79f6808fd95e2777ad",
+      "docs/llm-security-probe.md": "8ef1d5ba02d6a07282bf5ed2a17c6d5e94aa2e9bf0a3b7ebc2b2068365f4b84a",
+      "docs/siwc-refresh-live-validation-design.md": "2c3f485bf8f810cdac43ebc9aa90876c3be2e6772216895990d8f920c1da3583",
+      "package.json": "a6a98ce207487454e5ec6dec06cbfbcae76a719bb1df9bd58fa5b9454d6c22df",
+      "package-lock.json": "97e075d474240fa1633aa5839dcd835a392e783966e09de8fe9d6e73aeb211da",
+      "tsconfig.json": "40dd9032c82d008cfff3a839ebec4ab6572a7e41e9aeb68c91cbbbc328b1dc65",
+      "biome.json": "8bd60abeced1ddd40c3779d073e2d28da33f3c9539eb105cd15c72130931b086"
+    },
+    "startedAt": "2026-10-21T05:11:22.463Z",
+    "sourceMatchedBefore": true,
+    "runs": [
+      {
+        "command": "node scripts/siwc-auth.ts check <approved-auth-dir>",
+        "cwd": "<repository-root>",
+        "startedAt": "2026-10-21T05:11:22.464Z",
+        "finishedAt": "2026-10-21T05:11:23.716Z",
+        "exitCode": 0,
+        "signal": null,
+        "executionError": null,
+        "stdoutBytes": 477,
+        "stderrBytes": 0,
+        "stdout": {
+          "status": "connected",
+          "auth": {
+            "status": "reused",
+            "refreshRequests": 0,
+            "expiresAt": "2026-10-21T06:06:25.706Z"
+          },
+          "models": [
+            {
+              "slug": "gpt-6.1-sol",
+              "displayName": "GPT-6.1-Sol"
+            },
+            {
+              "slug": "gpt-6-astra",
+              "displayName": "GPT-6-Astra"
+            },
+            {
+              "slug": "gpt-6-sol",
+              "displayName": "GPT-6-Sol"
+            },
+            {
+              "slug": "gpt-6-luna",
+              "displayName": "GPT-6-Luna"
+            },
+            {
+              "slug": "gpt-5.6-sol",
+              "displayName": "GPT-5.6-Sol"
+            },
+            {
+              "slug": "gpt-5.6-terra",
+              "displayName": "GPT-5.6-Terra"
+            },
+            {
+              "slug": "gpt-5.6-luna",
+              "displayName": "GPT-5.6-Luna"
+            }
+          ]
+        },
+        "stderr": null,
+        "storedComparison": {
+          "accessTokenSame": true,
+          "refreshTokenSame": true,
+          "expirySame": true
+        }
+      },
+      {
+        "command": "node scripts/siwc-auth.ts check <approved-auth-dir>",
+        "cwd": "<repository-root>",
+        "startedAt": "2026-10-21T05:11:23.716Z",
+        "finishedAt": "2026-10-21T05:11:24.820Z",
+        "exitCode": 0,
+        "signal": null,
+        "executionError": null,
+        "stdoutBytes": 477,
+        "stderrBytes": 0,
+        "stdout": {
+          "status": "connected",
+          "auth": {
+            "status": "reused",
+            "refreshRequests": 0,
+            "expiresAt": "2026-10-21T06:06:25.706Z"
+          },
+          "models": [
+            {
+              "slug": "gpt-6.1-sol",
+              "displayName": "GPT-6.1-Sol"
+            },
+            {
+              "slug": "gpt-6-astra",
+              "displayName": "GPT-6-Astra"
+            },
+            {
+              "slug": "gpt-6-sol",
+              "displayName": "GPT-6-Sol"
+            },
+            {
+              "slug": "gpt-6-luna",
+              "displayName": "GPT-6-Luna"
+            },
+            {
+              "slug": "gpt-5.6-sol",
+              "displayName": "GPT-5.6-Sol"
+            },
+            {
+              "slug": "gpt-5.6-terra",
+              "displayName": "GPT-5.6-Terra"
+            },
+            {
+              "slug": "gpt-5.6-luna",
+              "displayName": "GPT-5.6-Luna"
+            }
+          ]
+        },
+        "stderr": null,
+        "storedComparison": {
+          "accessTokenSame": true,
+          "refreshTokenSame": true,
+          "expirySame": true
+        }
+      }
+    ],
+    "beforeExpiresAt": "2026-10-21T06:06:25.706Z",
+    "nextRefreshThreshold": "2026-10-21T06:01:25.706Z",
+    "sourceMatchedAfter": true,
+    "finishedAt": "2026-10-21T05:11:24.820Z",
+    "outcome": "final_source_reuse_confirmed_refresh_not_repeated"
+  },
+  "verification": {
+    "check": {
+      "command": "npm run check",
+      "cwd": "<repository-root>",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "cwd": "<repository-root>",
+      "exitCode": 0
+    },
+    "regression": {
+      "command": "npm test",
+      "cwd": "<repository-root>",
+      "exitCode": 0,
+      "passed": 155,
+      "failed": 0,
+      "skipped": 0
+    },
+    "negativeControls": {
+      "passed": 13,
+      "command": "mutation-probe.py --batch <private-mutation-batch> --cmd \"node --test --test-name-pattern '^subscription check' tests/siwc-refresh.test.mjs\" --expect AssertionError",
+      "sourceSnapshot": "tracked files only; environment files excluded"
+    },
+    "review": {
+      "standardsRemaining": 0,
+      "specRemaining": 0,
+      "agentRole": "reviewer",
+      "selection": "verified",
+      "requestedEffort": "high",
+      "effectiveModelAndEffort": "unverified",
+      "permissionEnforcement": "not checked"
+    }
+  },
+  "acceptance": {
+    "originalSourceRefreshObserved": true,
+    "finalSourceCatalogAndSeparateProcessReuseObserved": true,
+    "finalSourceContinuousRefreshAndReuseConfirmed": false,
+    "reason": "Catalog size fix changed the source after the actual refresh; no fresh refresh on the final source yet.",
+    "nextRefreshThreshold": "2026-10-21T06:01:25.706Z",
+    "serverEarliestRefreshAt": "2026-10-21T06:00:27Z",
+    "resume": "At or after both times, recheck the approved store and unchanged runtime source, then run check twice in separate processes.",
+    "notExercisedLive": [
+      "concurrent rotation",
+      "refresh-token invalidation",
+      "lost refresh response",
+      "storage failure",
+      "forced termination",
+      "inference",
+      "web search",
+      "KIS data",
+      "security-type accuracy",
+      "paid API fallback"
+    ]
+  },
+  "postRefreshTimingObservation": {
+    "checkedAt": "2026-10-21T05:13:44.225775+00:00",
+    "expiresAt": "2026-10-21T06:06:25.706000+00:00",
+    "earliestRefreshAt": "2026-10-21T06:00:27+00:00"
+  }
+}

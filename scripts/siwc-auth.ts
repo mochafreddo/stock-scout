@@ -72,6 +72,17 @@ type SiwcRegistration = Pick<
   'schemaVersion' | 'issuer' | 'subject' | 'clientId' | 'hostId'
 >;
 
+type SiwcAuthObservation = {
+  status: 'pending' | 'reused' | 'refreshed';
+  refreshRequests: number;
+  responseValidated?: boolean;
+  credentialsStored?: boolean;
+  storedCredentialsMatch?: boolean;
+  accessTokenChanged?: boolean;
+  refreshTokenChanged?: boolean;
+  expiresAt?: string;
+};
+
 function refreshTime(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   const at =
@@ -262,7 +273,10 @@ function loadSession(directory: string): SiwcRegistration | SiwcCredentials {
   return data as SiwcCredentials;
 }
 
-export async function readSiwcCredentials(directory: string): Promise<SiwcCredentials> {
+export async function readSiwcCredentials(
+  directory: string,
+  observation?: SiwcAuthObservation,
+): Promise<SiwcCredentials> {
   const cancellation = new AbortController();
   const stop = () => cancellation.abort(new Error('siwc_refresh_cancelled'));
   process.on('SIGINT', stop);
@@ -278,12 +292,17 @@ export async function readSiwcCredentials(directory: string): Promise<SiwcCreden
     const credentials = loadSession(directory);
     if (!('accessToken' in credentials)) fail('siwc_relogin_required');
     const refreshedEarliest = refreshTime(credentials.earliestRefreshAt);
-    if (credentials.expiresAt - Date.now() > 300_000) return credentials;
+    if (observation) observation.expiresAt = new Date(credentials.expiresAt).toISOString();
+    if (credentials.expiresAt - Date.now() > 300_000) {
+      if (observation) observation.status = 'reused';
+      return credentials;
+    }
     if (refreshedEarliest !== undefined && refreshedEarliest > Date.now())
       fail('siwc_refresh_not_allowed', refreshedEarliest);
     const signal = AbortSignal.any([cancellation.signal, AbortSignal.timeout(30_000)]);
     let tokens: Record<string, unknown>;
     try {
+      if (observation) observation.refreshRequests++;
       tokens = await request(
         `${issuer}/api/accounts/oauth/token`,
         {
@@ -340,8 +359,25 @@ export async function readSiwcCredentials(directory: string): Promise<SiwcCreden
       refreshed.idToken = tokens.id_token;
     }
     if (refreshed.expiresAt <= Date.now()) fail('siwc_credentials_expired');
+    if (observation) {
+      observation.responseValidated = true;
+      observation.accessTokenChanged = refreshed.accessToken !== credentials.accessToken;
+      observation.refreshTokenChanged = refreshed.refreshToken !== credentials.refreshToken;
+    }
     directoryPath(directory, false);
     atomicWrite(directory, 'credentials.json', refreshed);
+    if (observation) {
+      observation.credentialsStored = true;
+      const stored = loadSession(directory);
+      observation.storedCredentialsMatch =
+        'accessToken' in stored &&
+        stored.accessToken === refreshed.accessToken &&
+        stored.refreshToken === refreshed.refreshToken &&
+        stored.expiresAt === refreshed.expiresAt;
+      if (!observation.storedCredentialsMatch) fail('siwc_invalid_credentials');
+      observation.expiresAt = new Date(refreshed.expiresAt).toISOString();
+      observation.status = 'refreshed';
+    }
     await yieldTurn();
     signal.throwIfAborted();
     return refreshed;
@@ -356,7 +392,12 @@ export async function readSiwcCredentials(directory: string): Promise<SiwcCreden
   }
 }
 
-async function request(url: string, options: RequestInit = {}, refresh = false) {
+async function request(
+  url: string,
+  options: RequestInit = {},
+  refresh = false,
+  maximumBytes = 131_072,
+) {
   options.signal?.throwIfAborted();
   const response = await fetch(url, {
     ...options,
@@ -367,7 +408,7 @@ async function request(url: string, options: RequestInit = {}, refresh = false) 
   });
   const body = await response.text();
   options.signal?.throwIfAborted();
-  if (body.length > 131_072) fail('siwc_invalid_response');
+  if (Buffer.byteLength(body) > maximumBytes) fail('siwc_invalid_response');
   if (!response.ok) {
     if (refresh && response.status >= 400 && response.status < 500 && response.status !== 429) {
       let code: unknown;
@@ -625,15 +666,59 @@ async function login(directory: string) {
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const auth: SiwcAuthObservation = { status: 'pending', refreshRequests: 0 };
+  const checking = process.argv[2] === 'check';
   try {
-    if (process.argv.length !== 4 || process.argv[2] !== 'login') fail('siwc_usage');
-    await login(process.argv[3]);
+    if (process.argv.length !== 4 || !['login', 'check'].includes(process.argv[2]))
+      fail('siwc_usage');
+    if (checking) {
+      const credentials = await readSiwcCredentials(process.argv[3], auth);
+      const body = await request(
+        `${resource}/models`,
+        {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${credentials.accessToken}` },
+        },
+        false,
+        1_048_576,
+      );
+      if (!Array.isArray(body.models) || body.models.length > 4096) fail('siwc_invalid_response');
+      const models: { slug: string; displayName: string }[] = [];
+      const slugs = new Set<string>();
+      for (const entry of body.models) {
+        const model = object(entry);
+        if (typeof model.visibility !== 'string') fail('siwc_invalid_response');
+        if (model.visibility !== 'list') continue;
+        if (
+          !text(model.slug) ||
+          model.slug.length > 200 ||
+          typeof model.display_name !== 'string' ||
+          !model.display_name.trim() ||
+          model.display_name.length > 200 ||
+          [...model.display_name].some(
+            (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+          ) ||
+          slugs.has(model.slug)
+        )
+          fail('siwc_invalid_response');
+        models.push({ slug: model.slug, displayName: model.display_name });
+        slugs.add(model.slug);
+      }
+      process.stdout.write(`${JSON.stringify({ status: 'connected', auth, models })}\n`);
+    } else await login(process.argv[3]);
   } catch (error) {
     const message =
       error instanceof Error && /^siwc_[a-z_]+$/.test(error.message)
         ? error.message
         : 'siwc_authentication_failed';
-    process.stderr.write(`${JSON.stringify({ error: message })}\n`);
+    process.stderr.write(
+      `${JSON.stringify({
+        error: message,
+        ...(checking ? { auth } : {}),
+        ...('retryAt' in Object(error) ? { retryAt: (error as { retryAt: string }).retryAt } : {}),
+        ...(message === 'siwc_relogin_required' ? { action: 'login' } : {}),
+      })}\n`,
+    );
     process.exitCode = 1;
   }
 }

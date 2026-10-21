@@ -9,20 +9,74 @@ const modelFetch = globalThis.fetch;
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'refresh', alg: 'RS256', use: 'sig' };
 const mode = process.env.TEST_REFRESH_MODE;
+if (process.env.TEST_CHECK_MODE?.includes('timeout')) {
+  const timeout = AbortSignal.timeout;
+  AbortSignal.timeout = (milliseconds) => timeout(milliseconds === 15_000 ? 30 : milliseconds);
+}
 if (mode === 'locked' || mode === 'deadline') {
   const timeout = AbortSignal.timeout;
   AbortSignal.timeout = (milliseconds) => timeout(milliseconds === 30_000 ? 50 : milliseconds);
 }
-if (mode === 'save-failure' || mode?.startsWith('postvalidation-')) {
+if (
+  mode === 'save-failure' ||
+  mode?.startsWith('postvalidation-') ||
+  mode?.startsWith('readback-')
+) {
   const rename = fs.renameSync;
   fs.renameSync = (from, to) => {
     if (mode === 'save-failure') throw new Error('Synthetic write failure');
     rename(from, to);
-    process.kill(process.pid, mode.split('-')[1]);
+    if (mode.startsWith('readback-')) {
+      const stored = JSON.parse(fs.readFileSync(to, 'utf8'));
+      stored[mode.slice('readback-'.length)] =
+        mode === 'readback-expiresAt' ? Date.now() + 60_000 : 'synthetic-corrupt';
+      fs.writeFileSync(to, JSON.stringify(stored));
+    } else process.kill(process.pid, mode.split('-')[1]);
   };
   syncBuiltinESMExports();
 }
 globalThis.fetch = async (url, options = {}) => {
+  if (process.env.TEST_CHECK_MODE && String(url) === 'https://api.openai.com/v1/models') {
+    appendFileSync(
+      process.env.TEST_TRACE,
+      `${JSON.stringify({ url: String(url), method: options.method, headers: options.headers, signalPresent: Boolean(options.signal) })}\n`,
+    );
+    assert.equal(
+      new Headers(options.headers).get('authorization'),
+      `Bearer ${process.env.TEST_MODEL_TOKEN ?? 'synthetic-refreshed'}`,
+    );
+    const checkMode = process.env.TEST_CHECK_MODE;
+    if (checkMode === 'http') return Response.json({ error: 'RAW_PRIVATE_HTTP' }, { status: 503 });
+    if (checkMode === 'network') throw new Error('RAW_PRIVATE_NETWORK');
+    if (checkMode === 'timeout') {
+      await delay(120, undefined, { signal: options.signal });
+    }
+    if (checkMode === 'body-timeout') {
+      return {
+        ok: true,
+        text: async () => {
+          await delay(120, undefined, { signal: options.signal });
+          return JSON.stringify({ models: [] });
+        },
+      };
+    }
+    if (checkMode === 'json') return new Response('RAW_PRIVATE_JSON');
+    if (checkMode === 'large')
+      return Response.json({ models: [], metadata: 'x'.repeat(1_048_577) });
+    const checkBody = process.env.TEST_CHECK_BODY_FILE
+      ? fs.readFileSync(process.env.TEST_CHECK_BODY_FILE, 'utf8')
+      : process.env.TEST_CHECK_BODY;
+    return Response.json(
+      checkBody
+        ? JSON.parse(checkBody)
+        : {
+            models: [
+              { slug: 'hidden', display_name: 'Hidden', visibility: 'hide' },
+              { slug: 'gpt-6.1-sol', display_name: 'GPT 6.1', visibility: 'list' },
+            ],
+          },
+    );
+  }
   if (new URL(url).origin !== 'https://auth.openai.com') return modelFetch(url, options);
   appendFileSync(
     process.env.TEST_TRACE,

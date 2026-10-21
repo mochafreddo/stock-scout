@@ -45,19 +45,17 @@ function session(t, changes = {}) {
   );
   return { ...f, directory, path };
 }
-function run(f, mode = 'ok', extraEnv = {}) {
+function run(
+  f,
+  mode = 'ok',
+  extraEnv = {},
+  args = ['scripts/llm-security-probe.ts', f.directory, 'gpt-6.1-sol', '1'],
+) {
   const trace = join(f.home, 'refresh-trace');
   writeFileSync(trace, '', { mode: 0o600 });
   const result = spawnSync(
     process.execPath,
-    [
-      '--import',
-      new URL('./siwc-refresh-http-mock.mjs', import.meta.url).pathname,
-      'scripts/llm-security-probe.ts',
-      f.directory,
-      'gpt-6.1-sol',
-      '1',
-    ],
+    ['--import', new URL('./siwc-refresh-http-mock.mjs', import.meta.url).pathname, ...args],
     {
       encoding: 'utf8',
       timeout: 15000,
@@ -80,6 +78,221 @@ function run(f, mode = 'ok', extraEnv = {}) {
     requests: readFileSync(trace, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse),
   };
 }
+function check(f, mode = 'ok', extraEnv = {}) {
+  return run(f, mode, { TEST_CHECK_MODE: 'ok', ...extraEnv }, [
+    'scripts/siwc-auth.ts',
+    'check',
+    f.directory,
+  ]);
+}
+
+test('subscription check refreshes once and the next process lists models with the stored token', (t) => {
+  const f = session(t);
+  const first = check(f);
+  assert.equal(first.status, 0, first.stderr);
+  const output = JSON.parse(first.stdout);
+  assert.equal(output.status, 'connected');
+  assert.deepEqual(output.models, [{ slug: 'gpt-6.1-sol', displayName: 'GPT 6.1' }]);
+  assert.deepEqual(output.auth, {
+    status: 'refreshed',
+    refreshRequests: 1,
+    responseValidated: true,
+    credentialsStored: true,
+    storedCredentialsMatch: true,
+    accessTokenChanged: true,
+    refreshTokenChanged: true,
+    expiresAt: '2026-10-18T01:00:00.000Z',
+  });
+  assert.equal(first.requests.length, 2);
+  assert.equal(first.requests[1].url, 'https://api.openai.com/v1/models');
+  assert.equal(first.requests[1].method, 'GET');
+  assert.equal(first.requests[1].headers.Authorization, 'Bearer synthetic-refreshed');
+  const stored = readFileSync(f.path, 'utf8');
+  const second = check(f);
+  assert.equal(second.status, 0, second.stderr);
+  assert.deepEqual(JSON.parse(second.stdout).auth, {
+    status: 'reused',
+    refreshRequests: 0,
+    expiresAt: '2026-10-18T01:00:00.000Z',
+  });
+  assert.equal(second.requests.length, 1);
+  assert.equal(second.requests[0].headers.Authorization, 'Bearer synthetic-refreshed');
+  assert.equal(readFileSync(f.path, 'utf8'), stored);
+  assert.doesNotMatch(
+    first.stdout + first.stderr + second.stdout + second.stderr,
+    /synthetic-|oaiapp_|credentials\.json/,
+  );
+});
+
+test('subscription check accepts empty catalogs and preserves visible model ordering', (t) => {
+  for (const models of [
+    [],
+    [{ slug: 'hidden', visibility: 'hide' }],
+    [
+      { slug: 'z-model', display_name: 'Z model', visibility: 'list' },
+      { slug: 'a-model', display_name: 'A model', visibility: 'list' },
+    ],
+  ]) {
+    const f = session(t, { expiresAt: now + 3600_000 });
+    const result = check(f, 'ok', {
+      TEST_MODEL_TOKEN: 'synthetic-subscription',
+      TEST_CHECK_BODY: JSON.stringify({ models }),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.requests.length, 1);
+    assert.deepEqual(
+      JSON.parse(result.stdout).models,
+      models.length === 2
+        ? [
+            { slug: 'z-model', displayName: 'Z model' },
+            { slug: 'a-model', displayName: 'A model' },
+          ]
+        : [],
+    );
+  }
+});
+
+test('subscription check accepts a valid catalog larger than the token response limit', (t) => {
+  const f = session(t);
+  const result = check(f, 'ok', {
+    TEST_CHECK_BODY: JSON.stringify({
+      models: [{ slug: 'gpt-6.1-sol', display_name: 'GPT 6.1', visibility: 'list' }],
+      metadata: 'x'.repeat(600_000),
+    }),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).models, [
+    { slug: 'gpt-6.1-sol', displayName: 'GPT 6.1' },
+  ]);
+  assert.equal(result.requests.length, 2);
+});
+
+test('subscription check bounds catalog size in UTF-8 bytes', (t) => {
+  const f = session(t);
+  const bodyPath = join(f.home, 'catalog.json');
+  writeFileSync(bodyPath, JSON.stringify({ models: [], metadata: '가'.repeat(400_000) }), {
+    mode: 0o600,
+  });
+  const result = check(f, 'ok', {
+    TEST_CHECK_BODY_FILE: bodyPath,
+  });
+  assert.equal(result.status, 1);
+  assert.equal(JSON.parse(result.stderr).error, 'siwc_invalid_response');
+  assert.equal(JSON.parse(result.stderr).auth.status, 'refreshed');
+  assert.equal(result.requests.length, 2);
+});
+
+for (const mode of ['http', 'network', 'timeout', 'body-timeout', 'json', 'large']) {
+  test(`subscription check preserves a successful rotation when catalog requests fail without retry or inference: ${mode}`, (t) => {
+    const f = session(t);
+    const result = check(f, 'ok', { TEST_CHECK_MODE: mode });
+    assert.equal(result.status, 1, mode);
+    assert.equal(result.stdout, '', mode);
+    const error = JSON.parse(result.stderr);
+    assert.match(error.error, /^siwc_/, mode);
+    assert.equal(error.auth.status, 'refreshed', mode);
+    assert.equal(error.auth.credentialsStored, true, mode);
+    assert.equal(error.auth.storedCredentialsMatch, true, mode);
+    assert.equal(result.requests.length, 2, mode);
+    assert.equal(result.requests[1].signalPresent, true, mode);
+    assert.equal(JSON.parse(readFileSync(f.path, 'utf8')).refreshToken, 'synthetic-rotated');
+    assert.doesNotMatch(result.stderr, /RAW_PRIVATE|synthetic-|oaiapp_/);
+  });
+}
+
+test('subscription check rejects malformed catalogs instead of reporting an empty connected result', (t) => {
+  for (const body of [
+    null,
+    {},
+    { models: {} },
+    { models: [null] },
+    { models: [{}] },
+    { models: [{ visibility: 'list', slug: '', display_name: 'Model' }] },
+    { models: [{ visibility: 'list', slug: 'test', display_name: ' ' }] },
+    { models: [{ visibility: 'list', slug: 'test', display_name: 'bad\nname' }] },
+    {
+      models: [
+        { visibility: 'list', slug: 'test', display_name: 'Model' },
+        { visibility: 'list', slug: 'test', display_name: 'Duplicate' },
+      ],
+    },
+  ]) {
+    const f = session(t);
+    const result = check(f, 'ok', { TEST_CHECK_BODY: JSON.stringify(body) });
+    assert.equal(result.status, 1, JSON.stringify(body));
+    assert.equal(JSON.parse(result.stderr).error, 'siwc_invalid_response');
+    assert.equal(JSON.parse(result.stderr).auth.status, 'refreshed');
+    assert.equal(result.stdout, '');
+    assert.equal(result.requests.length, 2);
+  }
+});
+
+test('subscription check reports refresh progress on failure and never lists models before authentication succeeds', (t) => {
+  for (const [mode, changes, error, requests, validated] of [
+    ['ok', { earliestRefreshAt: 1792281660 }, 'siwc_refresh_not_allowed', 0, false],
+    ['network', {}, 'siwc_refresh_failed', 1, false],
+    ['missing-refresh', {}, 'siwc_invalid_response', 1, false],
+    ['save-failure', {}, 'siwc_refresh_failed', 1, true],
+    ['error:400:invalid_grant', {}, 'siwc_relogin_required', 1, false],
+  ]) {
+    const f = session(t, changes);
+    const result = check(f, mode);
+    assert.equal(result.status, 1, mode);
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, error, mode);
+    assert.equal(output.auth.status, 'pending');
+    assert.equal(output.auth.refreshRequests, requests);
+    assert.equal(output.auth.responseValidated === true, validated);
+    assert.equal(output.auth.credentialsStored, undefined);
+    assert.equal(result.stdout, '');
+    assert.equal(result.requests.length, requests);
+    if (mode === 'ok') assert.equal(output.retryAt, '2026-10-18T00:01:00.000Z');
+    if (mode.startsWith('error:')) assert.equal(output.action, 'login');
+  }
+  const f = session(t);
+  const invalid = run(f, 'ok', { TEST_CHECK_MODE: 'ok' }, [
+    'scripts/siwc-auth.ts',
+    'check',
+    f.directory,
+    'extra',
+  ]);
+  assert.equal(invalid.status, 1);
+  assert.equal(JSON.parse(invalid.stderr).error, 'siwc_usage');
+  assert.equal(invalid.requests.length, 0);
+});
+
+test('subscription check records stored rotation before honoring cancellation without listing models', (t) => {
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    const f = session(t);
+    const result = check(f, `postvalidation-${signal}`);
+    assert.equal(result.status, 1);
+    assert.equal(result.signal, null);
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, 'siwc_refresh_cancelled');
+    assert.equal(output.auth.status, 'refreshed');
+    assert.equal(output.auth.credentialsStored, true);
+    assert.equal(output.auth.storedCredentialsMatch, true);
+    assert.equal(result.requests.length, 1);
+    assert.equal(existsSync(join(f.directory, '.login.lock')), false);
+  }
+});
+
+test('subscription check rejects persisted tokens or expiration that do not match the validated response', (t) => {
+  for (const field of ['accessToken', 'refreshToken', 'expiresAt']) {
+    const f = session(t);
+    const result = check(f, `readback-${field}`);
+    assert.equal(result.status, 1, field);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, 'siwc_invalid_credentials');
+    assert.equal(output.auth.responseValidated, true);
+    assert.equal(output.auth.credentialsStored, true);
+    assert.equal(output.auth.storedCredentialsMatch, false);
+    assert.equal(output.auth.status, 'pending');
+    assert.equal(result.requests.length, 1);
+    assert.doesNotMatch(result.stderr, /synthetic-|oaiapp_|credentials\.json/);
+  }
+});
 function start(t, f, mode, name = mode, extraEnv = {}) {
   const trace = join(f.home, `${name}-trace`);
   writeFileSync(trace, '', { mode: 0o600 });
