@@ -1,6 +1,6 @@
 {
-  "sampleVersion": "2026-10-22.1",
-  "status": "partial_not_ready",
+  "sampleVersion": "2026-10-22.2",
+  "status": "sample_ready",
   "confirmedAt": "2026-10-22",
   "modelEvaluations": 0,
   "cases": [
@@ -146,18 +146,20 @@
       "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
     }
   ],
-  "missingRequiredCases": [
+  "deferredLiveCases": [
     {
       "purpose": "insufficient_evidence",
       "status": "not_acquired",
       "expectedIncluded": false,
-      "reason": "식별된 실제 증권에 대해 현재 적용 가능한 유형 근거의 부족을 독립적으로 확정한 사례를 확보하지 못했다."
+      "reason": "식별된 실제 증권에 대해 현재 적용 가능한 유형 근거의 부족을 독립적으로 확정한 사례를 확보하지 못했다.",
+      "requiredForSampleReadiness": false
     },
     {
       "purpose": "unresolved_conflicting_evidence",
       "status": "not_acquired",
       "expectedIncluded": false,
-      "reason": "같은 증권의 구체적인 유형 주장 사이에 해결되지 않은 모순이 있는 실제 사례를 확보하지 못했다."
+      "reason": "같은 증권의 구체적인 유형 주장 사이에 해결되지 않은 모순이 있는 실제 사례를 확보하지 못했다.",
+      "requiredForSampleReadiness": false
     }
   ]
 }
