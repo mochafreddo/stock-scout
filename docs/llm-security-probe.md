@@ -122,7 +122,7 @@ stdout에는 완성된 결과 JSON 한 줄만 출력합니다. `securities`에�
 
 ### 기본 실패 진단 읽기
 
-[#262](https://github.com/mochafreddo/stock-scout/issues/262)의 여섯 단계 기본 진단은 #265·#266·#267의 구현을 합쳐 제공합니다. [#265](https://github.com/mochafreddo/stock-scout/issues/265)의 입력·초기 인증 실패 진단은 [#268](https://github.com/mochafreddo/stock-scout/issues/268)·[#269](https://github.com/mochafreddo/stock-scout/issues/269)의 구현으로 제공합니다. #268의 기본 진단과 입력 경계는 [#270](https://github.com/mochafreddo/stock-scout/issues/270)·[#271](https://github.com/mochafreddo/stock-scout/issues/271)에서 구현했습니다. 유형 판단 CLI가 처리할 수 있는 실패의 기존 stderr JSON에 별도 옵션 없이 `diagnostic`을 추가합니다. `stage`·`reason`·`location`은 항상 제공하며 기존 `error`·인증 재시도 시각·로그인 안내와 종료 코드는 유지합니다. 성공 결과와 정상적인 분석 불충분에는 진단을 추가하지 않습니다. 독립된 인증·KIS 관측 CLI의 출력 계약도 유지합니다.
+[#258](https://github.com/mochafreddo/stock-scout/issues/258)의 실패 진단은 기본 단계 진단(#262), 상세 거부 사유·위치(#263), 단계별 통계(#264)를 함께 제공합니다. [#262](https://github.com/mochafreddo/stock-scout/issues/262)의 여섯 단계 기본 진단은 #265·#266·#267의 구현을 합쳐 제공합니다. [#265](https://github.com/mochafreddo/stock-scout/issues/265)의 입력·초기 인증 실패 진단은 [#268](https://github.com/mochafreddo/stock-scout/issues/268)·[#269](https://github.com/mochafreddo/stock-scout/issues/269)의 구현으로 제공합니다. #268의 기본 진단과 입력 경계는 [#270](https://github.com/mochafreddo/stock-scout/issues/270)·[#271](https://github.com/mochafreddo/stock-scout/issues/271)에서 구현했습니다. 유형 판단 CLI가 처리할 수 있는 실패의 기존 stderr JSON에 별도 옵션 없이 `diagnostic`을 추가합니다. `stage`·`reason`·`location`은 항상 제공하며 기존 `error`·인증 재시도 시각·로그인 안내와 종료 코드는 유지합니다. 성공 결과와 정상적인 분석 불충분에는 진단을 추가하지 않습니다. 독립된 인증·KIS 관측 CLI의 출력 계약도 유지합니다.
 
 인수 오류와 평가 파일 읽기·JSON 파싱·내용 검사 실패, 이 입력 범위의 예상하지 못한 예외는 [#271](https://github.com/mochafreddo/stock-scout/issues/271)에 따라 `stage: input`, `reason: unknown`, `location: null`입니다. 기존 오류 코드와 검사 순서를 유지하며 잘못된 항목을 알아도 인수 위치·평가 파일 내부 경로·파일 경로를 추가하지 않습니다. 입력 검사 뒤 초기 인증 준비 실패는 [#269](https://github.com/mochafreddo/stock-scout/issues/269)에 따라 `stage: authentication`입니다. 이 단계의 예상하지 못한 예외와 포착한 SIWC 동적 import 실패도 같은 단계를 유지하며 원인은 확인하지 못하면 `unknown`입니다. [#267](https://github.com/mochafreddo/stock-scout/issues/267)에 따라 조회 준비·실행·근거 검증 실패는 `retrieval`, 최종 판단 준비·실행·결과 검증 실패는 `judgment`, 최종 객체 구성·민감값 검사·직렬화 실패는 `output`입니다. 근거 검증과 판단 결과 검증을 각각 마친 뒤에만 다음 단계로 넘어가며 예상하지 못한 예외도 확인된 단계를 유지합니다. [#266](https://github.com/mochafreddo/stock-scout/issues/266)에 따라 순위 요청·응답 검사·입력 종목 구성과 종목 식별 실패는 `ranking`이며, 이 단계의 예상하지 못한 예외도 같은 단계를 유지합니다. #263의 응답 검증 실패는 아래 상세 진단 계약을 따르며, 위치를 특정할 수 없는 실패는 `location: null`입니다.
 
@@ -142,6 +142,39 @@ stdout에는 완성된 결과 JSON 한 줄만 출력합니다. `securities`에�
 `modelRequests`는 실제 전송을 시도한 모델 HTTP 요청 수로 실패한 시도도 포함합니다. 전송 전에 공통 한도로 차단한 요청은 포함하지 않습니다. `infoToolCalls`는 KIS 정보 조회 도구 실행 횟수이며 도구 한도로 거부된 실행도 포함합니다. 인증·재발급 등 내부 HTTP 요청 수와는 다릅니다. `observedWebToolCalls`는 단계 안에서 관측한 서로 다른 웹 도구 호출 ID 수이며 여러 이벤트나 모델 요청에 같은 ID가 반복되어도 한 번만 셉니다. 공급자 내부 HTTP 요청 수는 아닙니다. 세 종류의 호출은 합산하지 않으며 ID 원문은 진단에 넣지 않습니다.
 
 조회·판단 시간 제한과 일반 실패, 실패한 HTTP 시도, 웹 호출 ID 중복, 미시작·완료 단계 보존을 같은 공개 CLI·외부 HTTP 모의 검사로 확인합니다. 기존 호출·시간 한도와 추가 조회·재시도 금지는 유지하며 실제 KIS·OpenAI 진단 및 고정 표본 평가는 이 변경의 검증 범위 밖입니다.
+
+### 통합 실패 진단 예제
+
+필수 근거 필드가 빠진 조회 응답은 다음처럼 표시됩니다. 아래 시간과 호출 수는 통제된 모의 실행의 예시이며 실제 서비스 측정값이 아닙니다.
+
+```json
+{
+  "error": "MODEL_OUTPUT",
+  "diagnostic": {
+    "stage": "retrieval",
+    "reason": "missing_required_field",
+    "location": "evidence[1].subsequentChanges",
+    "statistics": {
+      "retrieval": {
+        "status": "failed",
+        "elapsedMs": 124,
+        "modelRequests": 2,
+        "infoToolCalls": 10,
+        "observedWebToolCalls": 0
+      },
+      "judgment": {
+        "status": "not_started",
+        "elapsedMs": null,
+        "modelRequests": 0,
+        "infoToolCalls": 0,
+        "observedWebToolCalls": 0
+      }
+    }
+  }
+}
+```
+
+`evidence[1]`은 조회 응답의 두 번째 근거입니다. 입력 종목의 두 번째 항목을 가리키지 않습니다. 이 예시는 해당 근거에 미열람 출처도 있지만 기존 검사 순서에서 필수 필드 누락을 먼저 발견한 경우입니다. 최종 판단은 시작하지 않았으며 종료 코드는 1, stdout은 비어 있습니다. 통합 회귀 검사는 응답 순서 변경, 첫 거부 사유·안전한 위치, 단계 통계와 추가 요청 방지를 함께 확인합니다.
 
 ## 로컬 검증과 실제 평가
 

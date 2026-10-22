@@ -1371,3 +1371,71 @@ test('CLI reports safe response paths and preserves the original first-rejection
     });
   }
 });
+
+test('CLI integrates response-location rejection and stage statistics for reordered evidence', (t) => {
+  const record = {
+    exchange: 'NAS',
+    symbol: 'GOOG',
+    source: 'kis:NAS:GOOG',
+    excerpt: 'Common stock',
+    identityLink: 'Individual security',
+    asOf: '2026-10-18',
+    effectiveDate: '2026-10-18',
+    subsequentChanges: 'No change',
+    currentness: 'Current',
+  };
+  const invalid = {
+    ...record,
+    symbol: 'AAPL',
+    source: 'private-source synthetic-subscription',
+    'private-field': '/private/path',
+  };
+  delete invalid.subsequentChanges;
+  const result = run(t, 'types', {
+    TEST_STATISTICS_CLOCK: '1',
+    TEST_RESPONSE_STAGE: 'retrieval',
+    TEST_RESPONSE_VALUE: JSON.stringify({ evidence: [record, invalid] }),
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'MODEL_OUTPUT',
+    diagnostic: {
+      stage: 'retrieval',
+      reason: 'missing_required_field',
+      location: 'evidence[1].subsequentChanges',
+      statistics: {
+        retrieval: {
+          status: 'failed',
+          elapsedMs: 124,
+          modelRequests: 2,
+          infoToolCalls: 10,
+          observedWebToolCalls: 0,
+        },
+        judgment: {
+          status: 'not_started',
+          elapsedMs: null,
+          modelRequests: 0,
+          infoToolCalls: 0,
+          observedWebToolCalls: 0,
+        },
+      },
+    },
+  });
+  assert.doesNotMatch(result.stderr, /private-|private.path|synthetic-|test-key|test-secret/);
+  const models = result.requests.filter((request) => request.url.endsWith('/responses'));
+  assert.equal(models.length, 2);
+  const prompt = JSON.parse(
+    models[0].body.input.find((item) => item.role === 'user').content[0].text,
+  );
+  assert.equal(prompt.securities[0].symbol, 'AAPL');
+  assert.ok(
+    models.every((request) => request.body.tools.some((tool) => tool.type === 'web_search')),
+  );
+  const lookups = result.requests.filter((request) => request.url.includes('/search-info?'));
+  assert.equal(lookups.length, 10);
+  assert.deepEqual(Object.fromEntries(new URL(lookups[0].url).searchParams), {
+    PRDT_TYPE_CD: '512',
+    PDNO: 'AAPL',
+  });
+});
