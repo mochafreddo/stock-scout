@@ -578,13 +578,13 @@ test('CLI refuses unbounded paid search even when an API key exists after subscr
   assert.doesNotMatch(result.stderr, /synthetic-paid/);
 });
 
-test('CLI reports a confirmed ranking incompleteness reason independently of its unknown stage', (t) => {
+test('CLI reports ranking incompleteness in the ranking stage', (t) => {
   const result = run(t, 'ranking-incomplete');
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
   assert.deepEqual(JSON.parse(result.stderr), {
     error: 'RANKING_INCOMPLETE',
-    diagnostic: { stage: 'unknown', reason: 'RANKING_INCOMPLETE', location: null },
+    diagnostic: { stage: 'ranking', reason: 'RANKING_INCOMPLETE', location: null },
   });
   assert.equal(result.requests.length, 1);
   const url = new URL(result.requests[0].url);
@@ -614,7 +614,7 @@ test('CLI carries confirmed identity and sensitive-output reasons from their int
       diagnostic: {
         stage:
           scenario === 'identity-conflict'
-            ? 'unknown'
+            ? 'ranking'
             : scenario === 'ambiguous'
               ? 'judgment'
               : 'output',
@@ -715,7 +715,7 @@ test('CLI does not trust known identifiers, prefixes or reason properties on ext
 
 test('CLI separates aggregated failures from a confirmed model authentication failure', (t) => {
   for (const [scenario, error, stage, reason] of [
-    ['rank-failure', 'RANKING_FAILED', 'unknown', 'unknown'],
+    ['rank-failure', 'RANKING_FAILED', 'ranking', 'unknown'],
     ['global-lookup', 'QUERY_FAILED', 'retrieval', 'unknown'],
     ['malformed-judgment', 'MODEL_OUTPUT', 'judgment', 'unknown'],
     ['auth-failure', 'AUTH_FAILED', 'retrieval', 'AUTH_FAILED'],
@@ -958,5 +958,77 @@ test('CLI leaves unregistered HTTP exceptions unknown within the active model st
         calls === 1 ? 0 : 1,
       );
     }
+  }
+});
+
+test('CLI preserves ranking failures and confirmed authentication causes without extra requests', (t) => {
+  for (const [scenario, count, reason] of [
+    ['rank-failure', 5, 'unknown'],
+    ['ranking-shape', 1, 'unknown'],
+    ['ranking-invalid-row', 1, 'unknown'],
+    ['ranking-first-failure', 2, 'unknown'],
+    ['ranking-http-auth', 1, 'unknown'],
+    ['ranking-auth', 2, 'AUTH_FAILED'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, scenario + result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'RANKING_FAILED',
+      diagnostic: { stage: 'ranking', reason, location: null },
+    });
+    assert.equal(result.requests.length, count, scenario);
+    for (const [index, request] of result.requests.entries()) {
+      const url = new URL(request.url);
+      assert.equal(url.origin, 'https://openapi.koreainvestment.com:9443');
+      if (scenario === 'ranking-auth' && index === 1) {
+        assert.equal(url.pathname, '/oauth2/tokenP');
+        assert.deepEqual(request.body, {
+          grant_type: 'client_credentials',
+          appkey: 'test-key',
+          appsecret: 'test-secret',
+        });
+        continue;
+      }
+      assert.equal(
+        url.pathname,
+        index % 2 === 0
+          ? '/uapi/overseas-stock/v1/ranking/trade-vol'
+          : '/uapi/overseas-stock/v1/ranking/trade-pbmn',
+      );
+      assert.deepEqual(Object.fromEntries(url.searchParams), {
+        EXCD: ['NAS', 'NYS', 'AMS'][Math.floor(index / 2)],
+        NDAY: '0',
+        VOL_RANG: '0',
+        KEYB: '',
+        AUTH: '',
+        PRC1: '',
+        PRC2: '',
+      });
+      assert.equal(request.body, null);
+    }
+    assert.doesNotMatch(result.stderr, /synthetic-|test-key|test-secret|private-|EGW00123/);
+  }
+});
+
+test('CLI keeps unexpected ranking HTTP exceptions unknown without trusting messages or fields', (t) => {
+  for (const message of [
+    'AUTH_FAILED',
+    'siwc_relogin_required',
+    'private-sentinel /private/path synthetic-subscription',
+  ]) {
+    const result = run(t, 'ranking-exception', { TEST_RANKING_EXCEPTION: message });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'RANKING_FAILED',
+      diagnostic: { stage: 'ranking', reason: 'unknown', location: null },
+    });
+    assert.equal(result.requests.length, 1);
+    assert.equal(
+      new URL(result.requests[0].url).pathname,
+      '/uapi/overseas-stock/v1/ranking/trade-vol',
+    );
+    assert.doesNotMatch(result.stderr, /private-|synthetic-|EGW00123|siwc_/);
   }
 });

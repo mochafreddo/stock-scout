@@ -142,6 +142,26 @@ globalThis.fetch = async (url, init = {}) => {
     if (request.pathname === '/oauth2/tokenP')
       return Response.json({ error: 'synthetic-subscription' }, { status: 401 });
     assert.equal(init.headers.authorization, 'Bearer test-token');
+    if (request.pathname.includes('/ranking/')) {
+      assert.equal(init.headers.appkey, 'test-key');
+      assert.equal(init.headers.appsecret, 'test-secret');
+      assert.equal(init.headers.custtype, 'P');
+      assert.equal(
+        init.headers.tr_id,
+        request.pathname.endsWith('trade-vol') ? 'HHDFS76310010' : 'HHDFS76320010',
+      );
+      assert.equal(init.redirect, 'error');
+      assert.ok(init.signal instanceof AbortSignal);
+      if (scenario === 'ranking-auth') return Response.json({ rt_cd: '1', msg_cd: 'EGW00123' });
+      if (scenario === 'ranking-http-auth')
+        return Response.json({ msg_cd: 'EGW00123', rt_cd: '0' }, { status: 401 });
+      if (scenario === 'ranking-exception')
+        throw Object.assign(new Error(process.env.TEST_RANKING_EXCEPTION), {
+          reason: 'AUTH_FAILED',
+          providerCode: 'EGW00123',
+          location: 'private-field.private-value',
+        });
+    }
     const body = { rt_cd: '0', msg_cd: 'MCA00000', output1: { nrec: '0' }, output2: [] };
     if (request.pathname.endsWith('search-info')) {
       if (scenario === 'retrieval-blocked') {
@@ -206,6 +226,17 @@ globalThis.fetch = async (url, init = {}) => {
     if (scenario === 'ranking-incomplete') {
       body.output1.nrec = '0';
       body.output2 = [];
+      return Response.json(body, { headers: { tr_cont: 'F' } });
+    }
+    if (scenario === 'ranking-shape') body.output2 = { 'private-field': 'private-value' };
+    if (scenario === 'ranking-invalid-row') {
+      body.output2[0].rank = 'private-value';
+      body.output2[0].symb = 'private-symbol';
+      return Response.json(body, { headers: { tr_cont: 'F' } });
+    }
+    if (scenario === 'ranking-first-failure' && request.pathname.endsWith('trade-pbmn')) {
+      body.output2[0].rank = '0';
+      body.output2[0].rsym = 'DIFFERENT';
       return Response.json(body, { headers: { tr_cont: 'F' } });
     }
     return Response.json(body, { headers: { tr_cont: 'D' } });

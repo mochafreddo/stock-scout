@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { DiagnosticError } from './diagnostic-error.ts';
+import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 import {
   type AssessmentStage,
@@ -29,7 +30,7 @@ const safeCodes = [
   'ANALYSIS_INSUFFICIENT',
 ];
 const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
-let stage: 'input' | 'authentication' | 'unknown' | AssessmentStage = 'input';
+let stage: 'input' | 'authentication' | 'ranking' | 'unknown' | AssessmentStage = 'input';
 try {
   const [directory, model, top, ...extra] = process.argv.slice(2);
   const evaluation = top === '--evaluation-input';
@@ -93,12 +94,15 @@ try {
     process.env.OPENAI_API_KEY,
   ];
   if (!evaluation) {
+    stage = 'ranking';
     for (const exchange of exchanges)
       for (const kind of ['volume', 'amount'] as const) {
         let record: Awaited<ReturnType<typeof queryKis>>;
         try {
           record = await queryKis(kind, exchange);
-        } catch {
+        } catch (error) {
+          if (error instanceof AuthError)
+            throw new DiagnosticError('AUTH_FAILED', 'RANKING_FAILED');
           throw new Error('RANKING_FAILED');
         }
         const ranks = new Set<number>();
