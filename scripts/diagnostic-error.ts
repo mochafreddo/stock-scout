@@ -2,7 +2,6 @@ type DiagnosticReason =
   | 'unknown'
   | 'missing_required_field'
   | 'unobserved_source'
-  | 'unknown_evidence_id'
   | 'cross_security_evidence'
   | 'RANKING_INCOMPLETE'
   | 'IDENTITY_AMBIGUOUS'
@@ -18,11 +17,10 @@ type DiagnosticReason =
   | 'siwc_relogin_required';
 
 type ResponseLocation =
-  | `evidence[${number}]`
-  | `evidence[${number}].${'exchange' | 'symbol' | 'sourceId' | 'excerpt' | 'identityLink' | 'asOf' | 'effectiveDate' | 'subsequentChanges' | 'currentness'}`
   | `judgments[${number}]`
   | `judgments[${number}].${'exchange' | 'symbol' | 'type' | 'identity' | 'applicable' | 'reason' | 'evidence'}`
-  | `judgments[${number}].evidence[${number}]`;
+  | `judgments[${number}].evidence[${number}]`
+  | `judgments[${number}].evidence[${number}].${'sourceId' | 'explanation'}`;
 
 export class DiagnosticError extends Error {
   readonly reason: DiagnosticReason;

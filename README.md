@@ -9,7 +9,7 @@
 | KIS 관측 CLI | 구현됨. NAS·NYS·AMS에서 한 페이지를 조회하고 선택한 필드를 JSON으로 출력합니다. |
 | KIS 자동 토큰 발급·캐시 | [#247](https://github.com/mochafreddo/stock-scout/issues/247)에서 발급·캐시 재사용을, [#248](https://github.com/mochafreddo/stock-scout/issues/248)에서 명시적 만료의 한 번 복구를 구현했습니다. 첫 실행은 5분 대기를 기록하며 복구에도 같은 발급 제한을 적용합니다. 실제 만료 복구는 미검증입니다. |
 | 장전 후보군 조회 | [#239](https://github.com/mochafreddo/stock-scout/issues/239)의 계획입니다. 데이터 의미·종목 유형·지원 시간 검증이 남아 있습니다. |
-| LLM 종목 유형 검증 | [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 작은 검증 흐름을 구현했습니다. 공식 로그인과 실제 KIS·검색 도구 연결은 확인했습니다. 근거 URL 연결 오류와 실행 시간 제한으로 최종 유형 결과·정확도 평가는 미완료입니다. [현재 검증 상태](docs/llm-security-probe.md#현재-검증-상태)를 확인하세요. |
+| LLM 종목 유형 검증 | [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 작은 검증 흐름을 구현했습니다. 공식 로그인과 실제 KIS·검색 도구 연결은 확인했습니다. 단일 모델 흐름으로 고정 입력의 최종 결과를 확인했습니다. 실제 여섯 순위 실행은 증권 식별 모호함으로 실패했고 독립 정확도 점검도 남아 있습니다. [현재 검증 상태](docs/llm-security-probe.md#현재-검증-상태)를 확인하세요. |
 | AI 매수 후보 추천 | #237의 계획입니다. 유형 검증 흐름을 추천·장전 보고서에 연결하는 작업은 남아 있습니다. |
 
 ## 시작하기

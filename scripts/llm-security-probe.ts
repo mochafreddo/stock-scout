@@ -202,7 +202,7 @@ try {
         stage,
         reason: error instanceof DiagnosticError ? error.reason : 'unknown',
         location: error instanceof DiagnosticError ? error.location : null,
-        ...(['retrieval', 'judgment'].includes(stage) && statistics ? { statistics } : {}),
+        ...(['assessment'].includes(stage) && statistics ? { statistics } : {}),
         ...(inputSnapshot &&
         !snapshotSecrets.some((secret) => secret && JSON.stringify(inputSnapshot).includes(secret))
           ? { inputSnapshot }

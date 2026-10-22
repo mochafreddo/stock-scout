@@ -72,7 +72,7 @@ if (process.env.TEST_STORAGE_EXCEPTION) {
   };
   syncBuiltinESMExports();
 }
-if (['retrieval-blocked', 'judgment-blocked'].includes(scenario)) {
+if (['info-blocked', 'model-blocked'].includes(scenario)) {
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, delay, ...args) =>
     originalSetTimeout(
@@ -80,10 +80,7 @@ if (['retrieval-blocked', 'judgment-blocked'].includes(scenario)) {
         tickClock(delay);
         callback(...args);
       },
-      (scenario === 'retrieval-blocked' && delay === 120_000) ||
-        (scenario === 'judgment-blocked' && delay === 180_000)
-        ? 10
-        : delay,
+      delay === 180_000 ? 10 : delay,
       ...args,
     );
 }
@@ -233,7 +230,7 @@ globalThis.fetch = async (url, init = {}) => {
     }
     const body = { rt_cd: '0', msg_cd: 'MCA00000', output1: { nrec: '0' }, output2: [] };
     if (request.pathname.endsWith('search-info')) {
-      if (scenario === 'retrieval-blocked') {
+      if (scenario === 'info-blocked') {
         setTimeout(() => {}, 30);
         return new Promise(() => {});
       }
@@ -377,23 +374,22 @@ globalThis.fetch = async (url, init = {}) => {
     assert.ok(!(key in body), key);
   assert.ok(body.input.every((item) => item.role !== 'system'));
   const prompt = JSON.parse(body.input.find((item) => item.role === 'user').content[0].text);
-  const judging = prompt.stage === 'judgment';
-  if (prompt.stage === process.env.TEST_HTTP_EXCEPTION_STAGE)
+  assert.equal(prompt.stage, 'assessment');
+  assert.equal(prompt.evidenceRecords, undefined);
+  if (
+    prompt.stage === process.env.TEST_HTTP_EXCEPTION_STAGE &&
+    modelRequests === Number(process.env.TEST_HTTP_EXCEPTION_AFTER ?? 0)
+  )
     throw Object.assign(new Error(process.env.TEST_HTTP_EXCEPTION), { reason: 'AUTH_FAILED' });
-  if (judging && scenario === 'judgment-blocked') {
+  if (scenario === 'model-blocked') {
     setTimeout(() => {}, 30);
     return new Promise(() => {});
   }
-  if (judging && process.env.TEST_WALL_CLOCK_SHIFT)
+  if (process.env.TEST_WALL_CLOCK_SHIFT && modelRequests > 0)
     mock.timers.setTime(Date.now() + Number(process.env.TEST_WALL_CLOCK_SHIFT));
-  if (judging) {
-    assert.equal(body.tools?.length ?? 0, 0);
-    assert.ok(prompt.evidenceRecords);
-  } else {
-    assert.ok(body.tools.some((item) => item.type === 'web_search'));
-    assert.ok(body.tools.some((item) => item.type === 'namespace' && item.name === 'stock_scout'));
-    assert.ok(body.tools.every((item) => ['namespace', 'web_search'].includes(item.type)));
-  }
+  assert.ok(body.tools.some((item) => item.type === 'web_search'));
+  assert.ok(body.tools.some((item) => item.type === 'namespace' && item.name === 'stock_scout'));
+  assert.ok(body.tools.every((item) => ['namespace', 'web_search'].includes(item.type)));
   if (scenario.startsWith('catalog') || scenario === 'opened-source') {
     const catalogSource =
       scenario === 'opened-source'
@@ -456,15 +452,13 @@ globalThis.fetch = async (url, init = {}) => {
         completed,
       ]);
     }
-    const catalog = judging
-      ? undefined
-      : JSON.parse(
-          body.input.find(
-            (item) => item.type === 'function_call_output' && item.call_id === 'call_sources',
-          ).output,
-        );
-    if (!judging) assert.deepEqual(catalog, [{ id: 's1', source: catalogSource }]);
-    if (scenario === 'catalog-model-limit' && modelRequests < 12) {
+    const catalog = JSON.parse(
+      body.input.find(
+        (item) => item.type === 'function_call_output' && item.call_id === 'call_sources',
+      ).output,
+    );
+    assert.deepEqual(catalog, [{ id: 's1', source: catalogSource }]);
+    if (scenario === 'catalog-model-limit' && modelRequests < 13) {
       const call = {
         type: 'function_call',
         id: `fc_sources_${modelRequests}`,
@@ -487,41 +481,30 @@ globalThis.fetch = async (url, init = {}) => {
         completed,
       ]);
     }
-    if (scenario === 'catalog-overrun' && !judging) tickClock(120_000);
-    const value = judging
-      ? {
-          judgments: [
-            {
-              exchange: 'NAS',
-              symbol: 'AAPL',
-              type: 'common',
-              identity: 'confirmed',
-              applicable: true,
-              reason: 'Controlled current common stock source.',
-              evidence: ['e1'],
-            },
-          ],
-        }
-      : {
+    if (scenario === 'catalog-overrun') tickClock(180_000);
+    const value = {
+      judgments: [
+        {
+          exchange: 'NAS',
+          symbol: 'AAPL',
+          type: 'common',
+          identity: 'confirmed',
+          applicable: true,
+          reason: 'Controlled current common stock source.',
           evidence: [
             {
-              exchange: 'NAS',
-              symbol: 'AAPL',
               sourceId:
                 scenario === 'catalog-unknown-id'
                   ? 's999'
                   : scenario === 'catalog-search-only-id'
                     ? 'https://example.org/search-only'
                     : catalog[0].id,
-              excerpt: 'Common stock in a controlled opened source.',
-              identityLink: 'NAS/AAPL security-level connection.',
-              asOf: '2026-10-18',
-              effectiveDate: '2026-10-18',
-              subsequentChanges: 'Controlled check found no change.',
-              currentness: 'Controlled current applicability.',
+              explanation: 'Common stock in a controlled opened source.',
             },
           ],
-        };
+        },
+      ],
+    };
     const text = JSON.stringify(value);
     return sse([
       {
@@ -552,7 +535,7 @@ globalThis.fetch = async (url, init = {}) => {
       completed,
     ]);
   }
-  if (++modelRequests === 1 || (scenario === 'model-limit' && modelRequests < 12)) {
+  if (++modelRequests === 1 || (scenario === 'model-limit' && modelRequests < 13)) {
     const callSamples =
       scenario === 'info-limit'
         ? Array.from({ length: 33 }, () => samples[0])
@@ -635,23 +618,16 @@ globalThis.fetch = async (url, init = {}) => {
           : [completed]),
     ]);
   }
-  assert.ok(
-    modelRequests === 2 ||
-      (judging && modelRequests === 3) ||
-      (scenario === 'model-limit' && modelRequests === 12),
-  );
+  assert.ok(modelRequests === 2);
   const toolResult = body.input.find((item) => item.type === 'function_call_output');
   for (const item of body.input.filter((item) => item.type === 'function_call_output')) {
     const output = JSON.parse(item.output);
     if (output.sourceId) sourceIds.set(output.source, output.sourceId);
     if (Array.isArray(output)) for (const source of output) sourceIds.set(source.source, source.id);
   }
-
-  if (!judging) {
-    assert.ok(toolResult, 'Full tool history must reach the next request');
-    if (scenario === 'individual-lookup') assert.match(toolResult.output, /SECURITY_LOOKUP_FAILED/);
-    else if (scenario !== 'global-lookup') assert.match(toolResult.output, /sourceId/);
-  }
+  assert.ok(toolResult, 'Full tool history must reach the next request');
+  if (scenario === 'individual-lookup') assert.match(toolResult.output, /SECURITY_LOOKUP_FAILED/);
+  else if (scenario !== 'global-lookup') assert.match(toolResult.output, /sourceId/);
   if (
     [
       'unknown',
@@ -693,66 +669,41 @@ globalThis.fetch = async (url, init = {}) => {
         },
   };
   if (scenario === 'search-scope-unknown') delete webItem.action;
-  let value;
-  if (judging) {
-    value = {
-      judgments: assessment.judgments.map((judgment) => ({
-        ...judgment,
-        evidence: prompt.evidenceRecords
-          .filter(
-            (record) => record.exchange === judgment.exchange && record.symbol === judgment.symbol,
-          )
-          .map((record) => record.id),
+  let value = {
+    judgments: assessment.judgments.map((judgment) => ({
+      ...judgment,
+      evidence: judgment.evidence.map((evidence) => ({
+        sourceId: sourceIds.get(evidence.source) ?? 's999',
+        explanation: evidence.detail,
       })),
-    };
-    if (scenario === 'off-ranking') value.judgments[0].symbol = 'MSFT';
-    if (['ambiguous', 'ambiguous-sensitive'].includes(scenario))
-      value.judgments[0].identity = 'ambiguous';
-    if (['sensitive-judgment', 'ambiguous-sensitive'].includes(scenario))
-      value.judgments[0].reason = 'synthetic-subscription';
-    if (scenario === 'malformed-judgment') value.judgments[0].applicable = 'true';
-    if (scenario === 'missing-result') value.judgments = [];
-    if (scenario === 'duplicate-result') value.judgments.push(value.judgments[0]);
-    if (scenario === 'forged-provenance') {
-      value.judgments[0].rsym = 'FORGED';
-      value.judgments[0].rankings = [];
-    }
-    if (scenario === 'invented-id') value.judgments[0].evidence = ['e999'];
-    if (scenario === 'url-instead-of-id') value.judgments[0].evidence = ['kis:NAS:AAPL'];
-    if (scenario === 'types-cross-id') value.judgments[0].evidence = ['e2'];
-    if (scenario.startsWith('types-partial-')) value.judgments[1].evidence = [];
-    if (scenario === 'types-partial-invalid-id') value.judgments[2].evidence = ['e999'];
-    if (scenario === 'types-partial-cross-id') value.judgments[2].evidence = ['e1'];
-    if (scenario === 'types-partial-ambiguous') value.judgments[2].identity = 'ambiguous';
-    if (scenario === 'malformed-context-identity') value.judgments[0].evidence = ['e1'];
-  } else {
-    value = {
-      evidence: assessment.judgments.flatMap((judgment) =>
-        judgment.evidence.map((evidence) => ({
-          exchange: judgment.exchange,
-          symbol: judgment.symbol,
-          sourceId: sourceIds.get(evidence.source) ?? 's999',
-          excerpt: evidence.detail,
-          identityLink:
-            scenario === 'kis-name-only'
-              ? 'KIS identifies the requested AMS/SPY security.'
-              : `Matched individual ${judgment.exchange}/${judgment.symbol} exchange and symbol.`,
-          asOf: evidence.asOf,
-          effectiveDate: scenario === 'kis-name-only' ? 'unknown' : '2026-10-18',
-          subsequentChanges:
-            scenario === 'kis-name-only'
-              ? 'No subsequent changes checked.'
-              : 'Controlled subsequent-change check found no change.',
-          currentness: evidence.currentness,
-        })),
-      ),
-    };
-    if (scenario === 'missing-context') delete value.evidence[0].subsequentChanges;
-    if (scenario === 'malformed-context-identity') value.evidence[0].exchange = ['NAS'];
+    })),
+  };
+  if (scenario === 'off-ranking') value.judgments[0].symbol = 'MSFT';
+  if (['ambiguous', 'ambiguous-sensitive'].includes(scenario))
+    value.judgments[0].identity = 'ambiguous';
+  if (['sensitive-judgment', 'ambiguous-sensitive'].includes(scenario))
+    value.judgments[0].reason = 'synthetic-subscription';
+  if (scenario === 'malformed-judgment') value.judgments[0].applicable = 'true';
+  if (scenario === 'missing-result') value.judgments = [];
+  if (scenario === 'duplicate-result') value.judgments.push(value.judgments[0]);
+  if (scenario === 'forged-provenance') {
+    value.judgments[0].rsym = 'FORGED';
+    value.judgments[0].rankings = [];
   }
-  if (['within-deadlines', 'judgment-overrun'].includes(scenario))
-    tickClock(judging ? (scenario === 'judgment-overrun' ? 61_000 : 59_000) : 119_000);
-  if (scenario === 'retrieval-overrun' && !judging) tickClock(120_000);
+  if (scenario === 'invented-id') value.judgments[0].evidence[0].sourceId = 's999';
+  if (scenario === 'url-instead-of-id') value.judgments[0].evidence[0].sourceId = 'kis:NAS:AAPL';
+  if (scenario === 'types-cross-id')
+    value.judgments[0].evidence[0].sourceId = sourceIds.get('kis:NAS:GOOG');
+  if (scenario.startsWith('types-partial-')) value.judgments[1].evidence = [];
+  if (scenario === 'types-partial-invalid-id') value.judgments[2].evidence[0].sourceId = 's999';
+  if (scenario === 'types-partial-cross-id')
+    value.judgments[2].evidence[0].sourceId = sourceIds.get('kis:NAS:AAPL');
+  if (scenario === 'types-partial-ambiguous') value.judgments[2].identity = 'ambiguous';
+  if (scenario === 'missing-explanation') delete value.judgments[0].evidence[0].explanation;
+  if (scenario === 'malformed-evidence') value.judgments[0].evidence[0].explanation = ['Common'];
+  if (scenario === 'past-former-deadline') tickClock(120_000);
+  if (scenario === 'within-deadline') tickClock(179_000);
+  if (scenario === 'assessment-overrun') tickClock(180_000);
   if (prompt.stage === process.env.TEST_RESPONSE_STAGE)
     value = JSON.parse(process.env.TEST_RESPONSE_VALUE);
   const text = JSON.stringify(value);
@@ -763,11 +714,7 @@ globalThis.fetch = async (url, init = {}) => {
       output_index: 0,
       item: { type: 'message', id: 'msg_result' },
     },
-    ...(judging && scenario === 'judgment-web-call'
-      ? [{ type: 'response.output_item.done', output_index: 1, item: webItem }]
-      : []),
-    ...(!judging &&
-    [
+    ...([
       'search-only',
       'opened-source',
       'search-failed',
@@ -783,7 +730,7 @@ globalThis.fetch = async (url, init = {}) => {
           { type: 'response.output_item.done', output_index: 1, item: webItem },
         ]
       : []),
-    ...(!judging && scenario === 'web-duplicates'
+    ...(scenario === 'web-duplicates'
       ? [
           {
             type: 'response.output_item.added',
@@ -798,7 +745,7 @@ globalThis.fetch = async (url, init = {}) => {
           { type: 'response.output_item.done', output_index: 9, item: webItem },
         ]
       : []),
-    ...(!judging && scenario === 'web-limit'
+    ...(scenario === 'web-limit'
       ? Array.from({ length: 33 }, (_, index) => [
           {
             type: 'response.output_item.added',
@@ -823,7 +770,7 @@ globalThis.fetch = async (url, init = {}) => {
         content: [{ type: 'output_text', text, annotations: [] }],
       },
     },
-    ...(judging && scenario === 'missing-final-completion'
+    ...(scenario === 'missing-final-completion'
       ? []
       : [
           scenario === 'incomplete'
