@@ -13,6 +13,7 @@ function tickClock(milliseconds) {
 const usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
 const completed = { type: 'response.completed', response: { usage } };
 let modelRequests = 0;
+const sourceIds = new Map();
 const scenario = process.env.SCENARIO;
 if (process.env.TEST_SERIALIZATION_STAGE) {
   const stringify = JSON.stringify;
@@ -270,7 +271,7 @@ globalThis.fetch = async (url, init = {}) => {
     `Bearer ${process.env.TEST_MODEL_TOKEN ?? 'synthetic-subscription'}`,
   );
   if (request.pathname === '/v1/models')
-    return Response.json({ models: [{ slug: 'gpt-6.1-sol', visibility: 'list' }] });
+    return Response.json({ models: [{ slug: 'gpt-6-luna', visibility: 'list' }] });
   assert.equal(request.pathname, '/v1/responses');
   if (process.env.SCENARIO === 'auth-failure')
     return Response.json(
@@ -292,7 +293,7 @@ globalThis.fetch = async (url, init = {}) => {
   const body = JSON.parse(init.body);
   assert.equal(body.stream, true);
   assert.equal(body.store, false);
-  assert.equal(body.model, 'gpt-6.1-sol');
+  assert.equal(body.model, process.env.TEST_MODEL ?? 'gpt-6-luna');
   for (const key of [
     'max_output_tokens',
     'max_tool_calls',
@@ -320,6 +321,164 @@ globalThis.fetch = async (url, init = {}) => {
     assert.ok(body.tools.some((item) => item.type === 'web_search'));
     assert.ok(body.tools.some((item) => item.type === 'namespace' && item.name === 'stock_scout'));
     assert.ok(body.tools.every((item) => ['namespace', 'web_search'].includes(item.type)));
+  }
+  if (scenario.startsWith('catalog') || scenario === 'opened-source') {
+    const catalogSource =
+      scenario === 'opened-source'
+        ? 'https://www.sec.gov/sample'
+        : 'https://www.sec.gov/catalog-source';
+    modelRequests++;
+    if (modelRequests === 1) {
+      const web = (id, action, status = 'completed') => [
+        {
+          type: 'response.output_item.added',
+          output_index: Number(id.slice(2)),
+          item: { type: 'web_search_call', id, status: 'in_progress' },
+        },
+        {
+          type: 'response.output_item.done',
+          output_index: Number(id.slice(2)),
+          item: { type: 'web_search_call', id, status, action },
+        },
+      ];
+      const call = {
+        type: 'function_call',
+        id: 'fc_sources',
+        call_id: 'call_sources',
+        name: 'list_sources',
+        namespace: 'stock_scout',
+        arguments: '{}',
+      };
+      return sse([
+        {
+          type: 'response.created',
+          response: { id: 'catalog_research', model: body.model, created_at: 1 },
+        },
+        ...web('ws1', {
+          type: 'search',
+          queries: ['controlled source'],
+          sources: [{ type: 'url', url: 'https://example.org/search-only' }],
+        }),
+        ...web('ws2', {
+          type: 'open_page',
+          url:
+            scenario === 'catalog-sensitive'
+              ? `${catalogSource}/synthetic-subscription`
+              : catalogSource,
+        }),
+        ...web('ws3', {
+          type: 'find_in_page',
+          url:
+            scenario === 'catalog-sensitive'
+              ? `${catalogSource}/synthetic-subscription`
+              : catalogSource,
+          pattern: 'common stock',
+        }),
+        ...web('ws4', { type: 'open_page', url: 'https://example.org/failed' }, 'failed'),
+        { type: 'response.output_item.added', output_index: 5, item: call },
+        {
+          type: 'response.output_item.done',
+          output_index: 5,
+          item: { ...call, status: 'completed' },
+        },
+        completed,
+      ]);
+    }
+    const catalog = judging
+      ? undefined
+      : JSON.parse(
+          body.input.find(
+            (item) => item.type === 'function_call_output' && item.call_id === 'call_sources',
+          ).output,
+        );
+    if (!judging) assert.deepEqual(catalog, [{ id: 's1', source: catalogSource }]);
+    if (scenario === 'catalog-model-limit' && modelRequests < 12) {
+      const call = {
+        type: 'function_call',
+        id: `fc_sources_${modelRequests}`,
+        call_id: `call_sources_${modelRequests}`,
+        name: 'list_sources',
+        namespace: 'stock_scout',
+        arguments: '{}',
+      };
+      return sse([
+        {
+          type: 'response.created',
+          response: { id: `catalog_loop_${modelRequests}`, model: body.model, created_at: 1 },
+        },
+        { type: 'response.output_item.added', output_index: 0, item: call },
+        {
+          type: 'response.output_item.done',
+          output_index: 0,
+          item: { ...call, status: 'completed' },
+        },
+        completed,
+      ]);
+    }
+    if (scenario === 'catalog-overrun' && !judging) tickClock(120_000);
+    const value = judging
+      ? {
+          judgments: [
+            {
+              exchange: 'NAS',
+              symbol: 'AAPL',
+              type: 'common',
+              identity: 'confirmed',
+              applicable: true,
+              reason: 'Controlled current common stock source.',
+              evidence: ['e1'],
+            },
+          ],
+        }
+      : {
+          evidence: [
+            {
+              exchange: 'NAS',
+              symbol: 'AAPL',
+              sourceId:
+                scenario === 'catalog-unknown-id'
+                  ? 's999'
+                  : scenario === 'catalog-search-only-id'
+                    ? 'https://example.org/search-only'
+                    : catalog[0].id,
+              excerpt: 'Common stock in a controlled opened source.',
+              identityLink: 'NAS/AAPL security-level connection.',
+              asOf: '2026-10-18',
+              effectiveDate: '2026-10-18',
+              subsequentChanges: 'Controlled check found no change.',
+              currentness: 'Controlled current applicability.',
+            },
+          ],
+        };
+    const text = JSON.stringify(value);
+    return sse([
+      {
+        type: 'response.created',
+        response: { id: `catalog_${modelRequests}`, model: body.model, created_at: 1 },
+      },
+      {
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: { type: 'message', id: 'catalog_message', role: 'assistant', content: [] },
+      },
+      {
+        type: 'response.output_text.delta',
+        output_index: 0,
+        item_id: 'catalog_message',
+        delta: text,
+      },
+      {
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: {
+          type: 'message',
+          id: 'catalog_message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text, annotations: [] }],
+        },
+      },
+      completed,
+    ]);
   }
   if (++modelRequests === 1 || (scenario === 'model-limit' && modelRequests < 12)) {
     const callSamples =
@@ -378,6 +537,11 @@ globalThis.fetch = async (url, init = {}) => {
       (scenario === 'model-limit' && modelRequests === 12),
   );
   const toolResult = body.input.find((item) => item.type === 'function_call_output');
+  for (const item of body.input.filter((item) => item.type === 'function_call_output')) {
+    const output = JSON.parse(item.output);
+    if (output.sourceId) sourceIds.set(output.source, output.sourceId);
+  }
+
   if (!judging) {
     assert.ok(toolResult, 'Full tool history must reach the next request');
     if (scenario === 'individual-lookup') assert.match(toolResult.output, /SECURITY_LOOKUP_FAILED/);
@@ -459,7 +623,7 @@ globalThis.fetch = async (url, init = {}) => {
         judgment.evidence.map((evidence) => ({
           exchange: judgment.exchange,
           symbol: judgment.symbol,
-          source: evidence.source,
+          sourceId: sourceIds.get(evidence.source) ?? 's999',
           excerpt: evidence.detail,
           identityLink: 'Matched individual NAS/AAPL exchange and symbol.',
           asOf: evidence.asOf,

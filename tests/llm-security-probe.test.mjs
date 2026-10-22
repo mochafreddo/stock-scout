@@ -74,7 +74,7 @@ function run(t, scenario = 'ok', extraEnv = {}, evaluationInput, credentialOverr
       new URL('./llm-security-http-mock.mjs', import.meta.url).pathname,
       'scripts/llm-security-probe.ts',
       directory,
-      'gpt-6.1-sol',
+      extraEnv.TEST_MODEL ?? 'gpt-6-luna',
       ...(evaluationInput === undefined
         ? [scenario.startsWith('types') || scenario === 'partial-ranking-incomplete' ? '2' : '1']
         : ['--evaluation-input', inputFile]),
@@ -205,7 +205,7 @@ test('CLI rejects malformed evaluation input before reading credentials or sendi
     [
       'scripts/llm-security-probe.ts',
       join(f.home, 'missing'),
-      'gpt-6.1-sol',
+      'gpt-6-luna',
       '--evaluation-input',
       inputFile,
     ],
@@ -244,7 +244,7 @@ test('CLI evaluates fixed inputs through the same evidence path without inventin
     PDNO: 'AAPL',
   });
   for (const request of result.requests.filter((r) => r.url.endsWith('/responses'))) {
-    assert.equal(request.body.model, 'gpt-6.1-sol');
+    assert.equal(request.body.model, 'gpt-6-luna');
     assert.equal(request.body.stream, true);
     assert.equal(request.body.store, false);
   }
@@ -301,7 +301,7 @@ test('CLI keeps evaluation read, parse and unexpected file failures in input bef
     const result = run(t, 'ok', {
       TEST_ARGUMENTS: JSON.stringify([
         join(f.home, 'missing-credentials'),
-        'gpt-6.1-sol',
+        'gpt-6-luna',
         '--evaluation-input',
         path,
       ]),
@@ -351,7 +351,7 @@ test('CLI leaves input after valid evaluation data for authentication and subseq
   });
   assert.equal(model.requests.length, 1);
   assert.equal(model.requests[0].url, 'https://api.openai.com/v1/responses');
-  assert.equal(model.requests[0].body.model, 'gpt-6.1-sol');
+  assert.equal(model.requests[0].body.model, 'gpt-6-luna');
   assert.equal(model.requests[0].body.stream, true);
   assert.equal(model.requests[0].body.store, false);
 });
@@ -673,10 +673,10 @@ test('CLI keeps argument failures and unexpected input exceptions in input witho
   for (const args of [
     [],
     ['ignored', 'bad model', '1'],
-    ['ignored', 'gpt-6.1-sol', '0'],
-    ['ignored', 'gpt-6.1-sol', '1', 'extra'],
-    ['ignored', 'gpt-6.1-sol', '--evaluation-input', 'relative.json'],
-    ['ignored', 'gpt-6.1-sol', '--evaluation-input'],
+    ['ignored', 'gpt-6-luna', '0'],
+    ['ignored', 'gpt-6-luna', '1', 'extra'],
+    ['ignored', 'gpt-6-luna', '--evaluation-input', 'relative.json'],
+    ['ignored', 'gpt-6-luna', '--evaluation-input'],
   ]) {
     const result = run(t, 'ok', { TEST_ARGUMENTS: JSON.stringify(args) });
     assert.equal(result.status, 1, result.stderr);
@@ -793,7 +793,11 @@ test('CLI keeps evidence rejection in retrieval without starting judgment', (t) 
   assert.equal(result.stdout, '');
   assert.deepEqual(legacyFailure(result.stderr), {
     error: 'MODEL_OUTPUT',
-    diagnostic: { stage: 'retrieval', reason: 'unobserved_source', location: 'evidence[0].source' },
+    diagnostic: {
+      stage: 'retrieval',
+      reason: 'unobserved_source',
+      location: 'evidence[0].sourceId',
+    },
   });
   assert.equal(result.requests.length, 3);
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 2);
@@ -895,7 +899,7 @@ test('CLI preserves confirmed execution failure reasons without changing calls o
     const models = result.requests.filter((r) => r.url.endsWith('/responses'));
     assert.equal(models.length, requests);
     for (const request of models) {
-      assert.equal(request.body.model, 'gpt-6.1-sol');
+      assert.equal(request.body.model, 'gpt-6-luna');
       assert.equal(request.body.stream, true);
       assert.equal(request.body.store, false);
     }
@@ -1161,7 +1165,7 @@ test('CLI counts failed HTTP attempts and separates stage calls and validation t
     );
     assert.equal(result.requests.filter((r) => r.url.includes('/search-info?')).length, infos);
     for (const request of result.requests.filter((r) => r.url.endsWith('/responses'))) {
-      assert.equal(request.body.model, 'gpt-6.1-sol');
+      assert.equal(request.body.model, 'gpt-6-luna');
       assert.equal(request.body.stream, true);
       assert.equal(request.body.store, false);
     }
@@ -1249,7 +1253,7 @@ test('CLI identifies the first missing evidence field at its response location',
 
 test('CLI distinguishes source and reference failures without additional requests', (t) => {
   for (const [scenario, stage, reason, location] of [
-    ['unobserved-source', 'retrieval', 'unobserved_source', 'evidence[0].source'],
+    ['unobserved-source', 'retrieval', 'unobserved_source', 'evidence[0].sourceId'],
     ['invented-id', 'judgment', 'unknown_evidence_id', 'judgments[0].evidence[0]'],
     ['types-cross-id', 'judgment', 'cross_security_evidence', 'judgments[0].evidence[0]'],
   ]) {
@@ -1262,7 +1266,7 @@ test('CLI distinguishes source and reference failures without additional request
     });
     const models = result.requests.filter((r) => r.url.endsWith('/responses'));
     assert.equal(models.length, stage === 'retrieval' ? 2 : 3);
-    assert.equal(models[0].body.model, 'gpt-6.1-sol');
+    assert.equal(models[0].body.model, 'gpt-6-luna');
     assert.equal(models[0].body.stream, true);
     assert.equal(models[0].body.store, false);
     if (stage === 'judgment') assert.equal(models.at(-1).body.tools?.length ?? 0, 0);
@@ -1277,7 +1281,7 @@ test('CLI reports safe response paths and preserves the original first-rejection
   const evidence = {
     exchange: 'NAS',
     symbol: 'AAPL',
-    source: 'kis:NAS:AAPL',
+    sourceId: 's1',
     excerpt: 'Common stock',
     identityLink: 'Individual security',
     asOf: '2026-10-18',
@@ -1294,7 +1298,7 @@ test('CLI reports safe response paths and preserves the original first-rejection
     reason: 'Common stock',
     evidence: ['e1'],
   };
-  const missingEvidence = { ...evidence, source: 'private-source synthetic-subscription' };
+  const missingEvidence = { ...evidence, sourceId: 'private-source synthetic-subscription' };
   delete missingEvidence.subsequentChanges;
   const missingJudgment = { ...judgment, evidence: ['private-id synthetic-subscription'] };
   delete missingJudgment.reason;
@@ -1311,7 +1315,7 @@ test('CLI reports safe response paths and preserves the original first-rejection
     ],
     [
       'retrieval',
-      { evidence: [{ ...evidence, exchange: null, source: 'unread' }] },
+      { evidence: [{ ...evidence, exchange: null, sourceId: 'unread' }] },
       'unknown',
       'evidence[0].exchange',
     ],
@@ -1319,7 +1323,7 @@ test('CLI reports safe response paths and preserves the original first-rejection
       'retrieval',
       { evidence: [{ ...evidence, symbol: 'GOOG' }] },
       'cross_security_evidence',
-      'evidence[0].source',
+      'evidence[0].sourceId',
       'types',
     ],
     ['retrieval', { evidence: [null] }, 'unknown', 'evidence[0]'],
@@ -1382,7 +1386,7 @@ test('CLI integrates response-location rejection and stage statistics for reorde
   const record = {
     exchange: 'NAS',
     symbol: 'GOOG',
-    source: 'kis:NAS:GOOG',
+    sourceId: 's2',
     excerpt: 'Common stock',
     identityLink: 'Individual security',
     asOf: '2026-10-18',
@@ -1393,7 +1397,7 @@ test('CLI integrates response-location rejection and stage statistics for reorde
   const invalid = {
     ...record,
     symbol: 'AAPL',
-    source: 'private-source synthetic-subscription',
+    sourceId: 'private-source synthetic-subscription',
     'private-field': '/private/path',
   };
   delete invalid.subsequentChanges;
@@ -1453,7 +1457,7 @@ test('CLI retains original six-ranking input and settings when retrieval times o
   const failure = JSON.parse(result.stderr);
   assert.equal(failure.error, 'MODEL_INCOMPLETE');
   const snapshot = failure.diagnostic.inputSnapshot;
-  assert.equal(snapshot.model, 'gpt-6.1-sol');
+  assert.equal(snapshot.model, 'gpt-6-luna');
   assert.equal(snapshot.inputMode, 'rankings');
   assert.equal(snapshot.topPerRanking, 1);
   assert.equal(snapshot.observations.length, 6);
@@ -1539,4 +1543,133 @@ test('CLI snapshot excludes mutations from a ranking that later fails validation
     [{ kind: 'volume', rank: 1 }],
   );
   assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 0);
+});
+
+test('CLI binds collected source IDs to original URLs and keeps final evidence IDs', (t) => {
+  const result = run(t);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const requests = result.requests.filter((row) => row.url.endsWith('/responses'));
+  const info = requests[1].body.input.find((row) => row.type === 'function_call_output');
+  const infoOutput = JSON.parse(info.output);
+  assert.equal(infoOutput.sourceId, 's1');
+  assert.equal(output.evidenceRecords[0].source, 'kis:NAS:AAPL');
+  assert.equal(output.evidenceRecords[0].id, 'e1');
+  assert.equal(output.securities[0].evidence[0].id, 'e1');
+  assert.equal(requests.at(-1).body.tools?.length ?? 0, 0);
+});
+
+test('CLI lists only successful opened sources with stable IDs before tool-free judgment', (t) => {
+  const result = run(t, 'catalog');
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.evidenceRecords[0].source, 'https://www.sec.gov/catalog-source');
+  assert.equal(output.evidenceRecords[0].id, 'e1');
+  assert.equal(output.webFailures.length, 1);
+  const models = result.requests.filter((row) => row.url.endsWith('/responses'));
+  assert.equal(models.length, 3);
+  const returned = JSON.parse(
+    models[1].body.input.find(
+      (row) => row.type === 'function_call_output' && row.call_id === 'call_sources',
+    ).output,
+  );
+  assert.deepEqual(returned, [{ id: 's1', source: 'https://www.sec.gov/catalog-source' }]);
+  assert.equal(models.at(-1).body.tools?.length ?? 0, 0);
+  assert.equal(result.requests.filter((row) => row.url.includes('/search-info')).length, 0);
+});
+
+test('CLI preserves successful hosted web history and emits one JSON failure after a failed page', (t) => {
+  const result = run(t, 'catalog-unknown-id');
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  const error = JSON.parse(result.stderr);
+  assert.equal(error.error, 'MODEL_OUTPUT');
+  assert.equal(error.diagnostic.reason, 'unobserved_source');
+  assert.equal(error.diagnostic.location, 'evidence[0].sourceId');
+  const models = result.requests.filter((row) => row.url.endsWith('/responses'));
+  assert.equal(models.length, 2);
+  assert.deepEqual(
+    models[1].body.input
+      .filter((row) => row.type === 'web_search_call')
+      .map((row) => row.action.type),
+    ['search', 'open_page', 'find_in_page'],
+  );
+  assert.ok(
+    models[1].body.input.some(
+      (row) => row.type === 'function_call_output' && row.call_id === 'call_sources',
+    ),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(withoutSnapshot(result.stderr)),
+    /https:|synthetic-|test-secret/,
+  );
+});
+
+test('CLI rejects an extra freely written source URL even beside a registered source ID', (t) => {
+  const result = run(t, 'ok', {
+    TEST_RESPONSE_STAGE: 'retrieval',
+    TEST_RESPONSE_VALUE: JSON.stringify({
+      evidence: [
+        {
+          exchange: 'NAS',
+          symbol: 'AAPL',
+          sourceId: 's1',
+          source: 'https://example.org/unread',
+          excerpt: 'Common stock',
+          identityLink: 'NAS/AAPL',
+          asOf: '2026-10-18',
+          effectiveDate: '2026-10-18',
+          subsequentChanges: 'No known change',
+          currentness: 'Current',
+        },
+      ],
+    }),
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(legacyFailure(result.stderr), {
+    error: 'MODEL_OUTPUT',
+    diagnostic: { stage: 'retrieval', reason: 'unknown', location: 'evidence[0]' },
+  });
+  assert.doesNotMatch(result.stderr, /example.org\/unread/);
+});
+
+test('CLI uses luna for development fixtures and preserves explicitly chosen production models', (t) => {
+  for (const model of ['gpt-6-luna', 'gpt-6-astra', 'gpt-6.1-sol']) {
+    const result = run(t, 'ok', { TEST_MODEL: model });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).model.id, model);
+    assert.ok(
+      result.requests
+        .filter((row) => row.url.endsWith('/responses'))
+        .every((row) => row.body.model === model),
+    );
+  }
+});
+
+test('CLI counts source-catalog turns against existing shared time and model ceilings', (t) => {
+  for (const [scenario, error, count] of [
+    ['catalog-overrun', 'MODEL_INCOMPLETE', 2],
+    ['catalog-model-limit', 'MODEL_LIMIT', 12],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(JSON.parse(result.stderr).error, error);
+    assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, count);
+  }
+});
+
+test('CLI rejects unregistered source references and sensitive opened URLs without judgment', (t) => {
+  for (const [scenario, error, count] of [
+    ['catalog-search-only-id', 'MODEL_OUTPUT', 2],
+    ['catalog-sensitive', 'SENSITIVE_OUTPUT', 1],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(JSON.parse(result.stderr).error, error);
+    assert.doesNotMatch(result.stderr, /synthetic-subscription|test-secret/);
+    assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, count);
+  }
 });

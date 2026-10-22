@@ -395,7 +395,7 @@ function probe(t, f, mode, extraEnv = {}) {
       new URL('./siwc-refresh-http-mock.mjs', import.meta.url).pathname,
       new URL('../scripts/llm-security-probe.ts', import.meta.url).pathname,
       f.directory,
-      'gpt-6.1-sol',
+      'gpt-6-luna',
       '1',
     ],
     {

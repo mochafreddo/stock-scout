@@ -19,7 +19,7 @@ type DiagnosticReason =
 
 type ResponseLocation =
   | `evidence[${number}]`
-  | `evidence[${number}].${'exchange' | 'symbol' | 'source' | 'excerpt' | 'identityLink' | 'asOf' | 'effectiveDate' | 'subsequentChanges' | 'currentness'}`
+  | `evidence[${number}].${'exchange' | 'symbol' | 'sourceId' | 'excerpt' | 'identityLink' | 'asOf' | 'effectiveDate' | 'subsequentChanges' | 'currentness'}`
   | `judgments[${number}]`
   | `judgments[${number}].${'exchange' | 'symbol' | 'type' | 'identity' | 'applicable' | 'reason' | 'evidence'}`
   | `judgments[${number}].evidence[${number}]`;

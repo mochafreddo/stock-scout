@@ -49,7 +49,7 @@ function run(
   f,
   mode = 'ok',
   extraEnv = {},
-  args = ['scripts/llm-security-probe.ts', f.directory, 'gpt-6.1-sol', '1'],
+  args = ['scripts/llm-security-probe.ts', f.directory, 'gpt-6-luna', '1'],
 ) {
   const trace = join(f.home, 'refresh-trace');
   writeFileSync(trace, '', { mode: 0o600 });
@@ -303,7 +303,7 @@ function start(t, f, mode, name = mode, extraEnv = {}) {
       new URL('./siwc-refresh-http-mock.mjs', import.meta.url).pathname,
       'scripts/llm-security-probe.ts',
       f.directory,
-      'gpt-6.1-sol',
+      'gpt-6-luna',
       '1',
     ],
     {
