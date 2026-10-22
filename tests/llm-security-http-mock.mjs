@@ -8,6 +8,23 @@ const usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
 const completed = { type: 'response.completed', response: { usage } };
 let modelRequests = 0;
 const scenario = process.env.SCENARIO;
+if (process.env.TEST_SERIALIZATION_STAGE) {
+  const stringify = JSON.stringify;
+  let outputSerializations = 0;
+  JSON.stringify = (value, ...args) => {
+    if (
+      value?.stage === process.env.TEST_SERIALIZATION_STAGE ||
+      (value?.validation === 'unverified' &&
+        value?.status &&
+        ++outputSerializations === Number(process.env.TEST_OUTPUT_SERIALIZATION))
+    )
+      throw Object.assign(new Error(process.env.TEST_SERIALIZATION_EXCEPTION), {
+        reason: 'AUTH_FAILED',
+        location: 'private-field.private-value',
+      });
+    return stringify(value, ...args);
+  };
+}
 if (process.env.TEST_ARGUMENTS)
   process.argv.splice(2, process.argv.length, ...JSON.parse(process.env.TEST_ARGUMENTS));
 if (process.env.TEST_ARGUMENT_EXCEPTION)
@@ -122,6 +139,8 @@ globalThis.fetch = async (url, init = {}) => {
     `${JSON.stringify({ url: request.href, body: init.body ? JSON.parse(init.body) : null })}\n`,
   );
   if (request.origin === 'https://openapi.koreainvestment.com:9443') {
+    if (request.pathname === '/oauth2/tokenP')
+      return Response.json({ error: 'synthetic-subscription' }, { status: 401 });
     assert.equal(init.headers.authorization, 'Bearer test-token');
     const body = { rt_cd: '0', msg_cd: 'MCA00000', output1: { nrec: '0' }, output2: [] };
     if (request.pathname.endsWith('search-info')) {
@@ -129,6 +148,7 @@ globalThis.fetch = async (url, init = {}) => {
         setTimeout(() => {}, 30);
         return new Promise(() => {});
       }
+      if (scenario === 'lookup-auth') return Response.json({ rt_cd: '1', msg_cd: 'EGW00123' });
       const sample = samples.find((sample) => sample.symbol === request.searchParams.get('PDNO'));
       assert.ok(sample);
       if (scenario === 'individual-lookup')
@@ -203,6 +223,8 @@ globalThis.fetch = async (url, init = {}) => {
       { error: { code: 'invalid_api_key', message: 'synthetic-subscription' } },
       { status: 401 },
     );
+  if (scenario === 'search-unsupported')
+    return Response.json({ error: { code: 'unsupported_tool' } }, { status: 400 });
   if (process.env.SCENARIO === 'quota-http')
     return Response.json(
       {
@@ -229,6 +251,8 @@ globalThis.fetch = async (url, init = {}) => {
   assert.ok(body.input.every((item) => item.role !== 'system'));
   const prompt = JSON.parse(body.input.find((item) => item.role === 'user').content[0].text);
   const judging = prompt.stage === 'judgment';
+  if (prompt.stage === process.env.TEST_HTTP_EXCEPTION_STAGE)
+    throw Object.assign(new Error(process.env.TEST_HTTP_EXCEPTION), { reason: 'AUTH_FAILED' });
   if (judging && scenario === 'judgment-blocked') {
     setTimeout(() => {}, 30);
     return new Promise(() => {});
@@ -335,8 +359,10 @@ globalThis.fetch = async (url, init = {}) => {
       })),
     };
     if (scenario === 'off-ranking') value.judgments[0].symbol = 'MSFT';
-    if (scenario === 'ambiguous') value.judgments[0].identity = 'ambiguous';
-    if (scenario === 'sensitive-judgment') value.judgments[0].reason = 'synthetic-subscription';
+    if (['ambiguous', 'ambiguous-sensitive'].includes(scenario))
+      value.judgments[0].identity = 'ambiguous';
+    if (['sensitive-judgment', 'ambiguous-sensitive'].includes(scenario))
+      value.judgments[0].reason = 'synthetic-subscription';
     if (scenario === 'malformed-judgment') value.judgments[0].applicable = 'true';
     if (scenario === 'missing-result') value.judgments = [];
     if (scenario === 'duplicate-result') value.judgments.push(value.judgments[0]);

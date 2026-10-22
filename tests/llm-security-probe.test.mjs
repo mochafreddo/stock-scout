@@ -146,7 +146,7 @@ test('CLI rejects unsolicited final web calls and sensitive judgment output with
       {
         error: code,
         diagnostic: {
-          stage: 'unknown',
+          stage: code === 'SENSITIVE_OUTPUT' ? 'output' : 'judgment',
           reason: code === 'SENSITIVE_OUTPUT' ? 'SENSITIVE_OUTPUT' : 'unknown',
           location: null,
         },
@@ -337,7 +337,7 @@ test('CLI leaves input after valid evaluation data for authentication and subseq
   assert.equal(model.stdout, '');
   assert.deepEqual(JSON.parse(model.stderr), {
     error: 'AUTH_FAILED',
-    diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    diagnostic: { stage: 'retrieval', reason: 'AUTH_FAILED', location: null },
   });
   assert.equal(model.requests.length, 1);
   assert.equal(model.requests[0].url, 'https://api.openai.com/v1/responses');
@@ -361,7 +361,11 @@ test('CLI binds final IDs to the observed context of the same individual securit
       JSON.parse(result.stderr),
       {
         error: 'MODEL_OUTPUT',
-        diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+        diagnostic: {
+          stage: scenario.includes('context') ? 'retrieval' : 'judgment',
+          reason: 'unknown',
+          location: null,
+        },
       },
       scenario,
     );
@@ -379,7 +383,11 @@ test('CLI reserves final judgment time inside the original total deadline', (t) 
     assert.equal(result.stdout, '');
     assert.deepEqual(JSON.parse(result.stderr), {
       error: 'MODEL_INCOMPLETE',
-      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+      diagnostic: {
+        stage: scenario === 'retrieval-overrun' ? 'retrieval' : 'judgment',
+        reason: 'MODEL_INCOMPLETE',
+        location: null,
+      },
     });
     assert.equal(
       result.requests.filter((r) => r.url.endsWith('/responses')).length,
@@ -603,7 +611,16 @@ test('CLI carries confirmed identity and sensitive-output reasons from their int
     assert.equal(result.stdout, '');
     assert.deepEqual(JSON.parse(result.stderr), {
       error: reason,
-      diagnostic: { stage: 'unknown', reason, location: null },
+      diagnostic: {
+        stage:
+          scenario === 'identity-conflict'
+            ? 'unknown'
+            : scenario === 'ambiguous'
+              ? 'judgment'
+              : 'output',
+        reason,
+        location: null,
+      },
     });
     assert.doesNotMatch(result.stderr, /synthetic-subscription/);
   }
@@ -696,19 +713,19 @@ test('CLI does not trust known identifiers, prefixes or reason properties on ext
   }
 });
 
-test('CLI keeps aggregated ranking, lookup and model errors at an unknown reason', (t) => {
-  for (const [scenario, error] of [
-    ['rank-failure', 'RANKING_FAILED'],
-    ['global-lookup', 'QUERY_FAILED'],
-    ['malformed-judgment', 'MODEL_OUTPUT'],
-    ['auth-failure', 'AUTH_FAILED'],
+test('CLI separates aggregated failures from a confirmed model authentication failure', (t) => {
+  for (const [scenario, error, stage, reason] of [
+    ['rank-failure', 'RANKING_FAILED', 'unknown', 'unknown'],
+    ['global-lookup', 'QUERY_FAILED', 'retrieval', 'unknown'],
+    ['malformed-judgment', 'MODEL_OUTPUT', 'judgment', 'unknown'],
+    ['auth-failure', 'AUTH_FAILED', 'retrieval', 'AUTH_FAILED'],
   ]) {
     const result = run(t, scenario);
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
     assert.deepEqual(JSON.parse(result.stderr), {
       error,
-      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+      diagnostic: { stage, reason, location: null },
     });
   }
 });
@@ -719,7 +736,7 @@ test('CLI preserves a confirmed sensitive lookup reason while keeping its legacy
   assert.equal(result.stdout, '');
   assert.deepEqual(JSON.parse(result.stderr), {
     error: 'QUERY_FAILED',
-    diagnostic: { stage: 'unknown', reason: 'SENSITIVE_OUTPUT', location: null },
+    diagnostic: { stage: 'retrieval', reason: 'SENSITIVE_OUTPUT', location: null },
   });
   assert.doesNotMatch(result.stderr, /synthetic-subscription/);
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
@@ -744,5 +761,202 @@ test('CLI keeps unexpected authentication and dynamic import failures in authent
       diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
     });
     assert.deepEqual(result.requests, []);
+  }
+});
+
+test('CLI keeps evidence rejection in retrieval without starting judgment', (t) => {
+  const result = run(
+    t,
+    'unobserved-source',
+    {},
+    {
+      securities: [{ exchange: 'NAS', symbol: 'AAPL' }],
+    },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'MODEL_OUTPUT',
+    diagnostic: { stage: 'retrieval', reason: 'unknown', location: null },
+  });
+  assert.equal(result.requests.length, 3);
+  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 2);
+  assert.equal(result.requests.filter((r) => r.url.includes('/ranking/')).length, 0);
+});
+
+test('CLI enters judgment after evidence validation and output after judgment validation', (t) => {
+  for (const [scenario, stage, error, reason] of [
+    ['invented-id', 'judgment', 'MODEL_OUTPUT', 'unknown'],
+    ['missing-result', 'judgment', 'MODEL_OUTPUT', 'unknown'],
+    ['malformed-judgment', 'judgment', 'MODEL_OUTPUT', 'unknown'],
+    ['judgment-web-call', 'judgment', 'MODEL_OUTPUT', 'unknown'],
+    ['sensitive-judgment', 'output', 'SENSITIVE_OUTPUT', 'SENSITIVE_OUTPUT'],
+    ['ambiguous-sensitive', 'judgment', 'IDENTITY_AMBIGUOUS', 'IDENTITY_AMBIGUOUS'],
+  ]) {
+    const result = run(
+      t,
+      scenario,
+      {},
+      {
+        securities: [{ exchange: 'NAS', symbol: 'AAPL' }],
+      },
+    );
+    assert.equal(result.status, 1, scenario + result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error,
+      diagnostic: { stage, reason, location: null },
+    });
+    assert.equal(result.requests.length, 4);
+    const models = result.requests.filter((r) => r.url.endsWith('/responses'));
+    assert.equal(models.length, 3);
+    assert.equal(models.at(-1).body.tools?.length ?? 0, 0);
+    assert.doesNotMatch(result.stderr, /synthetic-subscription/);
+  }
+});
+
+test('CLI keeps KIS authentication failure in retrieval with a confirmed safe reason', (t) => {
+  const result = run(
+    t,
+    'lookup-auth',
+    {},
+    {
+      securities: [{ exchange: 'NAS', symbol: 'AAPL' }],
+    },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'AUTH_FAILED',
+    diagnostic: { stage: 'retrieval', reason: 'AUTH_FAILED', location: null },
+  });
+  assert.equal(result.requests.length, 3);
+  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
+  const lookup = result.requests[1];
+  assert.deepEqual(Object.fromEntries(new URL(lookup.url).searchParams), {
+    PRDT_TYPE_CD: '512',
+    PDNO: 'AAPL',
+  });
+  assert.equal(new URL(result.requests[2].url).pathname, '/oauth2/tokenP');
+  assert.deepEqual(result.requests[2].body, {
+    grant_type: 'client_credentials',
+    appkey: 'test-key',
+    appsecret: 'test-secret',
+  });
+  assert.doesNotMatch(result.stderr, /synthetic-subscription|test-token|test-key|test-secret/);
+});
+
+test('CLI preserves confirmed execution failure reasons without changing calls or limits', (t) => {
+  for (const [scenario, stage, reason, requests] of [
+    ['auth-failure', 'retrieval', 'AUTH_FAILED', 1],
+    ['search-unsupported', 'retrieval', 'SEARCH_UNSUPPORTED', 1],
+    ['quota-http', 'retrieval', 'SUBSCRIPTION_LIMIT', 1],
+    ['model-limit', 'judgment', 'MODEL_LIMIT', 12],
+    ['retrieval-overrun', 'retrieval', 'MODEL_INCOMPLETE', 2],
+    ['judgment-overrun', 'judgment', 'MODEL_INCOMPLETE', 3],
+    ['search-service-failed', 'retrieval', 'SEARCH_FAILED', 2],
+  ]) {
+    const result = run(
+      t,
+      scenario,
+      {},
+      {
+        securities: [{ exchange: 'NAS', symbol: 'AAPL' }],
+      },
+    );
+    assert.equal(result.status, 1, scenario + result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: reason,
+      diagnostic: { stage, reason, location: null },
+    });
+    const models = result.requests.filter((r) => r.url.endsWith('/responses'));
+    assert.equal(models.length, requests);
+    for (const request of models) {
+      assert.equal(request.body.model, 'gpt-6.1-sol');
+      assert.equal(request.body.stream, true);
+      assert.equal(request.body.store, false);
+    }
+    assert.equal(result.requests.filter((r) => r.url.includes('/ranking/')).length, 0);
+    assert.ok(result.requests.filter((r) => r.url.includes('/search-info?')).length <= 11);
+  }
+});
+
+test('CLI retains stages for unexpected preparation and final serialization failures without trusting messages', (t) => {
+  for (const [stage, serialization, calls] of [
+    ['retrieval', undefined, 0],
+    ['judgment', undefined, 2],
+    ['output', '1', 3],
+    ['output', '2', 3],
+  ]) {
+    for (const message of [
+      'private-sentinel /private/path synthetic-subscription',
+      'AUTH_FAILED',
+      'siwc_relogin_required',
+    ]) {
+      const result = run(
+        t,
+        'ok',
+        {
+          TEST_SERIALIZATION_STAGE: stage,
+          TEST_OUTPUT_SERIALIZATION: serialization,
+          TEST_SERIALIZATION_EXCEPTION: message,
+        },
+        { securities: [{ exchange: 'NAS', symbol: 'AAPL' }] },
+      );
+      assert.equal(result.status, 1, stage + result.stderr);
+      assert.equal(result.stdout, '');
+      assert.deepEqual(JSON.parse(result.stderr), {
+        error:
+          message === 'AUTH_FAILED' || message === 'siwc_relogin_required'
+            ? message
+            : 'MODEL_FAILED',
+        diagnostic: { stage, reason: 'unknown', location: null },
+        ...(message === 'siwc_relogin_required' ? { action: 'login' } : {}),
+      });
+      assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, calls);
+      assert.equal(
+        result.requests.filter((r) => r.url.includes('/search-info?')).length,
+        calls ? 1 : 0,
+      );
+      assert.doesNotMatch(
+        result.stderr,
+        /private-sentinel|private.path|synthetic-subscription|private-field|private-value/,
+      );
+    }
+  }
+});
+
+test('CLI leaves unregistered HTTP exceptions unknown within the active model stage', (t) => {
+  for (const [stage, calls] of [
+    ['retrieval', 1],
+    ['judgment', 3],
+  ]) {
+    for (const message of [
+      'AUTH_FAILED',
+      'siwc_relogin_required',
+      'private-sentinel /private/path synthetic-subscription',
+    ]) {
+      const result = run(
+        t,
+        'ok',
+        {
+          TEST_HTTP_EXCEPTION_STAGE: stage,
+          TEST_HTTP_EXCEPTION: message,
+        },
+        { securities: [{ exchange: 'NAS', symbol: 'AAPL' }] },
+      );
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(result.stdout, '');
+      assert.deepEqual(JSON.parse(result.stderr), {
+        error: 'MODEL_FAILED',
+        diagnostic: { stage, reason: 'unknown', location: null },
+      });
+      assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, calls);
+      assert.equal(
+        result.requests.filter((r) => r.url.includes('/search-info?')).length,
+        calls === 1 ? 0 : 1,
+      );
+    }
   }
 });

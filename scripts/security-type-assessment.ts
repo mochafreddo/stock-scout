@@ -37,6 +37,7 @@ type Judgment = {
   reason: string;
   evidence: string[];
 };
+export type AssessmentStage = 'retrieval' | 'judgment' | 'output';
 export type Security = {
   exchange: KisExchange;
   symbol: string;
@@ -121,12 +122,14 @@ function modelFailure(error: unknown) {
       code = JSON.parse(error.responseBody ?? '{}').error?.code;
     } catch {}
     if (code === 'subscription_sharing_usage_limit_exceeded')
-      return process.env.OPENAI_API_KEY ? 'PAID_BUDGET_UNPROVABLE' : 'SUBSCRIPTION_LIMIT';
-    if ([401, 403].includes(error.statusCode ?? 0)) return 'AUTH_FAILED';
+      return new DiagnosticError(
+        process.env.OPENAI_API_KEY ? 'PAID_BUDGET_UNPROVABLE' : 'SUBSCRIPTION_LIMIT',
+      );
+    if ([401, 403].includes(error.statusCode ?? 0)) return new DiagnosticError('AUTH_FAILED');
     if (code === 'unsupported_tool' || code === 'unsupported_capability')
-      return 'SEARCH_UNSUPPORTED';
+      return new DiagnosticError('SEARCH_UNSUPPORTED');
   }
-  return 'MODEL_FAILED';
+  return new Error('MODEL_FAILED');
 }
 
 const text = (value: unknown): value is string =>
@@ -171,6 +174,7 @@ export async function assessSecurityTypes({
   inputMode,
   observations,
   topPerRanking,
+  onStage,
 }: {
   securities: Security[];
   model: string;
@@ -179,7 +183,9 @@ export async function assessSecurityTypes({
   inputMode: 'evaluation' | 'rankings';
   observations: unknown[];
   topPerRanking?: number;
+  onStage: (stage: AssessmentStage) => void;
 }) {
+  onStage('retrieval');
   const evaluation = inputMode === 'evaluation';
   const securities = new Map(
     inputs.map((security) => [keyOf(security.exchange, security.symbol), security]),
@@ -202,7 +208,7 @@ export async function assessSecurityTypes({
     apiKey: accessToken,
     fetch: async (url, init) => {
       if (String(url) !== 'https://api.openai.com/v1/responses' || ++requests > 12) {
-        failure = new Error('MODEL_LIMIT');
+        failure = new DiagnosticError('MODEL_LIMIT');
         throw failure;
       }
       return fetch(url, init);
@@ -241,7 +247,7 @@ export async function assessSecurityTypes({
           throw failure;
         }
         if (++queryCount > 32) {
-          failure = new Error('MODEL_LIMIT');
+          failure = new DiagnosticError('MODEL_LIMIT');
           throw failure;
         }
         const source = `kis:${keyOf(exchange, symbol)}`;
@@ -262,7 +268,9 @@ export async function assessSecurityTypes({
           failure =
             error instanceof DiagnosticError
               ? new DiagnosticError(error.reason, 'QUERY_FAILED')
-              : new Error(error instanceof AuthError ? 'AUTH_FAILED' : 'QUERY_FAILED');
+              : error instanceof AuthError
+                ? new DiagnosticError('AUTH_FAILED')
+                : new Error('QUERY_FAILED');
           controller.abort();
           throw failure;
         }
@@ -309,7 +317,7 @@ export async function assessSecurityTypes({
     );
     for await (const part of result.stream) {
       if (stage === 'judgment' && part.type === 'tool-call') throw new Error('MODEL_OUTPUT');
-      if (part.type === 'error') failure ??= new Error(modelFailure(part.error));
+      if (part.type === 'error') failure ??= modelFailure(part.error);
       if (part.type === 'raw') {
         const raw = part.rawValue as {
           type?: string;
@@ -327,7 +335,7 @@ export async function assessSecurityTypes({
           if (stage === 'judgment') throw new Error('MODEL_OUTPUT');
           if (raw.item.id) webCalls.add(raw.item.id);
           if (webCalls.size > 32) {
-            failure = new Error('MODEL_LIMIT');
+            failure = new DiagnosticError('MODEL_LIMIT');
             controller.abort();
           }
           if (raw.type === 'response.output_item.done') {
@@ -336,7 +344,7 @@ export async function assessSecurityTypes({
                 !['open_page', 'find_in_page'].includes(raw.item.action?.type ?? '') ||
                 !raw.item.action?.url
               ) {
-                failure = new Error('SEARCH_FAILED');
+                failure = new DiagnosticError('SEARCH_FAILED');
                 controller.abort();
               }
               webFailures.push({
@@ -360,13 +368,13 @@ export async function assessSecurityTypes({
           }
         }
         if (raw.type === 'response.completed') {
-          if (completedRequests.has(requests)) failure = new Error('MODEL_INCOMPLETE');
+          if (completedRequests.has(requests)) failure = new DiagnosticError('MODEL_INCOMPLETE');
           completedRequests.add(requests);
           completions = completedRequests.size;
         }
         if (['response.failed', 'response.incomplete', 'error'].includes(raw.type ?? '')) {
           const code = raw.response?.error?.code ?? raw.error?.code ?? raw.code;
-          failure = new Error(
+          failure = new DiagnosticError(
             code === 'subscription_sharing_usage_limit_exceeded'
               ? process.env.OPENAI_API_KEY
                 ? 'PAID_BUDGET_UNPROVABLE'
@@ -383,9 +391,9 @@ export async function assessSecurityTypes({
       Date.now() - startedAt >= 180_000 ||
       (stage === 'retrieval' && (retrievalSignal.aborted || Date.now() - startedAt >= 120_000))
     )
-      throw new Error('MODEL_INCOMPLETE');
+      throw new DiagnosticError('MODEL_INCOMPLETE');
     if (requests === stageRequests || completions - stageCompletions !== requests - stageRequests)
-      throw new Error('MODEL_INCOMPLETE');
+      throw new DiagnosticError('MODEL_INCOMPLETE');
     if (!parsed.value) throw new Error('MODEL_OUTPUT');
     return parsed.value;
   };
@@ -426,6 +434,7 @@ export async function assessSecurityTypes({
         excerptOrigin: 'model_extracted',
       };
     });
+    onStage('judgment');
     const evidenceById = new Map(evidenceRecords.map((record) => [record.id, record]));
     const parsed = await runStage('judgment', evidenceRecords);
     if (!Array.isArray(parsed.judgments)) throw new Error('MODEL_OUTPUT');
@@ -452,6 +461,7 @@ export async function assessSecurityTypes({
       };
     });
     if (seen.size !== securities.size) throw new Error('MODEL_OUTPUT');
+    onStage('output');
     const status = assessed.every((item) => item.type === 'unknown' || !item.applicable)
       ? 'analysis_insufficient'
       : 'assessed';

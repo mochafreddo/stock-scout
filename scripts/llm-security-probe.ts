@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { DiagnosticError } from './diagnostic-error.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
-import { assessSecurityTypes, type Security } from './security-type-assessment.ts';
+import {
+  type AssessmentStage,
+  assessSecurityTypes,
+  type Security,
+} from './security-type-assessment.ts';
 
 const exchanges: KisExchange[] = ['NAS', 'NYS', 'AMS'];
 const safeCodes = [
@@ -25,7 +29,7 @@ const safeCodes = [
   'ANALYSIS_INSUFFICIENT',
 ];
 const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
-let stage: 'input' | 'authentication' | 'unknown' = 'input';
+let stage: 'input' | 'authentication' | 'unknown' | AssessmentStage = 'input';
 try {
   const [directory, model, top, ...extra] = process.argv.slice(2);
   const evaluation = top === '--evaluation-input';
@@ -156,6 +160,9 @@ try {
     model,
     accessToken: credentials.accessToken,
     secrets,
+    onStage: (next) => {
+      stage = next;
+    },
     inputMode: evaluation ? 'evaluation' : 'rankings',
     observations,
     ...(evaluation ? {} : { topPerRanking: Number(top) }),
