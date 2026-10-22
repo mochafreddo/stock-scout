@@ -1,0 +1,163 @@
+{
+  "sampleVersion": "2026-10-22.1",
+  "status": "partial_not_ready",
+  "confirmedAt": "2026-10-22",
+  "modelEvaluations": 0,
+  "cases": [
+    {
+      "id": "01-common",
+      "input": "inputs/01-common.json",
+      "inputSha256": "bb625d10b477f820657409e9a41b6ab5840b82483eed4f2d464fc7b3ba34e5ca",
+      "expected": [
+        {
+          "exchange": "NAS",
+          "symbol": "AAPL",
+          "type": "common",
+          "included": true,
+          "applicable": true
+        }
+      ],
+      "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
+    },
+    {
+      "id": "02-share-classes",
+      "input": "inputs/02-share-classes.json",
+      "inputSha256": "5611605a3458ca256709b363e2a6e91d7dded15008bbf5fb66c19feb21a38040",
+      "expected": [
+        {
+          "exchange": "NAS",
+          "symbol": "GOOG",
+          "type": "common",
+          "included": true,
+          "applicable": true
+        },
+        {
+          "exchange": "NAS",
+          "symbol": "GOOGL",
+          "type": "common",
+          "included": true,
+          "applicable": true
+        }
+      ],
+      "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
+    },
+    {
+      "id": "03-adr-rights",
+      "input": "inputs/03-adr-rights.json",
+      "inputSha256": "48af04496390fb526ffa875f2f0345b4832a7424f8fc54efb03158ec5d07d8b9",
+      "expected": [
+        {
+          "exchange": "NYS",
+          "symbol": "BBD",
+          "type": "preferred_adr",
+          "included": false,
+          "applicable": true
+        },
+        {
+          "exchange": "NYS",
+          "symbol": "BBDO",
+          "type": "common_adr",
+          "included": true,
+          "applicable": true
+        }
+      ],
+      "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
+    },
+    {
+      "id": "04-preferred",
+      "input": "inputs/04-preferred.json",
+      "inputSha256": "a56e8a6e49080114fd215e6e76b34b579da1ec6bd3d8a8c6725b9a938a22dc7c",
+      "expected": [
+        {
+          "exchange": "NYS",
+          "symbol": "BAC/B",
+          "type": "preferred",
+          "included": false,
+          "applicable": true
+        },
+        {
+          "exchange": "NYS",
+          "symbol": "BAC/L",
+          "type": "preferred",
+          "included": false,
+          "applicable": true
+        }
+      ],
+      "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
+    },
+    {
+      "id": "05-aclarion-warrant",
+      "input": "inputs/05-aclarion-warrant.json",
+      "inputSha256": "7dc62a5d3fcdfd92f147d4fc9d9c79befa4e2042addc4b80e5ea2bdf770c0511",
+      "expected": [
+        {
+          "exchange": "NAS",
+          "symbol": "ACONW",
+          "type": "warrant",
+          "included": false,
+          "applicable": true
+        }
+      ],
+      "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
+    },
+    {
+      "id": "06-adstec-warrant",
+      "input": "inputs/06-adstec-warrant.json",
+      "inputSha256": "1f61adde5c67f671c68036b519c4762d2997ec7563768b949c07c86980edd5b4",
+      "expected": [
+        {
+          "exchange": "NAS",
+          "symbol": "ADSEW",
+          "type": "warrant",
+          "included": false,
+          "applicable": true
+        }
+      ],
+      "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
+    },
+    {
+      "id": "07-etf",
+      "input": "inputs/07-etf.json",
+      "inputSha256": "c41eb917ebfc573032a66663294ba26b7d92f6a65162136b55fb55689731c734",
+      "expected": [
+        {
+          "exchange": "AMS",
+          "symbol": "SPY",
+          "type": "etf",
+          "included": false,
+          "applicable": true
+        }
+      ],
+      "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
+    },
+    {
+      "id": "08-etn-subsequent-change",
+      "input": "inputs/08-etn-subsequent-change.json",
+      "inputSha256": "524ed656aae61ee3df34d32d4493f1880fee32730ab628d1243e710f7a94b02c",
+      "expected": [
+        {
+          "exchange": "AMS",
+          "symbol": "VXX",
+          "type": "etn",
+          "included": false,
+          "applicable": true
+        }
+      ],
+      "evaluatorReference": "../../security-type-evaluation-samples.md#독립-정답과-근거"
+    }
+  ],
+  "missingRequiredCases": [
+    {
+      "purpose": "insufficient_evidence",
+      "status": "not_acquired",
+      "expectedIncluded": false,
+      "reason": "식별된 실제 증권에 대해 현재 적용 가능한 유형 근거의 부족을 독립적으로 확정한 사례를 확보하지 못했다."
+    },
+    {
+      "purpose": "unresolved_conflicting_evidence",
+      "status": "not_acquired",
+      "expectedIncluded": false,
+      "reason": "같은 증권의 구체적인 유형 주장 사이에 해결되지 않은 모순이 있는 실제 사례를 확보하지 못했다."
+    }
+  ]
+}

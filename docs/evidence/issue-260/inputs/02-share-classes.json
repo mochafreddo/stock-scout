@@ -1,0 +1,12 @@
+{
+  "securities": [
+    {
+      "exchange": "NAS",
+      "symbol": "GOOG"
+    },
+    {
+      "exchange": "NAS",
+      "symbol": "GOOGL"
+    }
+  ]
+}

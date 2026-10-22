@@ -1,0 +1,12 @@
+{
+  "securities": [
+    {
+      "exchange": "NYS",
+      "symbol": "BBD"
+    },
+    {
+      "exchange": "NYS",
+      "symbol": "BBDO"
+    }
+  ]
+}
