@@ -16,6 +16,18 @@ if (process.env.TEST_ARGUMENT_EXCEPTION)
       throw new Error(process.env.TEST_ARGUMENT_EXCEPTION);
     },
   });
+if (process.env.TEST_EVALUATION_EXCEPTION) {
+  const read = fs.readFileSync;
+  fs.readFileSync = (path, ...args) => {
+    if (typeof path === 'string' && path.endsWith('/case.json'))
+      throw Object.assign(new Error(process.env.TEST_EVALUATION_EXCEPTION), {
+        reason: 'RANKING_INCOMPLETE',
+        location: ['securities', 0, 'symbol'],
+      });
+    return read(path, ...args);
+  };
+  syncBuiltinESMExports();
+}
 if (process.env.TEST_STORAGE_EXCEPTION) {
   const open = fs.openSync;
   fs.openSync = (path, ...args) => {

@@ -209,7 +209,7 @@ test('CLI rejects malformed evaluation input before reading credentials or sendi
   assert.equal(result.stdout, '');
   assert.deepEqual(JSON.parse(result.stderr), {
     error: 'USAGE',
-    diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    diagnostic: { stage: 'input', reason: 'unknown', location: null },
   });
 });
 
@@ -227,10 +227,24 @@ test('CLI evaluates fixed inputs through the same evidence path without inventin
   assert.equal(result.requests.filter((r) => r.url.includes('/ranking/')).length, 0);
   assert.equal(result.requests.filter((r) => r.url.includes('/search-info?')).length, 1);
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 3);
+  assert.equal(result.requests.length, 4);
+  const lookup = result.requests.find((r) => r.url.includes('/search-info?'));
+  assert.deepEqual(Object.fromEntries(new URL(lookup.url).searchParams), {
+    PRDT_TYPE_CD: '512',
+    PDNO: 'AAPL',
+  });
+  for (const request of result.requests.filter((r) => r.url.endsWith('/responses'))) {
+    assert.equal(request.body.model, 'gpt-6.1-sol');
+    assert.equal(request.body.stream, true);
+    assert.equal(request.body.store, false);
+  }
 });
 
 test('CLI rejects empty, excessive, duplicate, malformed or answer-bearing evaluation inputs', (t) => {
   for (const input of [
+    null,
+    [],
+    { securities: {} },
     {},
     { securities: [] },
     { securities: null },
@@ -238,6 +252,12 @@ test('CLI rejects empty, excessive, duplicate, malformed or answer-bearing evalu
     { securities: [{ exchange: 'NAS', symbol: 'aapl' }] },
     { securities: [{ exchange: 'NAS', symbol: 'AAPL', expected: 'common' }] },
     { securities: [{ exchange: 'NAS', symbol: 'AAPL' }], expected: ['common'] },
+    {
+      securities: [
+        { exchange: 'NAS', symbol: 'AAPL' },
+        { exchange: 'NYS', symbol: 'private-sentinel', 'private-field': 'private-value' },
+      ],
+    },
     {
       securities: [
         { exchange: 'NAS', symbol: 'AAPL' },
@@ -256,10 +276,74 @@ test('CLI rejects empty, excessive, duplicate, malformed or answer-bearing evalu
     assert.equal(result.stdout, '');
     assert.deepEqual(JSON.parse(result.stderr), {
       error: 'USAGE',
-      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+      diagnostic: { stage: 'input', reason: 'unknown', location: null },
     });
     assert.deepEqual(result.requests, []);
   }
+});
+
+test('CLI keeps evaluation read, parse and unexpected file failures in input before authentication', (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const invalidJson = join(f.home, 'private-case.json');
+  writeFileSync(invalidJson, '{"private-field":"private-value",', { mode: 0o600 });
+  for (const path of [join(f.home, 'private-missing.json'), f.home, invalidJson]) {
+    const result = run(t, 'ok', {
+      TEST_ARGUMENTS: JSON.stringify([
+        join(f.home, 'missing-credentials'),
+        'gpt-6.1-sol',
+        '--evaluation-input',
+        path,
+      ]),
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'USAGE',
+      diagnostic: { stage: 'input', reason: 'unknown', location: null },
+    });
+    assert.deepEqual(result.requests, []);
+  }
+  for (const message of ['private-sentinel', 'RANKING_INCOMPLETE', 'siwc_relogin_required']) {
+    const result = run(
+      t,
+      'ok',
+      { TEST_EVALUATION_EXCEPTION: message, TEST_STORAGE_EXCEPTION: 'siwc_relogin_required' },
+      { securities: [{ exchange: 'NAS', symbol: 'AAPL' }] },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: 'USAGE',
+      diagnostic: { stage: 'input', reason: 'unknown', location: null },
+    });
+    assert.deepEqual(result.requests, []);
+  }
+});
+
+test('CLI leaves input after valid evaluation data for authentication and subsequent model failures', (t) => {
+  const input = { securities: [{ exchange: 'NAS', symbol: 'AAPL' }] };
+  const auth = run(t, 'ok', { TEST_STORAGE_EXCEPTION: 'siwc_relogin_required' }, input);
+  assert.equal(auth.status, 1, auth.stderr);
+  assert.equal(auth.stdout, '');
+  assert.deepEqual(JSON.parse(auth.stderr), {
+    error: 'siwc_relogin_required',
+    action: 'login',
+    diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+  });
+  assert.deepEqual(auth.requests, []);
+  const model = run(t, 'auth-failure', {}, input);
+  assert.equal(model.status, 1, model.stderr);
+  assert.equal(model.stdout, '');
+  assert.deepEqual(JSON.parse(model.stderr), {
+    error: 'AUTH_FAILED',
+    diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+  });
+  assert.equal(model.requests.length, 1);
+  assert.equal(model.requests[0].url, 'https://api.openai.com/v1/responses');
+  assert.equal(model.requests[0].body.model, 'gpt-6.1-sol');
+  assert.equal(model.requests[0].body.stream, true);
+  assert.equal(model.requests[0].body.store, false);
 });
 
 test('CLI binds final IDs to the observed context of the same individual security', (t) => {

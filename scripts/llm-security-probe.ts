@@ -37,7 +37,6 @@ try {
       : !/^[1-9]$|^10$/.test(top ?? '') || extra.length)
   )
     throw new Error('USAGE');
-  stage = 'unknown';
   const securities = new Map<string, Security>();
   const identities = new Map<string, string>();
   const observations: unknown[] = [];
@@ -77,6 +76,7 @@ try {
       });
     }
   }
+  stage = 'unknown';
   const { readSiwcCredentials } = await import('./siwc-auth.ts');
   const credentials = await readSiwcCredentials(directory);
   const secrets = [
