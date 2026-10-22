@@ -4,6 +4,12 @@ import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import { mock } from 'node:test';
 
 mock.timers.enable({ apis: ['Date'], now: Number(process.env.TEST_NOW) });
+let elapsedMs = 0;
+mock.method(performance, 'now', () => elapsedMs);
+function tickClock(milliseconds) {
+  elapsedMs += milliseconds;
+  mock.timers.tick(milliseconds);
+}
 const usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
 const completed = { type: 'response.completed', response: { usage } };
 let modelRequests = 0;
@@ -68,7 +74,10 @@ if (['retrieval-blocked', 'judgment-blocked'].includes(scenario)) {
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, delay, ...args) =>
     originalSetTimeout(
-      callback,
+      () => {
+        tickClock(delay);
+        callback(...args);
+      },
       (scenario === 'retrieval-blocked' && delay === 120_000) ||
         (scenario === 'judgment-blocked' && delay === 180_000)
         ? 10
@@ -134,6 +143,14 @@ function sse(events) {
 }
 globalThis.fetch = async (url, init = {}) => {
   const request = new URL(url);
+  if (process.env.TEST_STATISTICS_CLOCK)
+    tickClock(
+      request.pathname.endsWith('/responses')
+        ? 7
+        : request.pathname.endsWith('/search-info')
+          ? 11
+          : 0,
+    );
   appendFileSync(
     process.env.TEST_TRACE,
     `${JSON.stringify({ url: request.href, body: init.body ? JSON.parse(init.body) : null })}\n`,
@@ -288,6 +305,8 @@ globalThis.fetch = async (url, init = {}) => {
     setTimeout(() => {}, 30);
     return new Promise(() => {});
   }
+  if (judging && process.env.TEST_WALL_CLOCK_SHIFT)
+    mock.timers.setTime(Date.now() + Number(process.env.TEST_WALL_CLOCK_SHIFT));
   if (judging) {
     assert.equal(body.tools?.length ?? 0, 0);
     assert.ok(prompt.evidenceRecords);
@@ -309,6 +328,29 @@ globalThis.fetch = async (url, init = {}) => {
     }));
     return sse([
       { type: 'response.created', response: { id: 'resp_info', model: body.model, created_at: 1 } },
+      ...(scenario === 'web-duplicates'
+        ? [
+            {
+              type: 'response.output_item.added',
+              output_index: 9,
+              item: {
+                type: 'web_search_call',
+                id: 'private-id synthetic-subscription',
+                status: 'in_progress',
+              },
+            },
+            {
+              type: 'response.output_item.done',
+              output_index: 9,
+              item: {
+                type: 'web_search_call',
+                id: 'private-id synthetic-subscription',
+                status: 'completed',
+                action: { type: 'search', queries: ['AAPL'] },
+              },
+            },
+          ]
+        : []),
       ...calls.flatMap((item, index) => [
         { type: 'response.output_item.added', output_index: index, item },
         {
@@ -425,8 +467,8 @@ globalThis.fetch = async (url, init = {}) => {
     if (scenario === 'malformed-context-identity') value.evidence[0].exchange = ['NAS'];
   }
   if (['within-deadlines', 'judgment-overrun'].includes(scenario))
-    mock.timers.tick(judging ? (scenario === 'judgment-overrun' ? 61_000 : 59_000) : 119_000);
-  if (scenario === 'retrieval-overrun' && !judging) mock.timers.tick(120_000);
+    tickClock(judging ? (scenario === 'judgment-overrun' ? 61_000 : 59_000) : 119_000);
+  if (scenario === 'retrieval-overrun' && !judging) tickClock(120_000);
   const text = JSON.stringify(value);
   return sse([
     { type: 'response.created', response: { id: 'resp_result', model: body.model, created_at: 1 } },
@@ -453,6 +495,21 @@ globalThis.fetch = async (url, init = {}) => {
             item: { type: 'web_search_call', id: 'ws_source', status: 'in_progress' },
           },
           { type: 'response.output_item.done', output_index: 1, item: webItem },
+        ]
+      : []),
+    ...(!judging && scenario === 'web-duplicates'
+      ? [
+          {
+            type: 'response.output_item.added',
+            output_index: 8,
+            item: { ...webItem, id: 'private-id synthetic-subscription', status: 'in_progress' },
+          },
+          {
+            type: 'response.output_item.done',
+            output_index: 8,
+            item: { ...webItem, id: 'private-id synthetic-subscription' },
+          },
+          { type: 'response.output_item.done', output_index: 9, item: webItem },
         ]
       : []),
     ...(!judging && scenario === 'web-limit'

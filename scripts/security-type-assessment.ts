@@ -38,6 +38,16 @@ type Judgment = {
   evidence: string[];
 };
 export type AssessmentStage = 'retrieval' | 'judgment' | 'output';
+export type AssessmentStatistics = Record<
+  'retrieval' | 'judgment',
+  {
+    status: 'completed' | 'failed' | 'not_started';
+    elapsedMs: number | null;
+    modelRequests: number;
+    infoToolCalls: number;
+    observedWebToolCalls: number;
+  }
+>;
 export type Security = {
   exchange: KisExchange;
   symbol: string;
@@ -183,9 +193,27 @@ export async function assessSecurityTypes({
   inputMode: 'evaluation' | 'rankings';
   observations: unknown[];
   topPerRanking?: number;
-  onStage: (stage: AssessmentStage) => void;
+  onStage: (stage: AssessmentStage, statistics: AssessmentStatistics) => void;
 }) {
-  onStage('retrieval');
+  const statistics: AssessmentStatistics = {
+    retrieval: {
+      status: 'not_started',
+      elapsedMs: null,
+      modelRequests: 0,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+    judgment: {
+      status: 'not_started',
+      elapsedMs: null,
+      modelRequests: 0,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+  };
+  let activeStage: AssessmentStage = 'retrieval';
+  let stageStartedAt = performance.now();
+  onStage('retrieval', statistics);
   const evaluation = inputMode === 'evaluation';
   const securities = new Map(
     inputs.map((security) => [keyOf(security.exchange, security.symbol), security]),
@@ -211,6 +239,7 @@ export async function assessSecurityTypes({
         failure = new DiagnosticError('MODEL_LIMIT');
         throw failure;
       }
+      if (activeStage !== 'output') statistics[activeStage].modelRequests++;
       return fetch(url, init);
     },
   });
@@ -241,6 +270,7 @@ export async function assessSecurityTypes({
         },
       },
       execute: async ({ exchange, symbol }) => {
+        statistics.retrieval.infoToolCalls++;
         if (failure) throw failure;
         if (!securities.has(keyOf(exchange, symbol))) {
           failure = new Error('MODEL_OUTPUT');
@@ -282,6 +312,7 @@ export async function assessSecurityTypes({
     stage: 'retrieval' | 'judgment',
     evidenceRecords: EvidenceRecord[] = [],
   ) => {
+    const observedWebCalls = new Set<string>();
     const stageRequests = requests;
     const stageCompletions = completions;
     const result = streamText({
@@ -332,6 +363,8 @@ export async function assessSecurityTypes({
           };
         };
         if (raw.item?.type === 'web_search_call') {
+          if (raw.item.id) observedWebCalls.add(raw.item.id);
+          statistics[stage].observedWebToolCalls = observedWebCalls.size;
           if (stage === 'judgment') throw new Error('MODEL_OUTPUT');
           if (raw.item.id) webCalls.add(raw.item.id);
           if (webCalls.size > 32) {
@@ -434,7 +467,11 @@ export async function assessSecurityTypes({
         excerptOrigin: 'model_extracted',
       };
     });
-    onStage('judgment');
+    statistics.retrieval.status = 'completed';
+    statistics.retrieval.elapsedMs = Math.round(performance.now() - stageStartedAt);
+    activeStage = 'judgment';
+    stageStartedAt = performance.now();
+    onStage('judgment', statistics);
     const evidenceById = new Map(evidenceRecords.map((record) => [record.id, record]));
     const parsed = await runStage('judgment', evidenceRecords);
     if (!Array.isArray(parsed.judgments)) throw new Error('MODEL_OUTPUT');
@@ -461,7 +498,10 @@ export async function assessSecurityTypes({
       };
     });
     if (seen.size !== securities.size) throw new Error('MODEL_OUTPUT');
-    onStage('output');
+    statistics.judgment.status = 'completed';
+    statistics.judgment.elapsedMs = Math.round(performance.now() - stageStartedAt);
+    activeStage = 'output';
+    onStage('output', statistics);
     const status = assessed.every((item) => item.type === 'unknown' || !item.applicable)
       ? 'analysis_insufficient'
       : 'assessed';
@@ -501,6 +541,10 @@ export async function assessSecurityTypes({
     safe(result, secrets);
     return result;
   } finally {
+    if (activeStage !== 'output') {
+      statistics[activeStage].status = 'failed';
+      statistics[activeStage].elapsedMs = Math.round(performance.now() - stageStartedAt);
+    }
     clearTimeout(retrievalDeadline);
     clearTimeout(deadline);
   }

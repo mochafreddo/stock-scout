@@ -5,6 +5,7 @@ import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 import {
   type AssessmentStage,
+  type AssessmentStatistics,
   assessSecurityTypes,
   type Security,
 } from './security-type-assessment.ts';
@@ -30,6 +31,7 @@ const safeCodes = [
   'ANALYSIS_INSUFFICIENT',
 ];
 const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
+let statistics: AssessmentStatistics | undefined;
 let stage: 'input' | 'authentication' | 'ranking' | 'unknown' | AssessmentStage = 'input';
 try {
   const [directory, model, top, ...extra] = process.argv.slice(2);
@@ -164,8 +166,9 @@ try {
     model,
     accessToken: credentials.accessToken,
     secrets,
-    onStage: (next) => {
+    onStage: (next, measured) => {
       stage = next;
+      statistics = measured;
     },
     inputMode: evaluation ? 'evaluation' : 'rankings',
     observations,
@@ -186,6 +189,7 @@ try {
         stage,
         reason: error instanceof DiagnosticError ? error.reason : 'unknown',
         location: null,
+        ...(['retrieval', 'judgment'].includes(stage) && statistics ? { statistics } : {}),
       },
       ...(code === 'siwc_refresh_not_allowed' && error instanceof Error && 'retryAt' in error
         ? { retryAt: error.retryAt }

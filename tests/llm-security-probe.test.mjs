@@ -13,11 +13,20 @@ test('type assessment CLI rejects missing arguments without credentials or netwo
   });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(legacyFailure(result.stderr), {
     error: 'USAGE',
     diagnostic: { stage: 'input', reason: 'unknown', location: null },
   });
 });
+
+function legacyFailure(stderr) {
+  const output = JSON.parse(stderr);
+  if (['retrieval', 'judgment'].includes(output.diagnostic.stage)) {
+    assert.ok(output.diagnostic.statistics);
+    delete output.diagnostic.statistics;
+  }
+  return output;
+}
 
 function run(t, scenario = 'ok', extraEnv = {}, evaluationInput, credentialOverrides = {}) {
   const f = fixture();
@@ -142,7 +151,7 @@ test('CLI rejects unsolicited final web calls and sensitive judgment output with
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '', scenario);
     assert.deepEqual(
-      JSON.parse(result.stderr),
+      legacyFailure(result.stderr),
       {
         error: code,
         diagnostic: {
@@ -162,7 +171,7 @@ test('CLI stops a blocked retrieval or final judgment at its deadline without pa
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '', scenario);
-    assert.equal(JSON.parse(result.stderr).error, 'MODEL_INCOMPLETE', scenario);
+    assert.equal(legacyFailure(result.stderr).error, 'MODEL_INCOMPLETE', scenario);
     assert.equal(
       result.requests.filter((r) => r.url.endsWith('/responses')).length,
       scenario === 'retrieval-blocked' ? 1 : 3,
@@ -174,14 +183,14 @@ test('CLI refuses model fields that could overwrite original ranking identity', 
   const result = run(t, 'forged-provenance');
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.equal(JSON.parse(result.stderr).error, 'MODEL_OUTPUT');
+  assert.equal(legacyFailure(result.stderr).error, 'MODEL_OUTPUT');
 });
 
 test('CLI shares the model request ceiling between retrieval and judgment', (t) => {
   const result = run(t, 'model-limit');
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.equal(JSON.parse(result.stderr).error, 'MODEL_LIMIT');
+  assert.equal(legacyFailure(result.stderr).error, 'MODEL_LIMIT');
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 12);
 });
 
@@ -207,7 +216,7 @@ test('CLI rejects malformed evaluation input before reading credentials or sendi
   );
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(legacyFailure(result.stderr), {
     error: 'USAGE',
     diagnostic: { stage: 'input', reason: 'unknown', location: null },
   });
@@ -274,7 +283,7 @@ test('CLI rejects empty, excessive, duplicate, malformed or answer-bearing evalu
     const result = run(t, 'ok', {}, input);
     assert.equal(result.status, 1, JSON.stringify(input));
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: 'USAGE',
       diagnostic: { stage: 'input', reason: 'unknown', location: null },
     });
@@ -298,7 +307,7 @@ test('CLI keeps evaluation read, parse and unexpected file failures in input bef
     });
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: 'USAGE',
       diagnostic: { stage: 'input', reason: 'unknown', location: null },
     });
@@ -313,7 +322,7 @@ test('CLI keeps evaluation read, parse and unexpected file failures in input bef
     );
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: 'USAGE',
       diagnostic: { stage: 'input', reason: 'unknown', location: null },
     });
@@ -335,7 +344,7 @@ test('CLI leaves input after valid evaluation data for authentication and subseq
   const model = run(t, 'auth-failure', {}, input);
   assert.equal(model.status, 1, model.stderr);
   assert.equal(model.stdout, '');
-  assert.deepEqual(JSON.parse(model.stderr), {
+  assert.deepEqual(legacyFailure(model.stderr), {
     error: 'AUTH_FAILED',
     diagnostic: { stage: 'retrieval', reason: 'AUTH_FAILED', location: null },
   });
@@ -358,7 +367,7 @@ test('CLI binds final IDs to the observed context of the same individual securit
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '', scenario);
     assert.deepEqual(
-      JSON.parse(result.stderr),
+      legacyFailure(result.stderr),
       {
         error: 'MODEL_OUTPUT',
         diagnostic: {
@@ -381,7 +390,7 @@ test('CLI reserves final judgment time inside the original total deadline', (t) 
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: 'MODEL_INCOMPLETE',
       diagnostic: {
         stage: scenario === 'retrieval-overrun' ? 'retrieval' : 'judgment',
@@ -400,7 +409,7 @@ test('CLI treats model authentication failure as global failure without paid fal
   const result = run(t, 'auth-failure');
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.equal(JSON.parse(result.stderr).error, 'AUTH_FAILED');
+  assert.equal(legacyFailure(result.stderr).error, 'AUTH_FAILED');
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
   assert.doesNotMatch(result.stderr, /synthetic-subscription/);
 });
@@ -409,7 +418,7 @@ test('CLI distinguishes explicit subscription exhaustion without sending an unbu
   const result = run(t, 'quota-http');
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.equal(JSON.parse(result.stderr).error, 'SUBSCRIPTION_LIMIT');
+  assert.equal(legacyFailure(result.stderr).error, 'SUBSCRIPTION_LIMIT');
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
 });
 
@@ -437,7 +446,7 @@ test('CLI never emits partial success on rank, identity or common lookup failure
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '', scenario);
-    assert.equal(JSON.parse(result.stderr).error, code, scenario);
+    assert.equal(legacyFailure(result.stderr).error, code, scenario);
   }
 });
 
@@ -452,7 +461,7 @@ test('CLI rejects incomplete final and intermediate model steps even when JSON i
     assert.equal(result.status, 1, scenario);
     assert.equal(result.stdout, '', scenario);
     assert.ok(
-      ['MODEL_FAILED', 'MODEL_INCOMPLETE'].includes(JSON.parse(result.stderr).error),
+      ['MODEL_FAILED', 'MODEL_INCOMPLETE'].includes(legacyFailure(result.stderr).error),
       result.stderr,
     );
   }
@@ -474,7 +483,7 @@ test('CLI validates identity, input membership, exactly one result and observed 
     assert.equal(result.status, 1, scenario);
     assert.equal(result.stdout, '', scenario);
     assert.equal(
-      JSON.parse(result.stderr).error,
+      legacyFailure(result.stderr).error,
       scenario === 'ambiguous' ? 'IDENTITY_AMBIGUOUS' : 'MODEL_OUTPUT',
       scenario + result.stderr,
     );
@@ -555,7 +564,7 @@ test('CLI fails globally on failed search operations and unlocalized web failure
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '');
-    assert.equal(JSON.parse(result.stderr).error, 'SEARCH_FAILED');
+    assert.equal(legacyFailure(result.stderr).error, 'SEARCH_FAILED');
   }
 });
 
@@ -564,7 +573,7 @@ test('CLI enforces information and hosted web-call ceilings without a successful
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '');
-    assert.equal(JSON.parse(result.stderr).error, 'MODEL_LIMIT');
+    assert.equal(legacyFailure(result.stderr).error, 'MODEL_LIMIT');
     assert.ok(result.requests.filter((r) => r.url.includes('/search-info?')).length <= 32);
   }
 });
@@ -573,7 +582,7 @@ test('CLI refuses unbounded paid search even when an API key exists after subscr
   const result = run(t, 'quota-http', { OPENAI_API_KEY: 'synthetic-paid' });
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.equal(JSON.parse(result.stderr).error, 'PAID_BUDGET_UNPROVABLE');
+  assert.equal(legacyFailure(result.stderr).error, 'PAID_BUDGET_UNPROVABLE');
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 1);
   assert.doesNotMatch(result.stderr, /synthetic-paid/);
 });
@@ -582,7 +591,7 @@ test('CLI reports ranking incompleteness in the ranking stage', (t) => {
   const result = run(t, 'ranking-incomplete');
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(legacyFailure(result.stderr), {
     error: 'RANKING_INCOMPLETE',
     diagnostic: { stage: 'ranking', reason: 'RANKING_INCOMPLETE', location: null },
   });
@@ -609,7 +618,7 @@ test('CLI carries confirmed identity and sensitive-output reasons from their int
     const result = run(t, scenario);
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: reason,
       diagnostic: {
         stage:
@@ -669,7 +678,7 @@ test('CLI keeps argument failures and unexpected input exceptions in input witho
     const result = run(t, 'ok', { TEST_ARGUMENTS: JSON.stringify(args) });
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: 'USAGE',
       diagnostic: { stage: 'input', reason: 'unknown', location: null },
     });
@@ -683,7 +692,7 @@ test('CLI keeps argument failures and unexpected input exceptions in input witho
     const result = run(t, 'ok', { TEST_ARGUMENT_EXCEPTION: message });
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error,
       diagnostic: { stage: 'input', reason: 'unknown', location: null },
       ...(error === 'siwc_relogin_required' ? { action: 'login' } : {}),
@@ -703,7 +712,7 @@ test('CLI does not trust known identifiers, prefixes or reason properties on ext
     const result = run(t, 'ok', { TEST_STORAGE_EXCEPTION: message });
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error,
       diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
       ...(error === 'siwc_relogin_required' ? { action: 'login' } : {}),
@@ -723,7 +732,7 @@ test('CLI separates aggregated failures from a confirmed model authentication fa
     const result = run(t, scenario);
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error,
       diagnostic: { stage, reason, location: null },
     });
@@ -734,7 +743,7 @@ test('CLI preserves a confirmed sensitive lookup reason while keeping its legacy
   const result = run(t, 'sensitive-lookup');
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(legacyFailure(result.stderr), {
     error: 'QUERY_FAILED',
     diagnostic: { stage: 'retrieval', reason: 'SENSITIVE_OUTPUT', location: null },
   });
@@ -756,7 +765,7 @@ test('CLI keeps unexpected authentication and dynamic import failures in authent
     const result = run(t, 'ok', extraEnv);
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: extraEnv.TEST_STORAGE_EXCEPTION ? 'siwc_refresh_failed' : 'MODEL_FAILED',
       diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
     });
@@ -775,7 +784,7 @@ test('CLI keeps evidence rejection in retrieval without starting judgment', (t) 
   );
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(legacyFailure(result.stderr), {
     error: 'MODEL_OUTPUT',
     diagnostic: { stage: 'retrieval', reason: 'unknown', location: null },
   });
@@ -803,7 +812,7 @@ test('CLI enters judgment after evidence validation and output after judgment va
     );
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error,
       diagnostic: { stage, reason, location: null },
     });
@@ -826,7 +835,7 @@ test('CLI keeps KIS authentication failure in retrieval with a confirmed safe re
   );
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(legacyFailure(result.stderr), {
     error: 'AUTH_FAILED',
     diagnostic: { stage: 'retrieval', reason: 'AUTH_FAILED', location: null },
   });
@@ -866,7 +875,7 @@ test('CLI preserves confirmed execution failure reasons without changing calls o
     );
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: reason,
       diagnostic: { stage, reason, location: null },
     });
@@ -906,7 +915,7 @@ test('CLI retains stages for unexpected preparation and final serialization fail
       );
       assert.equal(result.status, 1, stage + result.stderr);
       assert.equal(result.stdout, '');
-      assert.deepEqual(JSON.parse(result.stderr), {
+      assert.deepEqual(legacyFailure(result.stderr), {
         error:
           message === 'AUTH_FAILED' || message === 'siwc_relogin_required'
             ? message
@@ -948,7 +957,7 @@ test('CLI leaves unregistered HTTP exceptions unknown within the active model st
       );
       assert.equal(result.status, 1, result.stderr);
       assert.equal(result.stdout, '');
-      assert.deepEqual(JSON.parse(result.stderr), {
+      assert.deepEqual(legacyFailure(result.stderr), {
         error: 'MODEL_FAILED',
         diagnostic: { stage, reason: 'unknown', location: null },
       });
@@ -973,7 +982,7 @@ test('CLI preserves ranking failures and confirmed authentication causes without
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: 'RANKING_FAILED',
       diagnostic: { stage: 'ranking', reason, location: null },
     });
@@ -1020,7 +1029,7 @@ test('CLI keeps unexpected ranking HTTP exceptions unknown without trusting mess
     const result = run(t, 'ranking-exception', { TEST_RANKING_EXCEPTION: message });
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(legacyFailure(result.stderr), {
       error: 'RANKING_FAILED',
       diagnostic: { stage: 'ranking', reason: 'unknown', location: null },
     });
@@ -1030,5 +1039,182 @@ test('CLI keeps unexpected ranking HTTP exceptions unknown without trusting mess
       '/uapi/overseas-stock/v1/ranking/trade-vol',
     );
     assert.doesNotMatch(result.stderr, /private-|synthetic-|EGW00123|siwc_/);
+  }
+});
+
+test('CLI reports failed retrieval and unstarted judgment statistics at the elapsed deadline', (t) => {
+  const result = run(t, 'retrieval-overrun');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: 'MODEL_INCOMPLETE',
+    diagnostic: {
+      stage: 'retrieval',
+      reason: 'MODEL_INCOMPLETE',
+      location: null,
+      statistics: {
+        retrieval: {
+          status: 'failed',
+          elapsedMs: 120000,
+          modelRequests: 2,
+          infoToolCalls: 1,
+          observedWebToolCalls: 0,
+        },
+        judgment: {
+          status: 'not_started',
+          elapsedMs: null,
+          modelRequests: 0,
+          infoToolCalls: 0,
+          observedWebToolCalls: 0,
+        },
+      },
+    },
+  });
+  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 2);
+  const lookup = result.requests.find((r) => r.url.includes('/search-info?'));
+  assert.deepEqual(Object.fromEntries(new URL(lookup.url).searchParams), {
+    PRDT_TYPE_CD: '512',
+    PDNO: 'AAPL',
+  });
+});
+
+test('CLI preserves completed retrieval timing when judgment reaches the shared elapsed deadline', (t) => {
+  const result = run(t, 'judgment-overrun');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr).diagnostic.statistics, {
+    retrieval: {
+      status: 'completed',
+      elapsedMs: 119000,
+      modelRequests: 2,
+      infoToolCalls: 1,
+      observedWebToolCalls: 0,
+    },
+    judgment: {
+      status: 'failed',
+      elapsedMs: 61000,
+      modelRequests: 1,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+  });
+  const models = result.requests.filter((r) => r.url.endsWith('/responses'));
+  assert.equal(models.length, 3);
+  assert.equal(models.at(-1).body.tools?.length ?? 0, 0);
+});
+
+test('CLI counts failed HTTP attempts and separates stage calls and validation time on other failures', (t) => {
+  for (const [scenario, extra, stage, retrievalMs, requests, infos] of [
+    ['auth-failure', {}, 'retrieval', 7, 1, 0],
+    ['global-lookup', {}, 'retrieval', 18, 1, 1],
+    ['unobserved-source', {}, 'retrieval', 25, 2, 1],
+    ['malformed-judgment', {}, 'judgment', 25, 2, 1],
+    ['malformed-judgment', { TEST_WALL_CLOCK_SHIFT: '-60000' }, 'judgment', 25, 2, 1],
+    ['web-duplicates', { TEST_HTTP_EXCEPTION_STAGE: 'judgment' }, 'judgment', 25, 2, 1],
+    ['ok', { TEST_HTTP_EXCEPTION_STAGE: 'retrieval' }, 'retrieval', 7, 1, 0],
+  ]) {
+    const result = run(t, scenario, {
+      TEST_STATISTICS_CLOCK: '1',
+      TEST_HTTP_EXCEPTION: 'private-field private-value /private/path synthetic-subscription',
+      ...extra,
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const diagnostic = JSON.parse(result.stderr).diagnostic;
+    assert.equal(diagnostic.stage, stage);
+    assert.deepEqual(
+      diagnostic.statistics,
+      {
+        retrieval: {
+          status: stage === 'retrieval' ? 'failed' : 'completed',
+          elapsedMs: retrievalMs,
+          modelRequests: requests,
+          infoToolCalls: infos,
+          observedWebToolCalls: scenario === 'web-duplicates' ? 2 : 0,
+        },
+        judgment: {
+          status: stage === 'retrieval' ? 'not_started' : 'failed',
+          elapsedMs: stage === 'retrieval' ? null : 7,
+          modelRequests: stage === 'retrieval' ? 0 : 1,
+          infoToolCalls: 0,
+          observedWebToolCalls: 0,
+        },
+      },
+      scenario,
+    );
+    assert.equal(
+      result.requests.filter((r) => r.url.endsWith('/responses')).length,
+      requests + (stage === 'judgment' ? 1 : 0),
+    );
+    assert.equal(result.requests.filter((r) => r.url.includes('/search-info?')).length, infos);
+    for (const request of result.requests.filter((r) => r.url.endsWith('/responses'))) {
+      assert.equal(request.body.model, 'gpt-6.1-sol');
+      assert.equal(request.body.stream, true);
+      assert.equal(request.body.store, false);
+    }
+    assert.doesNotMatch(
+      result.stderr,
+      /private-field|private-value|private-id|private.path|synthetic-subscription|test-key|test-secret/,
+    );
+  }
+});
+
+test('CLI reports blocked stage time through cancellation and preserves unstarted and completed stages', (t) => {
+  for (const scenario of ['retrieval-blocked', 'judgment-blocked']) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const retrieval = scenario === 'retrieval-blocked';
+    assert.deepEqual(JSON.parse(result.stderr).diagnostic.statistics, {
+      retrieval: {
+        status: retrieval ? 'failed' : 'completed',
+        elapsedMs: retrieval ? 120000 : 0,
+        modelRequests: retrieval ? 1 : 2,
+        infoToolCalls: 1,
+        observedWebToolCalls: 0,
+      },
+      judgment: {
+        status: retrieval ? 'not_started' : 'failed',
+        elapsedMs: retrieval ? null : 180000,
+        modelRequests: retrieval ? 0 : 1,
+        infoToolCalls: 0,
+        observedWebToolCalls: 0,
+      },
+    });
+  }
+});
+
+test('CLI statistics preserve the existing request and tool ceilings', (t) => {
+  for (const [scenario, models, infos, webs, stage] of [
+    ['model-limit', 12, 11, 0, 'judgment'],
+    ['info-limit', 2, 33, 0, 'retrieval'],
+    ['web-limit', 2, 1, 33, 'retrieval'],
+    ['judgment-web-call', 2, 1, 0, 'judgment'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    const stats = JSON.parse(result.stderr).diagnostic.statistics;
+    assert.deepEqual(stats.retrieval, {
+      status: stage === 'retrieval' ? 'failed' : 'completed',
+      elapsedMs: 0,
+      modelRequests: models,
+      infoToolCalls: infos,
+      observedWebToolCalls: webs,
+    });
+    assert.deepEqual(stats.judgment, {
+      status: stage === 'retrieval' ? 'not_started' : 'failed',
+      elapsedMs: stage === 'retrieval' ? null : 0,
+      modelRequests: scenario === 'judgment-web-call' ? 1 : 0,
+      infoToolCalls: 0,
+      observedWebToolCalls: scenario === 'judgment-web-call' ? 1 : 0,
+    });
+    assert.equal(
+      result.requests.filter((r) => r.url.endsWith('/responses')).length,
+      models + (scenario === 'judgment-web-call' ? 1 : 0),
+    );
+    assert.equal(
+      result.requests.filter((r) => r.url.includes('/search-info?')).length,
+      Math.min(infos, 32),
+    );
   }
 });
