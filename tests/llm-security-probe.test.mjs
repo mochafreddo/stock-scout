@@ -21,6 +21,7 @@ test('type assessment CLI rejects missing arguments without credentials or netwo
 
 function legacyFailure(stderr) {
   const output = JSON.parse(stderr);
+  delete output.diagnostic.inputSnapshot;
   if (['retrieval', 'judgment'].includes(output.diagnostic.stage)) {
     assert.ok(output.diagnostic.statistics);
     delete output.diagnostic.statistics;
@@ -75,7 +76,7 @@ function run(t, scenario = 'ok', extraEnv = {}, evaluationInput, credentialOverr
       directory,
       'gpt-6.1-sol',
       ...(evaluationInput === undefined
-        ? [scenario.startsWith('types') ? '2' : '1']
+        ? [scenario.startsWith('types') || scenario === 'partial-ranking-incomplete' ? '2' : '1']
         : ['--evaluation-input', inputFile]),
     ],
     {
@@ -499,6 +500,7 @@ test('CLI discloses reduced assessment coverage and lookup failures', (t) => {
     excluded: 1,
     unconfirmed: 1,
     individualLookupFailures: 1,
+    inclusionRate: 0,
   });
 });
 
@@ -520,6 +522,7 @@ test('CLI preserves distinct share classes and applies all eligibility types to 
     excluded: 6,
     unconfirmed: 0,
     individualLookupFailures: 0,
+    inclusionRate: 0.4,
   });
   assert.equal(output.securities.find((item) => item.symbol === 'BBD').type, 'preferred_adr');
   assert.equal(output.securities.find((item) => item.symbol === 'BBDO').type, 'common_adr');
@@ -1056,7 +1059,7 @@ test('CLI reports failed retrieval and unstarted judgment statistics at the elap
   const result = run(t, 'retrieval-overrun');
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(withoutSnapshot(result.stderr), {
     error: 'MODEL_INCOMPLETE',
     diagnostic: {
       stage: 'retrieval',
@@ -1263,7 +1266,10 @@ test('CLI distinguishes source and reference failures without additional request
     assert.equal(models[0].body.stream, true);
     assert.equal(models[0].body.store, false);
     if (stage === 'judgment') assert.equal(models.at(-1).body.tools?.length ?? 0, 0);
-    assert.doesNotMatch(result.stderr, /synthetic-|test-key|test-secret|invented|https:/);
+    assert.doesNotMatch(
+      JSON.stringify(withoutSnapshot(result.stderr)),
+      /synthetic-|test-key|test-secret|invented|https:/,
+    );
   }
 });
 
@@ -1398,7 +1404,7 @@ test('CLI integrates response-location rejection and stage statistics for reorde
   });
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(withoutSnapshot(result.stderr), {
     error: 'MODEL_OUTPUT',
     diagnostic: {
       stage: 'retrieval',
@@ -1438,4 +1444,99 @@ test('CLI integrates response-location rejection and stage statistics for reorde
     PRDT_TYPE_CD: '512',
     PDNO: 'AAPL',
   });
+});
+
+test('CLI retains original six-ranking input and settings when retrieval times out', (t) => {
+  const result = run(t, 'retrieval-blocked');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const failure = JSON.parse(result.stderr);
+  assert.equal(failure.error, 'MODEL_INCOMPLETE');
+  const snapshot = failure.diagnostic.inputSnapshot;
+  assert.equal(snapshot.model, 'gpt-6.1-sol');
+  assert.equal(snapshot.inputMode, 'rankings');
+  assert.equal(snapshot.topPerRanking, 1);
+  assert.equal(snapshot.observations.length, 6);
+  assert.equal(snapshot.securities[0].exchange, 'NAS');
+  assert.equal(snapshot.securities[0].symbol, 'AAPL');
+  assert.equal(snapshot.securities[0].rsym, 'DNASAAPL');
+  assert.deepEqual(
+    snapshot.securities[0].rankings.map(({ kind, rank }) => ({ kind, rank })),
+    [
+      { kind: 'volume', rank: 1 },
+      { kind: 'amount', rank: 1 },
+    ],
+  );
+  assert.doesNotMatch(result.stderr, /synthetic-subscription|synthetic-refresh|test-secret/);
+});
+
+function withoutSnapshot(stderr) {
+  const output = JSON.parse(stderr);
+  delete output.diagnostic.inputSnapshot;
+  return output;
+}
+
+test('CLI preserves empty and partially collected ranking observations on failure', (t) => {
+  const empty = run(t, 'empty-rankings');
+  assert.equal(empty.status, 1, empty.stderr);
+  const failure = JSON.parse(empty.stderr);
+  assert.equal(failure.error, 'ANALYSIS_INSUFFICIENT');
+  assert.deepEqual(failure.diagnostic.inputSnapshot.securities, []);
+  assert.equal(failure.diagnostic.inputSnapshot.observations.length, 6);
+  assert.ok(failure.diagnostic.inputSnapshot.observations.every((row) => row.rowCount === 0));
+  assert.equal(empty.requests.filter((row) => row.url.endsWith('/responses')).length, 0);
+  const partial = run(t, 'rank-failure');
+  assert.equal(partial.status, 1, partial.stderr);
+  const snapshot = JSON.parse(partial.stderr).diagnostic.inputSnapshot;
+  assert.equal(snapshot.observations.length, 4);
+  assert.equal(snapshot.securities[0].symbol, 'AAPL');
+});
+
+test('CLI reports measured successful coverage and stage durations', (t) => {
+  const result = run(t, 'ok', { TEST_STATISTICS_CLOCK: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.coverage.inclusionRate, 1);
+  assert.deepEqual(output.statistics, {
+    retrieval: {
+      status: 'completed',
+      elapsedMs: 25,
+      modelRequests: 2,
+      infoToolCalls: 1,
+      observedWebToolCalls: 0,
+    },
+    judgment: {
+      status: 'completed',
+      elapsedMs: 7,
+      modelRequests: 1,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+  });
+});
+
+test('CLI omits the entire input snapshot if it contains an existing secret', (t) => {
+  const result = run(t, 'ok', { OPENAI_API_KEY: 'AAPL' });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const failure = JSON.parse(result.stderr);
+  assert.equal(failure.error, 'SENSITIVE_OUTPUT');
+  assert.equal(failure.diagnostic.inputSnapshot, undefined);
+  assert.doesNotMatch(result.stderr, /AAPL|test-key|test-secret|synthetic-/);
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 0);
+});
+
+test('CLI snapshot excludes mutations from a ranking that later fails validation', (t) => {
+  const result = run(t, 'partial-ranking-incomplete');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const failure = JSON.parse(result.stderr);
+  assert.equal(failure.error, 'RANKING_INCOMPLETE');
+  const snapshot = failure.diagnostic.inputSnapshot;
+  assert.equal(snapshot.observations.length, 1);
+  assert.deepEqual(
+    snapshot.securities[0].rankings.map(({ kind, rank }) => ({ kind, rank })),
+    [{ kind: 'volume', rank: 1 }],
+  );
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 0);
 });

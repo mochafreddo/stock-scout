@@ -32,6 +32,8 @@ const safeCodes = [
 ];
 const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
 let statistics: AssessmentStatistics | undefined;
+let inputSnapshot: Record<string, unknown> | undefined;
+let snapshotSecrets: (string | undefined)[] = [];
 let stage: 'input' | 'authentication' | 'ranking' | 'unknown' | AssessmentStage = 'input';
 try {
   const [directory, model, top, ...extra] = process.argv.slice(2);
@@ -95,6 +97,14 @@ try {
     process.env.KIS_APP_SECRET,
     process.env.OPENAI_API_KEY,
   ];
+  snapshotSecrets = secrets;
+  inputSnapshot = {
+    inputMode: evaluation ? 'evaluation' : 'rankings',
+    model,
+    ...(evaluation ? {} : { topPerRanking: Number(top) }),
+    securities: [...securities.values()],
+    observations,
+  };
   if (!evaluation) {
     stage = 'ranking';
     for (const exchange of exchanges)
@@ -148,6 +158,7 @@ try {
         const selected = [...ranks].filter((rank) => rank <= Number(top));
         if (selected.length < Number(top) && ['F', 'M'].includes(record.continuation))
           throw new DiagnosticError('RANKING_INCOMPLETE');
+        inputSnapshot.securities = structuredClone([...securities.values()]);
         observations.push({
           exchange,
           kind,
@@ -161,6 +172,8 @@ try {
       }
   }
   if (!securities.size) throw new Error('ANALYSIS_INSUFFICIENT');
+  if (secrets.some((secret) => secret && JSON.stringify(inputSnapshot).includes(secret)))
+    throw new DiagnosticError('SENSITIVE_OUTPUT');
   const result = await assessSecurityTypes({
     securities: [...securities.values()],
     model,
@@ -190,6 +203,10 @@ try {
         reason: error instanceof DiagnosticError ? error.reason : 'unknown',
         location: error instanceof DiagnosticError ? error.location : null,
         ...(['retrieval', 'judgment'].includes(stage) && statistics ? { statistics } : {}),
+        ...(inputSnapshot &&
+        !snapshotSecrets.some((secret) => secret && JSON.stringify(inputSnapshot).includes(secret))
+          ? { inputSnapshot }
+          : {}),
       },
       ...(code === 'siwc_refresh_not_allowed' && error instanceof Error && 'retryAt' in error
         ? { retryAt: error.retryAt }

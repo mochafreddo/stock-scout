@@ -245,6 +245,12 @@ globalThis.fetch = async (url, init = {}) => {
       body.output2 = [];
       return Response.json(body, { headers: { tr_cont: 'F' } });
     }
+    if (scenario === 'partial-ranking-incomplete' && request.pathname.endsWith('trade-pbmn'))
+      return Response.json(body, { headers: { tr_cont: 'F' } });
+    if (scenario === 'empty-rankings') {
+      body.output1.nrec = '0';
+      body.output2 = [];
+    }
     if (scenario === 'ranking-shape') body.output2 = { 'private-field': 'private-value' };
     if (scenario === 'ranking-invalid-row') {
       body.output2[0].rank = 'private-value';

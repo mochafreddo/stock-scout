@@ -567,10 +567,12 @@ export async function assessSecurityTypes({
       excluded: assessed.length - includedCount,
       unconfirmed: assessed.filter((item) => item.type === 'unknown' || !item.applicable).length,
       individualLookupFailures,
+      inclusionRate: includedCount / assessed.length,
     };
     const result = {
       status,
       coverage,
+      statistics,
       validation: 'unverified',
       dataSession: null,
       purpose: evaluation
