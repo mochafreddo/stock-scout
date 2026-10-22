@@ -67,7 +67,7 @@ const evidenceFields = [
   'effectiveDate',
   'subsequentChanges',
   'currentness',
-];
+] as const;
 const collectionSchema = jsonSchema<Record<string, unknown>>({
   type: 'object',
   additionalProperties: false,
@@ -144,8 +144,9 @@ function modelFailure(error: unknown) {
 
 const text = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0 && value.length <= 8000;
-function validateJudgment(value: unknown): Judgment {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('MODEL_OUTPUT');
+function validateJudgment(value: unknown, index: number): Judgment {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `judgments[${index}]`);
   const row = value as Record<string, unknown>;
   if (
     Object.keys(row).some(
@@ -153,26 +154,36 @@ function validateJudgment(value: unknown): Judgment {
         !['exchange', 'symbol', 'type', 'identity', 'applicable', 'reason', 'evidence'].includes(
           key,
         ),
-    ) ||
-    !exchanges.includes(row.exchange as KisExchange) ||
-    !text(row.symbol) ||
-    !types.includes(row.type as string) ||
-    !['confirmed', 'ambiguous'].includes(row.identity as string) ||
-    typeof row.applicable !== 'boolean' ||
-    !text(row.reason) ||
-    !Array.isArray(row.evidence) ||
-    row.evidence.length > 20 ||
-    !row.evidence.every(text)
+    )
   )
-    throw new Error('MODEL_OUTPUT');
+    throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `judgments[${index}]`);
+  for (const [field, valid] of [
+    ['exchange', () => exchanges.includes(row.exchange as KisExchange)],
+    ['symbol', () => text(row.symbol)],
+    ['type', () => types.includes(row.type as string)],
+    ['identity', () => ['confirmed', 'ambiguous'].includes(row.identity as string)],
+    ['applicable', () => typeof row.applicable === 'boolean'],
+    ['reason', () => text(row.reason)],
+    [
+      'evidence',
+      () => Array.isArray(row.evidence) && row.evidence.length <= 20 && row.evidence.every(text),
+    ],
+  ] as const) {
+    if (!valid())
+      throw new DiagnosticError(
+        Object.hasOwn(row, field) ? 'unknown' : 'missing_required_field',
+        'MODEL_OUTPUT',
+        `judgments[${index}].${field}`,
+      );
+  }
   return {
     exchange: row.exchange as KisExchange,
-    symbol: row.symbol,
+    symbol: row.symbol as string,
     type: row.type as string,
     identity: row.identity as Judgment['identity'],
-    applicable: row.applicable,
-    reason: row.reason,
-    evidence: row.evidence,
+    applicable: row.applicable as boolean,
+    reason: row.reason as string,
+    evidence: row.evidence as string[],
   };
 }
 
@@ -438,21 +449,44 @@ export async function assessSecurityTypes({
       clearTimeout(retrievalDeadline);
     }
     if (!Array.isArray(collected.evidence) || collected.evidence.length > securities.size * 20)
-      throw new Error('MODEL_OUTPUT');
+      throw new DiagnosticError(
+        Object.hasOwn(collected, 'evidence') ? 'unknown' : 'missing_required_field',
+        'MODEL_OUTPUT',
+      );
     const evidenceRecords: EvidenceRecord[] = collected.evidence.map((value, index) => {
       if (!value || typeof value !== 'object' || Array.isArray(value))
-        throw new Error('MODEL_OUTPUT');
+        throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `evidence[${index}]`);
       const row = value as Record<string, unknown>;
       const key = keyOf(String(row.exchange), String(row.symbol));
-      if (
-        !exchanges.includes(row.exchange as KisExchange) ||
-        !text(row.symbol) ||
-        !securities.has(key) ||
-        !evidenceFields.every((field) => text(row[field])) ||
-        !knownSources.has(String(row.source)) ||
-        (String(row.source).startsWith('kis:') && row.source !== `kis:${key}`)
-      )
-        throw new Error('MODEL_OUTPUT');
+      for (const [field, valid] of [
+        ['exchange', () => exchanges.includes(row.exchange as KisExchange)],
+        ['symbol', () => text(row.symbol)],
+      ] as const) {
+        if (!valid())
+          throw new DiagnosticError(
+            Object.hasOwn(row, field) ? 'unknown' : 'missing_required_field',
+            'MODEL_OUTPUT',
+            `evidence[${index}].${field}`,
+          );
+      }
+      if (!securities.has(key))
+        throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `evidence[${index}]`);
+      for (const field of evidenceFields) {
+        if (!text(row[field]))
+          throw new DiagnosticError(
+            Object.hasOwn(row, field) ? 'unknown' : 'missing_required_field',
+            'MODEL_OUTPUT',
+            `evidence[${index}].${field}`,
+          );
+      }
+      if (!knownSources.has(String(row.source)))
+        throw new DiagnosticError('unobserved_source', 'MODEL_OUTPUT', `evidence[${index}].source`);
+      if (String(row.source).startsWith('kis:') && row.source !== `kis:${key}`)
+        throw new DiagnosticError(
+          'cross_security_evidence',
+          'MODEL_OUTPUT',
+          `evidence[${index}].source`,
+        );
       return {
         id: `e${index + 1}`,
         exchange: row.exchange as KisExchange,
@@ -474,20 +508,41 @@ export async function assessSecurityTypes({
     onStage('judgment', statistics);
     const evidenceById = new Map(evidenceRecords.map((record) => [record.id, record]));
     const parsed = await runStage('judgment', evidenceRecords);
-    if (!Array.isArray(parsed.judgments)) throw new Error('MODEL_OUTPUT');
+    if (!Array.isArray(parsed.judgments))
+      throw new DiagnosticError(
+        Object.hasOwn(parsed, 'judgments') ? 'unknown' : 'missing_required_field',
+        'MODEL_OUTPUT',
+      );
     const judgments = parsed.judgments.map(validateJudgment);
     const seen = new Set<string>();
-    const assessed = judgments.map((judgment) => {
+    const assessed = judgments.map((judgment, index) => {
       const key = keyOf(judgment.exchange, judgment.symbol);
       const security = securities.get(key);
-      if (!security || seen.has(key)) throw new Error('MODEL_OUTPUT');
+      if (!security || seen.has(key))
+        throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `judgments[${index}]`);
       seen.add(key);
-      if (judgment.identity === 'ambiguous') throw new DiagnosticError('IDENTITY_AMBIGUOUS');
-      if (judgment.type !== 'unknown' && !judgment.evidence.length) throw new Error('MODEL_OUTPUT');
-      const evidence = judgment.evidence.map((id) => {
+      if (judgment.identity === 'ambiguous')
+        throw new DiagnosticError(
+          'IDENTITY_AMBIGUOUS',
+          'IDENTITY_AMBIGUOUS',
+          `judgments[${index}].identity`,
+        );
+      if (judgment.type !== 'unknown' && !judgment.evidence.length)
+        throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `judgments[${index}].evidence`);
+      const evidence = judgment.evidence.map((id, evidenceIndex) => {
         const record = evidenceById.get(id);
-        if (!record || keyOf(record.exchange, record.symbol) !== key)
-          throw new Error('MODEL_OUTPUT');
+        if (!record)
+          throw new DiagnosticError(
+            'unknown_evidence_id',
+            'MODEL_OUTPUT',
+            `judgments[${index}].evidence[${evidenceIndex}]`,
+          );
+        if (keyOf(record.exchange, record.symbol) !== key)
+          throw new DiagnosticError(
+            'cross_security_evidence',
+            'MODEL_OUTPUT',
+            `judgments[${index}].evidence[${evidenceIndex}]`,
+          );
         return record;
       });
       return {

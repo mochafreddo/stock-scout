@@ -188,7 +188,7 @@ try {
       diagnostic: {
         stage,
         reason: error instanceof DiagnosticError ? error.reason : 'unknown',
-        location: null,
+        location: error instanceof DiagnosticError ? error.location : null,
         ...(['retrieval', 'judgment'].includes(stage) && statistics ? { statistics } : {}),
       },
       ...(code === 'siwc_refresh_not_allowed' && error instanceof Error && 'retryAt' in error

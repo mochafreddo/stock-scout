@@ -469,6 +469,8 @@ globalThis.fetch = async (url, init = {}) => {
   if (['within-deadlines', 'judgment-overrun'].includes(scenario))
     tickClock(judging ? (scenario === 'judgment-overrun' ? 61_000 : 59_000) : 119_000);
   if (scenario === 'retrieval-overrun' && !judging) tickClock(120_000);
+  if (prompt.stage === process.env.TEST_RESPONSE_STAGE)
+    value = JSON.parse(process.env.TEST_RESPONSE_VALUE);
   const text = JSON.stringify(value);
   return sse([
     { type: 'response.created', response: { id: 'resp_result', model: body.model, created_at: 1 } },

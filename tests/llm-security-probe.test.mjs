@@ -356,12 +356,12 @@ test('CLI leaves input after valid evaluation data for authentication and subseq
 });
 
 test('CLI binds final IDs to the observed context of the same individual security', (t) => {
-  for (const scenario of [
-    'invented-id',
-    'url-instead-of-id',
-    'types-cross-id',
-    'missing-context',
-    'malformed-context-identity',
+  for (const [scenario, reason, location] of [
+    ['invented-id', 'unknown_evidence_id', 'judgments[0].evidence[0]'],
+    ['url-instead-of-id', 'unknown_evidence_id', 'judgments[0].evidence[0]'],
+    ['types-cross-id', 'cross_security_evidence', 'judgments[0].evidence[0]'],
+    ['missing-context', 'missing_required_field', 'evidence[0].subsequentChanges'],
+    ['malformed-context-identity', 'unknown', 'evidence[0].exchange'],
   ]) {
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario + result.stderr);
@@ -372,8 +372,8 @@ test('CLI binds final IDs to the observed context of the same individual securit
         error: 'MODEL_OUTPUT',
         diagnostic: {
           stage: scenario.includes('context') ? 'retrieval' : 'judgment',
-          reason: 'unknown',
-          location: null,
+          reason,
+          location,
         },
       },
       scenario,
@@ -628,7 +628,7 @@ test('CLI carries confirmed identity and sensitive-output reasons from their int
               ? 'judgment'
               : 'output',
         reason,
-        location: null,
+        location: scenario === 'ambiguous' ? 'judgments[0].identity' : null,
       },
     });
     assert.doesNotMatch(result.stderr, /synthetic-subscription/);
@@ -734,7 +734,11 @@ test('CLI separates aggregated failures from a confirmed model authentication fa
     assert.equal(result.stdout, '');
     assert.deepEqual(legacyFailure(result.stderr), {
       error,
-      diagnostic: { stage, reason, location: null },
+      diagnostic: {
+        stage,
+        reason,
+        location: scenario === 'malformed-judgment' ? 'judgments[0].applicable' : null,
+      },
     });
   }
 });
@@ -786,7 +790,7 @@ test('CLI keeps evidence rejection in retrieval without starting judgment', (t) 
   assert.equal(result.stdout, '');
   assert.deepEqual(legacyFailure(result.stderr), {
     error: 'MODEL_OUTPUT',
-    diagnostic: { stage: 'retrieval', reason: 'unknown', location: null },
+    diagnostic: { stage: 'retrieval', reason: 'unobserved_source', location: 'evidence[0].source' },
   });
   assert.equal(result.requests.length, 3);
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 2);
@@ -794,13 +798,19 @@ test('CLI keeps evidence rejection in retrieval without starting judgment', (t) 
 });
 
 test('CLI enters judgment after evidence validation and output after judgment validation', (t) => {
-  for (const [scenario, stage, error, reason] of [
-    ['invented-id', 'judgment', 'MODEL_OUTPUT', 'unknown'],
+  for (const [scenario, stage, error, reason, location = null] of [
+    ['invented-id', 'judgment', 'MODEL_OUTPUT', 'unknown_evidence_id', 'judgments[0].evidence[0]'],
     ['missing-result', 'judgment', 'MODEL_OUTPUT', 'unknown'],
-    ['malformed-judgment', 'judgment', 'MODEL_OUTPUT', 'unknown'],
+    ['malformed-judgment', 'judgment', 'MODEL_OUTPUT', 'unknown', 'judgments[0].applicable'],
     ['judgment-web-call', 'judgment', 'MODEL_OUTPUT', 'unknown'],
     ['sensitive-judgment', 'output', 'SENSITIVE_OUTPUT', 'SENSITIVE_OUTPUT'],
-    ['ambiguous-sensitive', 'judgment', 'IDENTITY_AMBIGUOUS', 'IDENTITY_AMBIGUOUS'],
+    [
+      'ambiguous-sensitive',
+      'judgment',
+      'IDENTITY_AMBIGUOUS',
+      'IDENTITY_AMBIGUOUS',
+      'judgments[0].identity',
+    ],
   ]) {
     const result = run(
       t,
@@ -814,7 +824,7 @@ test('CLI enters judgment after evidence validation and output after judgment va
     assert.equal(result.stdout, '');
     assert.deepEqual(legacyFailure(result.stderr), {
       error,
-      diagnostic: { stage, reason, location: null },
+      diagnostic: { stage, reason, location },
     });
     assert.equal(result.requests.length, 4);
     const models = result.requests.filter((r) => r.url.endsWith('/responses'));
@@ -1216,5 +1226,148 @@ test('CLI statistics preserve the existing request and tool ceilings', (t) => {
       result.requests.filter((r) => r.url.includes('/search-info?')).length,
       Math.min(infos, 32),
     );
+  }
+});
+
+test('CLI identifies the first missing evidence field at its response location', (t) => {
+  const result = run(t, 'missing-context');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(legacyFailure(result.stderr), {
+    error: 'MODEL_OUTPUT',
+    diagnostic: {
+      stage: 'retrieval',
+      reason: 'missing_required_field',
+      location: 'evidence[0].subsequentChanges',
+    },
+  });
+  assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 2);
+});
+
+test('CLI distinguishes source and reference failures without additional requests', (t) => {
+  for (const [scenario, stage, reason, location] of [
+    ['unobserved-source', 'retrieval', 'unobserved_source', 'evidence[0].source'],
+    ['invented-id', 'judgment', 'unknown_evidence_id', 'judgments[0].evidence[0]'],
+    ['types-cross-id', 'judgment', 'cross_security_evidence', 'judgments[0].evidence[0]'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(legacyFailure(result.stderr), {
+      error: 'MODEL_OUTPUT',
+      diagnostic: { stage, reason, location },
+    });
+    const models = result.requests.filter((r) => r.url.endsWith('/responses'));
+    assert.equal(models.length, stage === 'retrieval' ? 2 : 3);
+    assert.equal(models[0].body.model, 'gpt-6.1-sol');
+    assert.equal(models[0].body.stream, true);
+    assert.equal(models[0].body.store, false);
+    if (stage === 'judgment') assert.equal(models.at(-1).body.tools?.length ?? 0, 0);
+    assert.doesNotMatch(result.stderr, /synthetic-|test-key|test-secret|invented|https:/);
+  }
+});
+
+test('CLI reports safe response paths and preserves the original first-rejection order', (t) => {
+  const evidence = {
+    exchange: 'NAS',
+    symbol: 'AAPL',
+    source: 'kis:NAS:AAPL',
+    excerpt: 'Common stock',
+    identityLink: 'Individual security',
+    asOf: '2026-10-18',
+    effectiveDate: '2026-10-18',
+    subsequentChanges: 'No change',
+    currentness: 'Current',
+  };
+  const judgment = {
+    exchange: 'NAS',
+    symbol: 'AAPL',
+    type: 'common',
+    identity: 'confirmed',
+    applicable: true,
+    reason: 'Common stock',
+    evidence: ['e1'],
+  };
+  const missingEvidence = { ...evidence, source: 'private-source synthetic-subscription' };
+  delete missingEvidence.subsequentChanges;
+  const missingJudgment = { ...judgment, evidence: ['private-id synthetic-subscription'] };
+  delete missingJudgment.reason;
+  const reordered = [
+    { ...judgment, symbol: 'GOOG', evidence: ['e2'] },
+    { ...judgment, evidence: ['private-id synthetic-subscription'] },
+  ];
+  for (const [stage, value, reason, location, scenario] of [
+    [
+      'retrieval',
+      { evidence: [missingEvidence, null] },
+      'missing_required_field',
+      'evidence[0].subsequentChanges',
+    ],
+    [
+      'retrieval',
+      { evidence: [{ ...evidence, exchange: null, source: 'unread' }] },
+      'unknown',
+      'evidence[0].exchange',
+    ],
+    [
+      'retrieval',
+      { evidence: [{ ...evidence, symbol: 'GOOG' }] },
+      'cross_security_evidence',
+      'evidence[0].source',
+      'types',
+    ],
+    ['retrieval', { evidence: [null] }, 'unknown', 'evidence[0]'],
+    ['retrieval', { evidence: null }, 'unknown', null],
+    ['retrieval', {}, 'missing_required_field', null],
+    ['judgment', {}, 'missing_required_field', null],
+    [
+      'judgment',
+      { judgments: [{ ...judgment, evidence: ['e999'] }, null] },
+      'unknown',
+      'judgments[1]',
+    ],
+    ['judgment', { judgments: [missingJudgment] }, 'missing_required_field', 'judgments[0].reason'],
+    [
+      'judgment',
+      { judgments: [judgment, missingJudgment] },
+      'missing_required_field',
+      'judgments[1].reason',
+    ],
+    [
+      'judgment',
+      { judgments: reordered },
+      'unknown_evidence_id',
+      'judgments[1].evidence[0]',
+      'types',
+    ],
+    [
+      'judgment',
+      { judgments: [{ ...judgment, 'private-field synthetic-subscription': '/private/path' }] },
+      'unknown',
+      'judgments[0]',
+    ],
+    ['judgment', { judgments: [] }, 'unknown', null],
+  ]) {
+    const result = run(t, scenario ?? 'ok', {
+      TEST_RESPONSE_STAGE: stage,
+      TEST_RESPONSE_VALUE: JSON.stringify(value),
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(legacyFailure(result.stderr), {
+      error: 'MODEL_OUTPUT',
+      diagnostic: { stage, reason, location },
+    });
+    assert.doesNotMatch(result.stderr, /private-|synthetic-|test-key|test-secret/);
+    const models = result.requests.filter((r) => r.url.endsWith('/responses'));
+    assert.equal(models.length, stage === 'retrieval' ? 2 : 3);
+    assert.equal(models.at(-1).body.store, false);
+    assert.equal(models.at(-1).body.stream, true);
+    const info = result.requests.filter((r) => r.url.includes('/search-info?'));
+    assert.equal(info.length, scenario === 'types' ? 10 : 1);
+    assert.deepEqual(Object.fromEntries(new URL(info[0].url).searchParams), {
+      PRDT_TYPE_CD: '512',
+      PDNO: 'AAPL',
+    });
   }
 });
