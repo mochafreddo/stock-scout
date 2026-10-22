@@ -475,12 +475,10 @@ test('CLI validates identity, input membership, exactly one result and observed 
   for (const scenario of [
     'unobserved-source',
     'off-ranking',
-    'no-evidence',
     'missing-result',
     'duplicate-result',
     'ambiguous',
     'malformed-judgment',
-    'no-evidence-excluded',
     'unknown-unobserved-source',
   ]) {
     const result = run(t, scenario);
@@ -491,6 +489,40 @@ test('CLI validates identity, input membership, exactly one result and observed 
       scenario === 'ambiguous' ? 'IDENTITY_AMBIGUOUS' : 'MODEL_OUTPUT',
       scenario + result.stderr,
     );
+  }
+});
+
+test('CLI excludes unsupported fixed types with empty evidence and preserves the rejected type', (t) => {
+  for (const [scenario, submittedType] of [
+    ['no-evidence', 'common'],
+    ['no-evidence-excluded', 'etf'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stderr, '');
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'analysis_insufficient');
+    assert.deepEqual(output.coverage, {
+      input: 1,
+      included: 0,
+      excluded: 1,
+      unconfirmed: 1,
+      individualLookupFailures: 0,
+      inclusionRate: 0,
+    });
+    const security = output.securities[0];
+    assert.equal(security.type, 'unknown');
+    assert.equal(security.applicable, false);
+    assert.equal(security.included, false);
+    assert.deepEqual(security.evidence, []);
+    assert.deepEqual(security.typeRejection, {
+      submittedType,
+      reason: 'missing_type_evidence',
+    });
+    const models = result.requests.filter((request) => request.url.endsWith('/responses'));
+    assert.equal(models.length, 3);
+    assert.equal(models.at(-1).body.tools?.length ?? 0, 0);
+    assert.doesNotMatch(result.stdout, /synthetic-subscription|synthetic-identity|test-secret/);
   }
 });
 
@@ -1678,15 +1710,24 @@ test('CLI rejects unregistered source references and sensitive opened URLs witho
   }
 });
 
-test('CLI rejects a type confirmed only from a KIS broad stock code and product name', (t) => {
+test('CLI excludes a type confirmed only from a KIS broad stock code and product name', (t) => {
   const result = run(t, 'kis-name-only', {}, { securities: [{ exchange: 'AMS', symbol: 'SPY' }] });
-  assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.equal(result.stdout, '');
-  const error = JSON.parse(result.stderr);
-  assert.equal(error.error, 'MODEL_OUTPUT');
-  assert.equal(error.diagnostic.stage, 'judgment');
-  assert.equal(error.diagnostic.reason, 'unknown');
-  assert.equal(error.diagnostic.location, 'judgments[0].evidence');
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.equal(result.stderr, '');
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, 'analysis_insufficient');
+  const security = output.securities[0];
+  assert.equal(security.type, 'unknown');
+  assert.equal(security.applicable, false);
+  assert.equal(security.included, false);
+  assert.deepEqual(security.typeRejection, {
+    submittedType: 'etf',
+    reason: 'kis_broad_stock_only',
+  });
+  assert.equal(security.evidence[0].source, 'kis:AMS:SPY');
+  assert.equal(output.lookups[0].record.rows[0].ovrs_stck_dvsn_cd, '01');
+  assert.equal(output.coverage.unconfirmed, 1);
+  assert.equal(output.statistics.judgment.status, 'completed');
   assert.equal(result.requests.filter((request) => request.url.endsWith('/responses')).length, 3);
 });
 
@@ -1697,11 +1738,13 @@ test('CLI preserves unknown exclusions and independent type evidence beside a br
   const insufficient = JSON.parse(unknown.stdout);
   assert.equal(insufficient.status, 'analysis_insufficient');
   assert.equal(insufficient.securities[0].type, 'unknown');
+  assert.equal(insufficient.securities[0].typeRejection, undefined);
   assert.equal(insufficient.coverage.unconfirmed, 1);
   const independent = run(t, 'kis-name-with-web', {}, input);
   assert.equal(independent.status, 0, independent.stderr);
   const assessed = JSON.parse(independent.stdout);
   assert.equal(assessed.securities[0].type, 'etf');
+  assert.equal(assessed.securities[0].typeRejection, undefined);
   assert.deepEqual(
     assessed.securities[0].evidence.map((record) => record.source),
     ['kis:AMS:SPY', 'https://www.sec.gov/controlled-security-type'],
@@ -1709,6 +1752,91 @@ test('CLI preserves unknown exclusions and independent type evidence beside a br
   const requests = independent.requests.filter((request) => request.url.endsWith('/responses'));
   assert.equal(requests.length, 3);
   assert.equal(requests.at(-1).body.tools?.length ?? 0, 0);
+});
+
+test('CLI continues a ranking batch after individual type rejections and reports reduced coverage', (t) => {
+  const result = run(t, 'types-partial-evidence');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, 'assessed');
+  assert.deepEqual(output.coverage, {
+    input: 10,
+    included: 2,
+    excluded: 8,
+    unconfirmed: 2,
+    individualLookupFailures: 0,
+    inclusionRate: 0.2,
+  });
+  assert.deepEqual(
+    output.securities.filter((security) => security.included).map((security) => security.symbol),
+    ['GOOGL', 'BBDO'],
+  );
+  assert.deepEqual(
+    output.securities
+      .filter((security) => security.type === 'unknown')
+      .map((security) => ({
+        symbol: security.symbol,
+        applicable: security.applicable,
+        included: security.included,
+        ...security.typeRejection,
+      })),
+    [
+      {
+        symbol: 'AAPL',
+        applicable: false,
+        included: false,
+        submittedType: 'common',
+        reason: 'kis_broad_stock_only',
+      },
+      {
+        symbol: 'GOOG',
+        applicable: false,
+        included: false,
+        submittedType: 'common',
+        reason: 'missing_type_evidence',
+      },
+    ],
+  );
+  const rejected = output.securities[0];
+  assert.equal(rejected.exchange, 'NAS');
+  assert.equal(rejected.rsym, 'DNASAAPL');
+  assert.equal(rejected.rankings[0].kind, 'volume');
+  assert.equal(rejected.rankings[0].rank, 1);
+  assert.equal(rejected.evidence[0].id, 'e1');
+  assert.equal(rejected.evidence[0].source, 'kis:NAS:AAPL');
+  assert.equal(output.securities[2].typeRejection, undefined);
+  assert.equal(output.model.requests, 3);
+  const models = result.requests.filter((request) => request.url.endsWith('/responses'));
+  assert.equal(models.at(-1).body.tools?.length ?? 0, 0);
+  assert.doesNotMatch(result.stdout, /synthetic-subscription|synthetic-identity|test-secret/);
+});
+
+test('CLI does not hide reference or identity errors behind individual type rejections', (t) => {
+  for (const [scenario, error, reason, location] of [
+    ['types-partial-invalid-id', 'MODEL_OUTPUT', 'unknown_evidence_id', 'judgments[2].evidence[0]'],
+    [
+      'types-partial-cross-id',
+      'MODEL_OUTPUT',
+      'cross_security_evidence',
+      'judgments[2].evidence[0]',
+    ],
+    [
+      'types-partial-ambiguous',
+      'IDENTITY_AMBIGUOUS',
+      'IDENTITY_AMBIGUOUS',
+      'judgments[2].identity',
+    ],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(legacyFailure(result.stderr), {
+      error,
+      diagnostic: { stage: 'judgment', reason, location },
+    });
+    assert.equal(result.requests.filter((request) => request.url.endsWith('/responses')).length, 3);
+  }
 });
 
 test('CLI does not replace a previously observed specific KIS code with a later broad stock observation', (t) => {

@@ -275,6 +275,8 @@ globalThis.fetch = async (url, init = {}) => {
       if (scenario === 'sensitive-lookup') body.output.prdt_clsf_name = 'synthetic-subscription';
       if (scenario.startsWith('types'))
         body.output = { prdt_clsf_name: sample.type, ovrs_item_name: sample.symbol };
+      if (scenario.startsWith('types-partial-') && sample.symbol === 'AAPL')
+        body.output.ovrs_stck_dvsn_cd = '01';
     } else if (request.searchParams.get('EXCD') === 'NAS') {
       body.output1.nrec = '1';
       body.output2 = [
@@ -718,6 +720,10 @@ globalThis.fetch = async (url, init = {}) => {
     if (scenario === 'invented-id') value.judgments[0].evidence = ['e999'];
     if (scenario === 'url-instead-of-id') value.judgments[0].evidence = ['kis:NAS:AAPL'];
     if (scenario === 'types-cross-id') value.judgments[0].evidence = ['e2'];
+    if (scenario.startsWith('types-partial-')) value.judgments[1].evidence = [];
+    if (scenario === 'types-partial-invalid-id') value.judgments[2].evidence = ['e999'];
+    if (scenario === 'types-partial-cross-id') value.judgments[2].evidence = ['e1'];
+    if (scenario === 'types-partial-ambiguous') value.judgments[2].identity = 'ambiguous';
     if (scenario === 'malformed-context-identity') value.judgments[0].evidence = ['e1'];
   } else {
     value = {

@@ -627,8 +627,6 @@ export async function assessSecurityTypes({
           'IDENTITY_AMBIGUOUS',
           `judgments[${index}].identity`,
         );
-      if (judgment.type !== 'unknown' && !judgment.evidence.length)
-        throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `judgments[${index}].evidence`);
       const evidence = judgment.evidence.map((id, evidenceIndex) => {
         const record = evidenceById.get(id);
         if (!record)
@@ -645,14 +643,27 @@ export async function assessSecurityTypes({
           );
         return record;
       });
-      if (
-        judgment.type !== 'unknown' &&
-        evidence.every((record) => kisBroadStockOnly.get(record.source) === true)
-      )
-        throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `judgments[${index}].evidence`);
+      const rejectionReason = !evidence.length
+        ? 'missing_type_evidence'
+        : evidence.every((record) => kisBroadStockOnly.get(record.source) === true)
+          ? 'kis_broad_stock_only'
+          : undefined;
+      const typeRejection =
+        judgment.type !== 'unknown' && rejectionReason
+          ? { submittedType: judgment.type, reason: rejectionReason }
+          : undefined;
+      if (typeRejection) {
+        judgment.type = 'unknown';
+        judgment.applicable = false;
+        judgment.reason =
+          rejectionReason === 'missing_type_evidence'
+            ? 'The submitted type has no supporting evidence.'
+            : 'KIS broad stock code 01 alone does not establish the submitted security type.';
+      }
       return {
         ...security,
         ...judgment,
+        ...(typeRejection ? { typeRejection } : {}),
         evidence,
         included: ['common', 'common_adr'].includes(judgment.type) && judgment.applicable,
       };
