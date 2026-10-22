@@ -122,7 +122,7 @@ stdout에는 완성된 결과 JSON 한 줄만 출력합니다. `securities`에�
 
 ### 기본 실패 진단 읽기
 
-[#268](https://github.com/mochafreddo/stock-scout/issues/268)의 기본 진단과 입력 실패 진단은 [#270](https://github.com/mochafreddo/stock-scout/issues/270)·[#271](https://github.com/mochafreddo/stock-scout/issues/271)의 구현으로 제공합니다. 유형 판단 CLI가 처리할 수 있는 실패의 기존 stderr JSON에 별도 옵션 없이 `diagnostic`을 추가합니다. `stage`·`reason`·`location`은 항상 제공하며 기존 `error`·인증 재시도 시각·로그인 안내와 종료 코드는 유지합니다. 성공 결과와 정상적인 분석 불충분에는 진단을 추가하지 않습니다. 독립된 인증·KIS 관측 CLI의 출력 계약도 유지합니다.
+[#265](https://github.com/mochafreddo/stock-scout/issues/265)의 기본 진단과 입력·초기 인증 실패 진단은 [#268](https://github.com/mochafreddo/stock-scout/issues/268)·[#269](https://github.com/mochafreddo/stock-scout/issues/269)의 구현으로 제공합니다. #268의 기본 진단과 입력 경계는 [#270](https://github.com/mochafreddo/stock-scout/issues/270)·[#271](https://github.com/mochafreddo/stock-scout/issues/271)에서 구현했습니다. 유형 판단 CLI가 처리할 수 있는 실패의 기존 stderr JSON에 별도 옵션 없이 `diagnostic`을 추가합니다. `stage`·`reason`·`location`은 항상 제공하며 기존 `error`·인증 재시도 시각·로그인 안내와 종료 코드는 유지합니다. 성공 결과와 정상적인 분석 불충분에는 진단을 추가하지 않습니다. 독립된 인증·KIS 관측 CLI의 출력 계약도 유지합니다.
 
 인수 오류와 평가 파일 읽기·JSON 파싱·내용 검사 실패, 이 입력 범위의 예상하지 못한 예외는 [#271](https://github.com/mochafreddo/stock-scout/issues/271)에 따라 `stage: input`, `reason: unknown`, `location: null`입니다. 기존 오류 코드와 검사 순서를 유지하며 잘못된 항목을 알아도 인수 위치·평가 파일 내부 경로·파일 경로를 추가하지 않습니다. 입력 검사 뒤 초기 인증 준비 실패는 [#269](https://github.com/mochafreddo/stock-scout/issues/269)에 따라 `stage: authentication`입니다. 이 단계의 예상하지 못한 예외와 포착한 SIWC 동적 import 실패도 같은 단계를 유지하며 원인은 확인하지 못하면 `unknown`입니다. 인증 준비가 끝난 뒤 순위·조회·판단·출력 실패는 실제 단계 전달 전까지 `stage: unknown`입니다. 이번 구현의 모든 실패는 `location: null`이며 응답 위치는 후속 상세 진단에서 연결합니다.
 
