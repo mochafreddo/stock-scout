@@ -119,7 +119,10 @@ test('CLI assesses a deduplicated KIS ranking security through namespaced tools 
     output.securities[0].rankings.map((row) => row.kind),
     ['volume', 'amount'],
   );
-  assert.equal(output.securities[0].evidence[0].source, 'kis:NAS:AAPL');
+  assert.equal(
+    output.securities[0].evidence[0].source,
+    'https://www.sec.gov/controlled-security-type',
+  );
   assert.equal(result.requests.filter((r) => r.url.includes('/ranking/')).length, 6);
   assert.equal(result.requests.filter((r) => r.url.endsWith('/responses')).length, 3);
   assert.doesNotMatch(
@@ -1075,7 +1078,7 @@ test('CLI reports failed retrieval and unstarted judgment statistics at the elap
           elapsedMs: 120000,
           modelRequests: 2,
           infoToolCalls: 1,
-          observedWebToolCalls: 0,
+          observedWebToolCalls: 1,
         },
         judgment: {
           status: 'not_started',
@@ -1105,7 +1108,7 @@ test('CLI preserves completed retrieval timing when judgment reaches the shared 
       elapsedMs: 119000,
       modelRequests: 2,
       infoToolCalls: 1,
-      observedWebToolCalls: 0,
+      observedWebToolCalls: 1,
     },
     judgment: {
       status: 'failed',
@@ -1121,14 +1124,14 @@ test('CLI preserves completed retrieval timing when judgment reaches the shared 
 });
 
 test('CLI counts failed HTTP attempts and separates stage calls and validation time on other failures', (t) => {
-  for (const [scenario, extra, stage, retrievalMs, requests, infos] of [
-    ['auth-failure', {}, 'retrieval', 7, 1, 0],
-    ['global-lookup', {}, 'retrieval', 18, 1, 1],
-    ['unobserved-source', {}, 'retrieval', 25, 2, 1],
-    ['malformed-judgment', {}, 'judgment', 25, 2, 1],
-    ['malformed-judgment', { TEST_WALL_CLOCK_SHIFT: '-60000' }, 'judgment', 25, 2, 1],
-    ['web-duplicates', { TEST_HTTP_EXCEPTION_STAGE: 'judgment' }, 'judgment', 25, 2, 1],
-    ['ok', { TEST_HTTP_EXCEPTION_STAGE: 'retrieval' }, 'retrieval', 7, 1, 0],
+  for (const [scenario, extra, stage, retrievalMs, requests, infos, webs] of [
+    ['auth-failure', {}, 'retrieval', 7, 1, 0, 0],
+    ['global-lookup', {}, 'retrieval', 18, 1, 1, 1],
+    ['unobserved-source', {}, 'retrieval', 25, 2, 1, 1],
+    ['malformed-judgment', {}, 'judgment', 25, 2, 1, 1],
+    ['malformed-judgment', { TEST_WALL_CLOCK_SHIFT: '-60000' }, 'judgment', 25, 2, 1, 1],
+    ['web-duplicates', { TEST_HTTP_EXCEPTION_STAGE: 'judgment' }, 'judgment', 25, 2, 1, 3],
+    ['ok', { TEST_HTTP_EXCEPTION_STAGE: 'retrieval' }, 'retrieval', 7, 1, 0, 0],
   ]) {
     const result = run(t, scenario, {
       TEST_STATISTICS_CLOCK: '1',
@@ -1147,7 +1150,7 @@ test('CLI counts failed HTTP attempts and separates stage calls and validation t
           elapsedMs: retrievalMs,
           modelRequests: requests,
           infoToolCalls: infos,
-          observedWebToolCalls: scenario === 'web-duplicates' ? 2 : 0,
+          observedWebToolCalls: webs,
         },
         judgment: {
           status: stage === 'retrieval' ? 'not_started' : 'failed',
@@ -1188,7 +1191,7 @@ test('CLI reports blocked stage time through cancellation and preserves unstarte
         elapsedMs: retrieval ? 120000 : 0,
         modelRequests: retrieval ? 1 : 2,
         infoToolCalls: 1,
-        observedWebToolCalls: 0,
+        observedWebToolCalls: 1,
       },
       judgment: {
         status: retrieval ? 'not_started' : 'failed',
@@ -1203,10 +1206,10 @@ test('CLI reports blocked stage time through cancellation and preserves unstarte
 
 test('CLI statistics preserve the existing request and tool ceilings', (t) => {
   for (const [scenario, models, infos, webs, stage] of [
-    ['model-limit', 12, 11, 0, 'judgment'],
-    ['info-limit', 2, 33, 0, 'retrieval'],
+    ['model-limit', 12, 11, 1, 'judgment'],
+    ['info-limit', 2, 33, 1, 'retrieval'],
     ['web-limit', 2, 1, 33, 'retrieval'],
-    ['judgment-web-call', 2, 1, 0, 'judgment'],
+    ['judgment-web-call', 2, 1, 1, 'judgment'],
   ]) {
     const result = run(t, scenario);
     assert.equal(result.status, 1, result.stderr);
@@ -1507,7 +1510,7 @@ test('CLI reports measured successful coverage and stage durations', (t) => {
       elapsedMs: 25,
       modelRequests: 2,
       infoToolCalls: 1,
-      observedWebToolCalls: 0,
+      observedWebToolCalls: 1,
     },
     judgment: {
       status: 'completed',
@@ -1546,14 +1549,15 @@ test('CLI snapshot excludes mutations from a ranking that later fails validation
 });
 
 test('CLI binds collected source IDs to original URLs and keeps final evidence IDs', (t) => {
-  const result = run(t);
+  const result = run(t, 'kis-specific', {}, { securities: [{ exchange: 'NYS', symbol: 'BAC/B' }] });
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   const requests = result.requests.filter((row) => row.url.endsWith('/responses'));
   const info = requests[1].body.input.find((row) => row.type === 'function_call_output');
   const infoOutput = JSON.parse(info.output);
   assert.equal(infoOutput.sourceId, 's1');
-  assert.equal(output.evidenceRecords[0].source, 'kis:NAS:AAPL');
+  assert.equal(output.evidenceRecords[0].source, 'kis:NYS:BAC/B');
+  assert.equal(output.securities[0].type, 'preferred');
   assert.equal(output.evidenceRecords[0].id, 'e1');
   assert.equal(output.securities[0].evidence[0].id, 'e1');
   assert.equal(requests.at(-1).body.tools?.length ?? 0, 0);
@@ -1672,4 +1676,57 @@ test('CLI rejects unregistered source references and sensitive opened URLs witho
     assert.doesNotMatch(result.stderr, /synthetic-subscription|test-secret/);
     assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, count);
   }
+});
+
+test('CLI rejects a type confirmed only from a KIS broad stock code and product name', (t) => {
+  const result = run(t, 'kis-name-only', {}, { securities: [{ exchange: 'AMS', symbol: 'SPY' }] });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(result.stdout, '');
+  const error = JSON.parse(result.stderr);
+  assert.equal(error.error, 'MODEL_OUTPUT');
+  assert.equal(error.diagnostic.stage, 'judgment');
+  assert.equal(error.diagnostic.reason, 'unknown');
+  assert.equal(error.diagnostic.location, 'judgments[0].evidence');
+  assert.equal(result.requests.filter((request) => request.url.endsWith('/responses')).length, 3);
+});
+
+test('CLI preserves unknown exclusions and independent type evidence beside a broad KIS identity record', (t) => {
+  const input = { securities: [{ exchange: 'AMS', symbol: 'SPY' }] };
+  const unknown = run(t, 'kis-name-unknown', {}, input);
+  assert.equal(unknown.status, 2, unknown.stderr);
+  const insufficient = JSON.parse(unknown.stdout);
+  assert.equal(insufficient.status, 'analysis_insufficient');
+  assert.equal(insufficient.securities[0].type, 'unknown');
+  assert.equal(insufficient.coverage.unconfirmed, 1);
+  const independent = run(t, 'kis-name-with-web', {}, input);
+  assert.equal(independent.status, 0, independent.stderr);
+  const assessed = JSON.parse(independent.stdout);
+  assert.equal(assessed.securities[0].type, 'etf');
+  assert.deepEqual(
+    assessed.securities[0].evidence.map((record) => record.source),
+    ['kis:AMS:SPY', 'https://www.sec.gov/controlled-security-type'],
+  );
+  const requests = independent.requests.filter((request) => request.url.endsWith('/responses'));
+  assert.equal(requests.length, 3);
+  assert.equal(requests.at(-1).body.tools?.length ?? 0, 0);
+});
+
+test('CLI does not replace a previously observed specific KIS code with a later broad stock observation', (t) => {
+  const result = run(
+    t,
+    'kis-specific-repeat',
+    {},
+    { securities: [{ exchange: 'NYS', symbol: 'BAC/B' }] },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(
+    output.lookups.map((lookup) => lookup.record.rows[0].ovrs_stck_dvsn_cd),
+    ['04', '01'],
+  );
+  assert.deepEqual(
+    output.lookups.map((lookup) => lookup.sourceId),
+    ['s1', 's1'],
+  );
+  assert.equal(output.securities[0].type, 'preferred');
 });

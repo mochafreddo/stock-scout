@@ -239,6 +239,7 @@ export async function assessSecurityTypes({
   );
   const knownSources = new Map<string, string>();
   const sourceIds = new Map<string, string>();
+  const kisBroadStockOnly = new Map<string, boolean>();
   const registerSource = (source: string) => {
     safe(source, secrets);
     let id = sourceIds.get(source);
@@ -316,6 +317,12 @@ export async function assessSecurityTypes({
           const output = { source, exchange, symbol, record };
           safe(output, secrets);
           const result = { ...output, sourceId: registerSource(source) };
+          kisBroadStockOnly.set(
+            source,
+            kisBroadStockOnly.get(source) !== false &&
+              record.rows.length > 0 &&
+              record.rows.every((row) => row.ovrs_stck_dvsn_cd === '01'),
+          );
           lookups.push(result);
           return result;
         } catch (error) {
@@ -638,6 +645,11 @@ export async function assessSecurityTypes({
           );
         return record;
       });
+      if (
+        judgment.type !== 'unknown' &&
+        evidence.every((record) => kisBroadStockOnly.get(record.source) === true)
+      )
+        throw new DiagnosticError('unknown', 'MODEL_OUTPUT', `judgments[${index}].evidence`);
       return {
         ...security,
         ...judgment,

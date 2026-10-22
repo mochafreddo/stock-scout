@@ -13,6 +13,7 @@ function tickClock(milliseconds) {
 const usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
 const completed = { type: 'response.completed', response: { usage } };
 let modelRequests = 0;
+let infoResponses = 0;
 const sourceIds = new Map();
 const scenario = process.env.SCENARIO;
 if (process.env.TEST_SERIALIZATION_STAGE) {
@@ -86,20 +87,30 @@ if (['retrieval-blocked', 'judgment-blocked'].includes(scenario)) {
       ...args,
     );
 }
-const samples = scenario.startsWith('types')
+const typeSource = 'https://www.sec.gov/controlled-security-type';
+const suppliesTypeSource =
+  scenario === 'kis-name-with-web' ||
+  (!scenario.startsWith('types') && !scenario.startsWith('kis-'));
+const samples = scenario.startsWith('kis-')
   ? [
-      { exchange: 'NAS', symbol: 'AAPL', kind: 'volume', rank: 1, type: 'common' },
-      { exchange: 'NAS', symbol: 'GOOG', kind: 'volume', rank: 2, type: 'common' },
-      { exchange: 'NAS', symbol: 'ACONW', kind: 'amount', rank: 1, type: 'warrant' },
-      { exchange: 'NAS', symbol: 'GOOGL', kind: 'amount', rank: 2, type: 'common' },
-      { exchange: 'NYS', symbol: 'BBD', kind: 'volume', rank: 1, type: 'preferred_adr' },
-      { exchange: 'NYS', symbol: 'BAC/B', kind: 'volume', rank: 2, type: 'preferred' },
-      { exchange: 'NYS', symbol: 'BBDO', kind: 'amount', rank: 1, type: 'common_adr' },
-      { exchange: 'NYS', symbol: 'BAC/L', kind: 'amount', rank: 2, type: 'preferred' },
-      { exchange: 'AMS', symbol: 'SPY', kind: 'volume', rank: 1, type: 'etf' },
-      { exchange: 'AMS', symbol: 'VXX', kind: 'amount', rank: 1, type: 'etn' },
+      scenario.startsWith('kis-specific')
+        ? { exchange: 'NYS', symbol: 'BAC/B', type: 'preferred' }
+        : { exchange: 'AMS', symbol: 'SPY', type: 'etf' },
     ]
-  : [{ exchange: 'NAS', symbol: 'AAPL', type: 'common' }];
+  : scenario.startsWith('types')
+    ? [
+        { exchange: 'NAS', symbol: 'AAPL', kind: 'volume', rank: 1, type: 'common' },
+        { exchange: 'NAS', symbol: 'GOOG', kind: 'volume', rank: 2, type: 'common' },
+        { exchange: 'NAS', symbol: 'ACONW', kind: 'amount', rank: 1, type: 'warrant' },
+        { exchange: 'NAS', symbol: 'GOOGL', kind: 'amount', rank: 2, type: 'common' },
+        { exchange: 'NYS', symbol: 'BBD', kind: 'volume', rank: 1, type: 'preferred_adr' },
+        { exchange: 'NYS', symbol: 'BAC/B', kind: 'volume', rank: 2, type: 'preferred' },
+        { exchange: 'NYS', symbol: 'BBDO', kind: 'amount', rank: 1, type: 'common_adr' },
+        { exchange: 'NYS', symbol: 'BAC/L', kind: 'amount', rank: 2, type: 'preferred' },
+        { exchange: 'AMS', symbol: 'SPY', kind: 'volume', rank: 1, type: 'etf' },
+        { exchange: 'AMS', symbol: 'VXX', kind: 'amount', rank: 1, type: 'etn' },
+      ]
+    : [{ exchange: 'NAS', symbol: 'AAPL', type: 'common' }];
 const assessment = {
   judgments: [
     {
@@ -111,7 +122,7 @@ const assessment = {
       reason: 'Explicit common-stock classification for this listed security.',
       evidence: [
         {
-          source: 'kis:NAS:AAPL',
+          source: typeSource,
           detail: 'Common stock, matched to NAS/AAPL.',
           asOf: '2026-10-18',
           currentness: 'Current classification returned for this symbol.',
@@ -120,6 +131,46 @@ const assessment = {
     },
   ],
 };
+if (scenario.startsWith('kis-'))
+  assessment.judgments = [
+    {
+      exchange: 'AMS',
+      symbol: 'SPY',
+      type: 'etf',
+      identity: 'confirmed',
+      applicable: true,
+      reason: 'The product name identifies an ETF.',
+      evidence: [
+        {
+          source: 'kis:AMS:SPY',
+          detail: 'STATE STREET SPDR S&P 500 ETF; listed.',
+          asOf: '2026-10-18',
+          currentness: 'Recent listing identity.',
+        },
+      ],
+    },
+  ];
+if (scenario === 'kis-name-unknown') {
+  assessment.judgments[0].type = 'unknown';
+  assessment.judgments[0].applicable = false;
+  assessment.judgments[0].reason = 'Listing identity and broad stock code do not establish type.';
+}
+if (scenario === 'kis-name-with-web')
+  assessment.judgments[0].evidence.push({
+    source: typeSource,
+    detail: 'Explicit ETF classification for this individual listed security.',
+    asOf: '2026-10-18',
+    currentness: 'Current controlled type-source fixture.',
+  });
+if (scenario.startsWith('kis-specific')) {
+  const judgment = assessment.judgments[0];
+  judgment.exchange = 'NYS';
+  judgment.symbol = 'BAC/B';
+  judgment.type = 'preferred';
+  judgment.reason = 'Controlled specific KIS code fixture.';
+  judgment.evidence[0].source = 'kis:NYS:BAC/B';
+  judgment.evidence[0].detail = 'Preferred stock in controlled specific-code fixture.';
+}
 if (scenario.startsWith('types'))
   assessment.judgments = samples.map((sample) => ({
     exchange: sample.exchange,
@@ -197,11 +248,30 @@ globalThis.fetch = async (url, init = {}) => {
         request.searchParams.get('PRDT_TYPE_CD'),
         { NAS: '512', NYS: '513', AMS: '529' }[sample.exchange],
       );
+      infoResponses++;
       body.output = {
         std_pdno: 'US0378331005',
         ovrs_stck_dvsn_cd: '01',
-        prdt_clsf_name: 'Common stock',
+        prdt_eng_name: 'APPLE INC',
+        prdt_clsf_name: '해외주식',
       };
+      if (scenario.startsWith('kis-name-'))
+        body.output = {
+          std_pdno: 'US78462F1030',
+          prdt_eng_name: 'STATE STREET SPDR S&P 500 ETF',
+          ovrs_stck_dvsn_cd: '01',
+          prdt_clsf_cd: '101210',
+          prdt_clsf_name: '해외주식',
+          ovrs_excg_cd: 'AMEX',
+          lstg_yn: 'Y',
+        };
+      if (scenario.startsWith('kis-specific'))
+        body.output = {
+          std_pdno: 'US0605056821',
+          ovrs_stck_dvsn_cd: scenario === 'kis-specific-repeat' && infoResponses > 1 ? '01' : '04',
+          prdt_clsf_name: '해외주식',
+          prdt_eng_name: 'BANK OF AMERICA PREFERRED',
+        };
       if (scenario === 'sensitive-lookup') body.output.prdt_clsf_name = 'synthetic-subscription';
       if (scenario.startsWith('types'))
         body.output = { prdt_clsf_name: sample.type, ovrs_item_name: sample.symbol };
@@ -482,7 +552,11 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (++modelRequests === 1 || (scenario === 'model-limit' && modelRequests < 12)) {
     const callSamples =
-      scenario === 'info-limit' ? Array.from({ length: 33 }, () => samples[0]) : samples;
+      scenario === 'info-limit'
+        ? Array.from({ length: 33 }, () => samples[0])
+        : scenario === 'kis-specific-repeat'
+          ? [samples[0], samples[0]]
+          : samples;
     const calls = callSamples.map((sample, index) => ({
       type: 'function_call',
       id: `fc_info_${index}`,
@@ -491,8 +565,36 @@ globalThis.fetch = async (url, init = {}) => {
       namespace: 'stock_scout',
       arguments: JSON.stringify({ exchange: sample.exchange, symbol: sample.symbol }),
     }));
+    if (suppliesTypeSource)
+      calls.push({
+        type: 'function_call',
+        id: 'fc_type_sources',
+        call_id: 'call_type_sources',
+        name: 'list_sources',
+        namespace: 'stock_scout',
+        arguments: '{}',
+      });
     return sse([
       { type: 'response.created', response: { id: 'resp_info', model: body.model, created_at: 1 } },
+      ...(suppliesTypeSource
+        ? [
+            {
+              type: 'response.output_item.added',
+              output_index: 100,
+              item: { type: 'web_search_call', id: 'ws_type_source', status: 'in_progress' },
+            },
+            {
+              type: 'response.output_item.done',
+              output_index: 100,
+              item: {
+                type: 'web_search_call',
+                id: 'ws_type_source',
+                status: 'completed',
+                action: { type: 'open_page', url: typeSource },
+              },
+            },
+          ]
+        : []),
       ...(scenario === 'web-duplicates'
         ? [
             {
@@ -540,13 +642,13 @@ globalThis.fetch = async (url, init = {}) => {
   for (const item of body.input.filter((item) => item.type === 'function_call_output')) {
     const output = JSON.parse(item.output);
     if (output.sourceId) sourceIds.set(output.source, output.sourceId);
+    if (Array.isArray(output)) for (const source of output) sourceIds.set(source.source, source.id);
   }
 
   if (!judging) {
     assert.ok(toolResult, 'Full tool history must reach the next request');
     if (scenario === 'individual-lookup') assert.match(toolResult.output, /SECURITY_LOOKUP_FAILED/);
-    else if (scenario !== 'global-lookup' && !scenario.startsWith('types'))
-      assert.match(toolResult.output, /Common stock/);
+    else if (scenario !== 'global-lookup') assert.match(toolResult.output, /sourceId/);
   }
   if (
     [
@@ -625,10 +727,16 @@ globalThis.fetch = async (url, init = {}) => {
           symbol: judgment.symbol,
           sourceId: sourceIds.get(evidence.source) ?? 's999',
           excerpt: evidence.detail,
-          identityLink: 'Matched individual NAS/AAPL exchange and symbol.',
+          identityLink:
+            scenario === 'kis-name-only'
+              ? 'KIS identifies the requested AMS/SPY security.'
+              : `Matched individual ${judgment.exchange}/${judgment.symbol} exchange and symbol.`,
           asOf: evidence.asOf,
-          effectiveDate: '2026-10-18',
-          subsequentChanges: 'Controlled subsequent-change check found no change.',
+          effectiveDate: scenario === 'kis-name-only' ? 'unknown' : '2026-10-18',
+          subsequentChanges:
+            scenario === 'kis-name-only'
+              ? 'No subsequent changes checked.'
+              : 'Controlled subsequent-change check found no change.',
           currentness: evidence.currentness,
         })),
       ),
