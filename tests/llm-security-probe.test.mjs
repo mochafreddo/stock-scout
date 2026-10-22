@@ -479,18 +479,13 @@ test('CLI validates identity, input membership, exactly one result and observed 
     'off-ranking',
     'missing-result',
     'duplicate-result',
-    'ambiguous',
     'malformed-judgment',
     'unknown-unobserved-source',
   ]) {
     const result = run(t, scenario);
     assert.equal(result.status, 1, scenario);
     assert.equal(result.stdout, '', scenario);
-    assert.equal(
-      legacyFailure(result.stderr).error,
-      scenario === 'ambiguous' ? 'IDENTITY_AMBIGUOUS' : 'MODEL_OUTPUT',
-      scenario + result.stderr,
-    );
+    assert.equal(legacyFailure(result.stderr).error, 'MODEL_OUTPUT', scenario + result.stderr);
   }
 });
 
@@ -652,7 +647,6 @@ test('CLI reports ranking incompleteness in the ranking stage', (t) => {
 test('CLI carries confirmed identity and sensitive-output reasons from their internal failure sites', (t) => {
   for (const [scenario, reason] of [
     ['identity-conflict', 'IDENTITY_AMBIGUOUS'],
-    ['ambiguous', 'IDENTITY_AMBIGUOUS'],
     ['sensitive-judgment', 'SENSITIVE_OUTPUT'],
   ]) {
     const result = run(t, scenario);
@@ -661,14 +655,9 @@ test('CLI carries confirmed identity and sensitive-output reasons from their int
     assert.deepEqual(legacyFailure(result.stderr), {
       error: reason,
       diagnostic: {
-        stage:
-          scenario === 'identity-conflict'
-            ? 'ranking'
-            : scenario === 'ambiguous'
-              ? 'assessment'
-              : 'output',
+        stage: scenario === 'identity-conflict' ? 'ranking' : 'output',
         reason,
-        location: scenario === 'ambiguous' ? 'judgments[0].identity' : null,
+        location: null,
       },
     });
     assert.doesNotMatch(result.stderr, /synthetic-subscription/);
@@ -853,13 +842,7 @@ test('CLI retains assessment diagnostics until final judgment validation and out
     ['missing-result', 'assessment', 'MODEL_OUTPUT', 'unknown'],
     ['malformed-judgment', 'assessment', 'MODEL_OUTPUT', 'unknown', 'judgments[0].applicable'],
     ['sensitive-judgment', 'output', 'SENSITIVE_OUTPUT', 'SENSITIVE_OUTPUT'],
-    [
-      'ambiguous-sensitive',
-      'assessment',
-      'IDENTITY_AMBIGUOUS',
-      'IDENTITY_AMBIGUOUS',
-      'judgments[0].identity',
-    ],
+    ['ambiguous-sensitive', 'assessment', 'SENSITIVE_OUTPUT', 'SENSITIVE_OUTPUT'],
   ]) {
     const result = run(
       t,
@@ -1680,6 +1663,147 @@ test('CLI preserves unknown exclusions and independent type evidence beside a br
   assert.ok(requests.at(-1).body.tools.some((tool) => tool.type === 'web_search'));
 });
 
+test('CLI excludes an identity-unconfirmed common stock and preserves the remaining ranking batch', (t) => {
+  const result = run(t, 'types-identity-mixed');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, 'assessed');
+  assert.deepEqual(output.coverage, {
+    input: 10,
+    included: 3,
+    excluded: 7,
+    unconfirmed: 1,
+    individualLookupFailures: 0,
+    inclusionRate: 0.3,
+  });
+  const excluded = output.securities[0];
+  assert.equal(excluded.exchange, 'NAS');
+  assert.equal(excluded.symbol, 'AAPL');
+  assert.equal(excluded.rsym, 'DNASAAPL');
+  assert.equal(excluded.rankings[0].kind, 'volume');
+  assert.equal(excluded.rankings[0].rank, 1);
+  assert.equal(excluded.identity, 'ambiguous');
+  assert.equal(excluded.type, 'unknown');
+  assert.equal(excluded.applicable, false);
+  assert.equal(excluded.included, false);
+  assert.deepEqual(excluded.typeRejection, {
+    submittedType: 'common',
+    reason: 'identity_unconfirmed',
+  });
+  assert.equal(excluded.reason, 'The listed security identity could not be confirmed.');
+  assert.equal(excluded.evidence[0].source, 'kis:NAS:AAPL');
+  assert.deepEqual(
+    output.securities.filter((row) => row.included).map((row) => row.symbol),
+    ['GOOG', 'GOOGL', 'BBDO'],
+  );
+});
+
+test('CLI reports all identity-unconfirmed securities as analysis insufficient without confirmed types', (t) => {
+  const result = run(t, 'identity-all');
+  assert.equal(result.status, 2, result.stderr);
+  assert.equal(result.stderr, '');
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, 'analysis_insufficient');
+  assert.deepEqual(output.coverage, {
+    input: 2,
+    included: 0,
+    excluded: 2,
+    unconfirmed: 2,
+    individualLookupFailures: 0,
+    inclusionRate: 0,
+  });
+  assert.deepEqual(
+    output.securities.map((row) => ({
+      symbol: row.symbol,
+      identity: row.identity,
+      type: row.type,
+      applicable: row.applicable,
+      included: row.included,
+      ...row.typeRejection,
+    })),
+    [
+      {
+        symbol: 'AAPL',
+        identity: 'ambiguous',
+        type: 'unknown',
+        applicable: false,
+        included: false,
+        submittedType: 'common',
+        reason: 'identity_unconfirmed',
+      },
+      {
+        symbol: 'SPY',
+        identity: 'ambiguous',
+        type: 'unknown',
+        applicable: false,
+        included: false,
+        submittedType: 'unknown',
+        reason: 'identity_unconfirmed',
+      },
+    ],
+  );
+});
+
+test('CLI distinguishes a confirmed excluded ETF from an identity-unconfirmed security in reordered results', (t) => {
+  const result = run(t, 'identity-reordered');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, 'assessed');
+  assert.deepEqual(output.coverage, {
+    input: 2,
+    included: 0,
+    excluded: 2,
+    unconfirmed: 1,
+    individualLookupFailures: 0,
+    inclusionRate: 0,
+  });
+  const [etf, ambiguous] = output.securities;
+  assert.equal(etf.symbol, 'SPY');
+  assert.equal(etf.exchange, 'AMS');
+  assert.equal(etf.rsym, 'DAMSSPY');
+  assert.deepEqual(
+    etf.rankings.map(({ kind, rank }) => ({ kind, rank })),
+    [{ kind: 'amount', rank: 1 }],
+  );
+  assert.equal(etf.identity, 'confirmed');
+  assert.equal(etf.type, 'etf');
+  assert.equal(etf.applicable, true);
+  assert.equal(etf.included, false);
+  assert.equal(etf.typeRejection, undefined);
+  assert.equal(ambiguous.symbol, 'AAPL');
+  assert.equal(ambiguous.exchange, 'NAS');
+  assert.equal(ambiguous.rsym, 'DNASAAPL');
+  assert.deepEqual(
+    ambiguous.rankings.map(({ kind, rank }) => ({ kind, rank })),
+    [{ kind: 'volume', rank: 1 }],
+  );
+  assert.equal(ambiguous.typeRejection.reason, 'identity_unconfirmed');
+});
+
+test('CLI validates every source and original input before excluding ambiguous identities', (t) => {
+  for (const [scenario, reason, location] of [
+    ['identity-unknown-source', 'unobserved_source', 'judgments[0].evidence[0].sourceId'],
+    ['identity-cross-source', 'cross_security_evidence', 'judgments[0].evidence[0].sourceId'],
+    ['identity-other-unknown-source', 'unobserved_source', 'judgments[1].evidence[0].sourceId'],
+    ['identity-missing', 'unknown', null],
+    ['identity-duplicate', 'unknown', 'judgments[2]'],
+    ['identity-outside', 'unknown', 'judgments[0]'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, scenario + result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(legacyFailure(result.stderr), {
+      error: 'MODEL_OUTPUT',
+      diagnostic: { stage: 'assessment', reason, location },
+    });
+    assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 2);
+    assert.equal(result.requests.filter((row) => row.url.includes('/ranking/')).length, 6);
+    assert.doesNotMatch(result.stderr, /synthetic-subscription|synthetic-identity|test-secret/);
+  }
+});
+
 test('CLI continues a ranking batch after individual type rejections and reports reduced coverage', (t) => {
   const result = run(t, 'types-partial-evidence');
   assert.equal(result.status, 0, result.stderr);
@@ -1752,12 +1876,6 @@ test('CLI does not hide reference or identity errors behind individual type reje
       'cross_security_evidence',
       'judgments[2].evidence[0].sourceId',
     ],
-    [
-      'types-partial-ambiguous',
-      'IDENTITY_AMBIGUOUS',
-      'IDENTITY_AMBIGUOUS',
-      'judgments[2].identity',
-    ],
   ]) {
     const result = run(t, scenario);
     assert.equal(result.status, 1, result.stderr);
@@ -1768,6 +1886,51 @@ test('CLI does not hide reference or identity errors behind individual type reje
     });
     assert.equal(result.requests.filter((request) => request.url.endsWith('/responses')).length, 2);
   }
+});
+
+test('CLI distinguishes identity exclusion from confirmed-identity type rejections in the same batch', (t) => {
+  const result = run(t, 'types-partial-ambiguous');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.coverage.unconfirmed, 3);
+  assert.equal(output.coverage.included, 2);
+  assert.deepEqual(
+    output.securities.slice(0, 3).map((row) => ({
+      symbol: row.symbol,
+      identity: row.identity,
+      type: row.type,
+      included: row.included,
+      reason: row.typeRejection.reason,
+      submittedType: row.typeRejection.submittedType,
+    })),
+    [
+      {
+        symbol: 'AAPL',
+        identity: 'confirmed',
+        type: 'unknown',
+        included: false,
+        reason: 'kis_broad_stock_only',
+        submittedType: 'common',
+      },
+      {
+        symbol: 'GOOG',
+        identity: 'confirmed',
+        type: 'unknown',
+        included: false,
+        reason: 'missing_type_evidence',
+        submittedType: 'common',
+      },
+      {
+        symbol: 'ACONW',
+        identity: 'ambiguous',
+        type: 'unknown',
+        included: false,
+        reason: 'identity_unconfirmed',
+        submittedType: 'warrant',
+      },
+    ],
+  );
 });
 
 test('CLI does not replace a previously observed specific KIS code with a later broad stock observation', (t) => {

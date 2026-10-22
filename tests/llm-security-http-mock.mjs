@@ -16,6 +16,7 @@ let modelRequests = 0;
 let infoResponses = 0;
 const sourceIds = new Map();
 const scenario = process.env.SCENARIO;
+const identityExclusion = scenario.startsWith('identity-') && scenario !== 'identity-conflict';
 if (process.env.TEST_SERIALIZATION_STAGE) {
   const stringify = JSON.stringify;
   let outputSerializations = 0;
@@ -87,27 +88,32 @@ if (['info-blocked', 'model-blocked'].includes(scenario)) {
 const typeSource = 'https://www.sec.gov/controlled-security-type';
 const suppliesTypeSource =
   scenario === 'kis-name-with-web' ||
-  (!scenario.startsWith('types') && !scenario.startsWith('kis-'));
-const samples = scenario.startsWith('kis-')
+  (!scenario.startsWith('types') && !scenario.startsWith('kis-') && !identityExclusion);
+const samples = identityExclusion
   ? [
-      scenario.startsWith('kis-specific')
-        ? { exchange: 'NYS', symbol: 'BAC/B', type: 'preferred' }
-        : { exchange: 'AMS', symbol: 'SPY', type: 'etf' },
+      { exchange: 'NAS', symbol: 'AAPL', kind: 'volume', rank: 1, type: 'common' },
+      { exchange: 'AMS', symbol: 'SPY', kind: 'amount', rank: 1, type: 'etf' },
     ]
-  : scenario.startsWith('types')
+  : scenario.startsWith('kis-')
     ? [
-        { exchange: 'NAS', symbol: 'AAPL', kind: 'volume', rank: 1, type: 'common' },
-        { exchange: 'NAS', symbol: 'GOOG', kind: 'volume', rank: 2, type: 'common' },
-        { exchange: 'NAS', symbol: 'ACONW', kind: 'amount', rank: 1, type: 'warrant' },
-        { exchange: 'NAS', symbol: 'GOOGL', kind: 'amount', rank: 2, type: 'common' },
-        { exchange: 'NYS', symbol: 'BBD', kind: 'volume', rank: 1, type: 'preferred_adr' },
-        { exchange: 'NYS', symbol: 'BAC/B', kind: 'volume', rank: 2, type: 'preferred' },
-        { exchange: 'NYS', symbol: 'BBDO', kind: 'amount', rank: 1, type: 'common_adr' },
-        { exchange: 'NYS', symbol: 'BAC/L', kind: 'amount', rank: 2, type: 'preferred' },
-        { exchange: 'AMS', symbol: 'SPY', kind: 'volume', rank: 1, type: 'etf' },
-        { exchange: 'AMS', symbol: 'VXX', kind: 'amount', rank: 1, type: 'etn' },
+        scenario.startsWith('kis-specific')
+          ? { exchange: 'NYS', symbol: 'BAC/B', type: 'preferred' }
+          : { exchange: 'AMS', symbol: 'SPY', type: 'etf' },
       ]
-    : [{ exchange: 'NAS', symbol: 'AAPL', type: 'common' }];
+    : scenario.startsWith('types')
+      ? [
+          { exchange: 'NAS', symbol: 'AAPL', kind: 'volume', rank: 1, type: 'common' },
+          { exchange: 'NAS', symbol: 'GOOG', kind: 'volume', rank: 2, type: 'common' },
+          { exchange: 'NAS', symbol: 'ACONW', kind: 'amount', rank: 1, type: 'warrant' },
+          { exchange: 'NAS', symbol: 'GOOGL', kind: 'amount', rank: 2, type: 'common' },
+          { exchange: 'NYS', symbol: 'BBD', kind: 'volume', rank: 1, type: 'preferred_adr' },
+          { exchange: 'NYS', symbol: 'BAC/B', kind: 'volume', rank: 2, type: 'preferred' },
+          { exchange: 'NYS', symbol: 'BBDO', kind: 'amount', rank: 1, type: 'common_adr' },
+          { exchange: 'NYS', symbol: 'BAC/L', kind: 'amount', rank: 2, type: 'preferred' },
+          { exchange: 'AMS', symbol: 'SPY', kind: 'volume', rank: 1, type: 'etf' },
+          { exchange: 'AMS', symbol: 'VXX', kind: 'amount', rank: 1, type: 'etn' },
+        ]
+      : [{ exchange: 'NAS', symbol: 'AAPL', type: 'common' }];
 const assessment = {
   judgments: [
     {
@@ -168,7 +174,7 @@ if (scenario.startsWith('kis-specific')) {
   judgment.evidence[0].source = 'kis:NYS:BAC/B';
   judgment.evidence[0].detail = 'Preferred stock in controlled specific-code fixture.';
 }
-if (scenario.startsWith('types'))
+if (scenario.startsWith('types') || identityExclusion)
   assessment.judgments = samples.map((sample) => ({
     exchange: sample.exchange,
     symbol: sample.symbol,
@@ -270,7 +276,7 @@ globalThis.fetch = async (url, init = {}) => {
           prdt_eng_name: 'BANK OF AMERICA PREFERRED',
         };
       if (scenario === 'sensitive-lookup') body.output.prdt_clsf_name = 'synthetic-subscription';
-      if (scenario.startsWith('types'))
+      if (scenario.startsWith('types') || identityExclusion)
         body.output = { prdt_clsf_name: sample.type, ovrs_item_name: sample.symbol };
       if (scenario.startsWith('types-partial-') && sample.symbol === 'AAPL')
         body.output.ovrs_stck_dvsn_cd = '01';
@@ -288,7 +294,10 @@ globalThis.fetch = async (url, init = {}) => {
         },
       ];
     }
-    if (scenario.startsWith('types') && request.pathname.includes('/ranking/')) {
+    if (
+      (scenario.startsWith('types') || identityExclusion) &&
+      request.pathname.includes('/ranking/')
+    ) {
       const kind = request.pathname.endsWith('trade-vol') ? 'volume' : 'amount';
       body.output2 = samples
         .filter(
@@ -699,6 +708,23 @@ globalThis.fetch = async (url, init = {}) => {
   if (scenario === 'types-partial-cross-id')
     value.judgments[2].evidence[0].sourceId = sourceIds.get('kis:NAS:AAPL');
   if (scenario === 'types-partial-ambiguous') value.judgments[2].identity = 'ambiguous';
+  if (scenario === 'types-identity-mixed') value.judgments[0].identity = 'ambiguous';
+  if (identityExclusion) {
+    value.judgments[0].identity = 'ambiguous';
+    if (scenario === 'identity-all') {
+      value.judgments[1].identity = 'ambiguous';
+      value.judgments[1].type = 'unknown';
+    }
+    if (scenario === 'identity-unknown-source') value.judgments[0].evidence[0].sourceId = 's999';
+    if (scenario === 'identity-cross-source')
+      value.judgments[0].evidence[0].sourceId = sourceIds.get('kis:AMS:SPY');
+    if (scenario === 'identity-other-unknown-source')
+      value.judgments[1].evidence[0].sourceId = 's999';
+    if (scenario === 'identity-missing') value.judgments.pop();
+    if (scenario === 'identity-duplicate') value.judgments.push(value.judgments[0]);
+    if (scenario === 'identity-outside') value.judgments[0].symbol = 'OUTSIDE';
+    if (scenario === 'identity-reordered') value.judgments.reverse();
+  }
   if (scenario === 'missing-explanation') delete value.judgments[0].evidence[0].explanation;
   if (scenario === 'malformed-evidence') value.judgments[0].evidence[0].explanation = ['Common'];
   if (scenario === 'past-former-deadline') tickClock(120_000);
