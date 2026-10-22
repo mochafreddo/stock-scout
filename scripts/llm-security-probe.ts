@@ -25,7 +25,7 @@ const safeCodes = [
   'ANALYSIS_INSUFFICIENT',
 ];
 const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
-let stage: 'input' | 'unknown' = 'input';
+let stage: 'input' | 'authentication' | 'unknown' = 'input';
 try {
   const [directory, model, top, ...extra] = process.argv.slice(2);
   const evaluation = top === '--evaluation-input';
@@ -76,9 +76,10 @@ try {
       });
     }
   }
-  stage = 'unknown';
+  stage = 'authentication';
   const { readSiwcCredentials } = await import('./siwc-auth.ts');
   const credentials = await readSiwcCredentials(directory);
+  stage = 'unknown';
   const secrets = [
     credentials.accessToken,
     credentials.idToken,

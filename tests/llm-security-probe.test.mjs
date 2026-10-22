@@ -329,7 +329,7 @@ test('CLI leaves input after valid evaluation data for authentication and subseq
   assert.deepEqual(JSON.parse(auth.stderr), {
     error: 'siwc_relogin_required',
     action: 'login',
-    diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+    diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
   });
   assert.deepEqual(auth.requests, []);
   const model = run(t, 'auth-failure', {}, input);
@@ -609,7 +609,7 @@ test('CLI carries confirmed identity and sensitive-output reasons from their int
   }
 });
 
-test('CLI preserves retry time and login guidance with confirmed authentication reasons and an unknown stage', (t) => {
+test('CLI preserves retry time and login guidance with confirmed authentication reasons', (t) => {
   const retryAt = '2026-10-18T00:10:00.000Z';
   const blocked = run(t, 'ok', {}, undefined, {
     expiresAt: now + 300_000,
@@ -620,7 +620,7 @@ test('CLI preserves retry time and login guidance with confirmed authentication 
   assert.deepEqual(JSON.parse(blocked.stderr), {
     error: 'siwc_refresh_not_allowed',
     retryAt,
-    diagnostic: { stage: 'unknown', reason: 'siwc_refresh_not_allowed', location: null },
+    diagnostic: { stage: 'authentication', reason: 'siwc_refresh_not_allowed', location: null },
   });
   assert.deepEqual(blocked.requests, []);
   const registration = Object.fromEntries(
@@ -635,7 +635,7 @@ test('CLI preserves retry time and login guidance with confirmed authentication 
   assert.deepEqual(JSON.parse(relogin.stderr), {
     error: 'siwc_relogin_required',
     action: 'login',
-    diagnostic: { stage: 'unknown', reason: 'siwc_relogin_required', location: null },
+    diagnostic: { stage: 'authentication', reason: 'siwc_relogin_required', location: null },
   });
   assert.deepEqual(relogin.requests, []);
 });
@@ -688,7 +688,7 @@ test('CLI does not trust known identifiers, prefixes or reason properties on ext
     assert.equal(result.stdout, '');
     assert.deepEqual(JSON.parse(result.stderr), {
       error,
-      diagnostic: { stage: 'unknown', reason: 'unknown', location: null },
+      diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
       ...(error === 'siwc_relogin_required' ? { action: 'login' } : {}),
       ...(error === 'siwc_refresh_not_allowed' ? { retryAt: '2026-10-18T00:10:00.000Z' } : {}),
     });
@@ -729,4 +729,20 @@ test('CLI preserves a confirmed sensitive lookup reason while keeping its legacy
     PRDT_TYPE_CD: '512',
     PDNO: 'AAPL',
   });
+});
+
+test('CLI keeps unexpected authentication and dynamic import failures in authentication', (t) => {
+  for (const extraEnv of [
+    { TEST_STORAGE_EXCEPTION: 'private-sentinel /private/path synthetic-subscription' },
+    { TEST_IMPORT_EXCEPTION: 'private-sentinel /private/path synthetic-subscription' },
+  ]) {
+    const result = run(t, 'ok', extraEnv);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: extraEnv.TEST_STORAGE_EXCEPTION ? 'siwc_refresh_failed' : 'MODEL_FAILED',
+      diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
+    });
+    assert.deepEqual(result.requests, []);
+  }
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs, { appendFileSync } from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
+import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import { mock } from 'node:test';
 
 mock.timers.enable({ apis: ['Date'], now: Number(process.env.TEST_NOW) });
@@ -28,6 +28,13 @@ if (process.env.TEST_EVALUATION_EXCEPTION) {
   };
   syncBuiltinESMExports();
 }
+if (process.env.TEST_IMPORT_EXCEPTION)
+  registerHooks({
+    load(url, context, nextLoad) {
+      if (url.endsWith('/siwc-auth.ts')) throw new Error(process.env.TEST_IMPORT_EXCEPTION);
+      return nextLoad(url, context);
+    },
+  });
 if (process.env.TEST_STORAGE_EXCEPTION) {
   const open = fs.openSync;
   fs.openSync = (path, ...args) => {
