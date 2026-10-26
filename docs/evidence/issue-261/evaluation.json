@@ -1,0 +1,354 @@
+{
+  "evaluationVersion": "2026-10-26.1",
+  "evaluatedAtUtc": "2026-10-26",
+  "result": "passed_selected_sample",
+  "reviewBase": "1c68e351c44f931d84c3fae478461f563caec728",
+  "runtimeChanged": false,
+  "model": "gpt-6-luna",
+  "limits": {
+    "modelFlowTimeoutSeconds": 180,
+    "modelRequests": 12,
+    "infoToolCalls": 32,
+    "observedWebToolCalls": 32
+  },
+  "executionBudget": {
+    "maximum": 4,
+    "used": 2,
+    "unused": 2,
+    "unusedReason": "Both selected cases passed without a code change; no unsupported repetition."
+  },
+  "independentAnswers": {
+    "evaluationVersion": "2026-10-26.1",
+    "status": "fixed_before_model_execution",
+    "cases": [
+      {
+        "input": "docs/evidence/issue-260/inputs/01-common.json",
+        "sha256": "bb625d10b477f820657409e9a41b6ab5840b82483eed4f2d464fc7b3ba34e5ca",
+        "answers": [
+          {
+            "exchange": "NAS",
+            "symbol": "AAPL",
+            "type": "common",
+            "included": true
+          }
+        ]
+      },
+      {
+        "input": "docs/evidence/issue-260/inputs/03-adr-rights.json",
+        "sha256": "48af04496390fb526ffa875f2f0345b4832a7424f8fc54efb03158ec5d07d8b9",
+        "answers": [
+          {
+            "exchange": "NYS",
+            "symbol": "BBD",
+            "type": "preferred_adr",
+            "included": false
+          },
+          {
+            "exchange": "NYS",
+            "symbol": "BBDO",
+            "type": "common_adr",
+            "included": true
+          }
+        ]
+      }
+    ],
+    "model": "gpt-6-luna",
+    "independentRecheck": {
+      "directoryCreationTime": "1023202621:31",
+      "retrievedDateUtc": "2026-10-26",
+      "sources": [
+        {
+          "url": "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
+          "sha256": "59ac9b74ff663c6de40f5c93a54d5e12eb3fbef74f82e8a7cfc1456ad9f969ec"
+        },
+        {
+          "url": "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
+          "sha256": "94335ed3f4abc4bbd58a4415d105d453184f5484eaf6a2884d1bfb0120d850c9"
+        },
+        {
+          "url": "https://www.bradescori.com.br/en/services/bradesco-shares/",
+          "review": "NYSE BBDO common ADR and BBD preferred ADR; common/preferred underlying rights explicitly distinguished; page includes 1H26 context."
+        },
+        {
+          "url": "https://www.bradescori.com.br/en/services/faq/",
+          "review": "NYSE ADR tickers link to common/preferred underlying shares; ADR ratio 1:1. Generic venue text is not used instead of directory listing."
+        }
+      ],
+      "limitations": [
+        "Bradesco direct anonymous fetch failed; web tool page reads retained separately.",
+        "Issuer pages have no explicit publication date; directory supports current listing.",
+        "Not a complete corporate-action audit."
+      ]
+    }
+  },
+  "runs": [
+    {
+      "case": "01-common.json",
+      "command": [
+        "node",
+        "--env-file=.env",
+        "--import",
+        "<private-task-record>/observe.mjs",
+        "scripts/llm-security-probe.ts",
+        "<existing-auth-dir>",
+        "gpt-6-luna",
+        "--evaluation-input",
+        "<private-task-record>/run-01-aapl/input.json"
+      ],
+      "workingDirectory": "repository root",
+      "startedAt": "2026-10-26T04:36:41.926203+00:00",
+      "finishedAt": "2026-10-26T04:37:01.667935+00:00",
+      "inputSha256": "bb625d10b477f820657409e9a41b6ab5840b82483eed4f2d464fc7b3ba34e5ca",
+      "runtimeSourceSha256": {
+        "scripts/diagnostic-error.ts": "f98ca4a778f2a3d64d4d3ec55f4165c888609443b05c3c3615cd33859b5dcc25",
+        "scripts/kis-auth.ts": "dc744f3005622bd675a01ac530abcf7b113d504102a1fec6aba41f068d71282b",
+        "scripts/kis-observe.ts": "bb3bc77987bf7cb15465bd050a048f7d1885276367243985eb90845c5b056b86",
+        "scripts/kis-probe.ts": "b277e165c6f1915dd1c04f9a7e32e7a143111a384d0b42c4cb757e18cf0c04b1",
+        "scripts/kis-query.ts": "ae9b132a9431f449758f8a0fc614d6e417c7937971e5e0da2a8a9785a008e11c",
+        "scripts/llm-security-probe.ts": "36c86c6a474edfe9faebff9cbcdc86134275c539f6139944e2c8e08babecf64c",
+        "scripts/pre-push.ts": "5a37cf5ba9bfafe2477cec7b226aeb489406d7f4d426f5c1996121a951799a48",
+        "scripts/security-type-assessment.ts": "6e1453cc7937fb03eaef0d44917aedf3106d8747f12d39180c815e9e54883b87",
+        "scripts/security-type-probe.ts": "84a073c2160aeba776739c435b856a08536a865b8a5acecf02788d00d04b89a2",
+        "scripts/siwc-auth.ts": "632206effdd2b274c7b002d1a598eb82d4333c1f779d84249e3bdfc5421c2c3d",
+        "package-lock.json": "97e075d474240fa1633aa5839dcd835a392e783966e09de8fe9d6e73aeb211da"
+      },
+      "inputUnchanged": true,
+      "sourceUnchanged": true,
+      "exitCode": 0,
+      "processElapsedSeconds": 19.723,
+      "status": "assessed",
+      "statistics": {
+        "status": "completed",
+        "elapsedMs": 17320,
+        "modelRequests": 3,
+        "infoToolCalls": 1,
+        "observedWebToolCalls": 2
+      },
+      "coverage": {
+        "input": 1,
+        "included": 1,
+        "excluded": 0,
+        "unconfirmed": 0,
+        "individualLookupFailures": 0,
+        "inclusionRate": 1
+      },
+      "model": {
+        "id": "gpt-6-luna",
+        "requests": 3,
+        "completions": 3
+      },
+      "stdoutSha256": "d219e0f0acbc4ed1a3591d56cb7d84586ec0a4f53ad6f156ffa8519622b3361b",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "observationSha256": "69806cdad1347ff380da06a6f766decd0d3ba8198bbbff224d0893b7140a98e9",
+      "observedHttp": {
+        "modelResponses": [
+          200,
+          200,
+          200
+        ],
+        "modelTerminals": [
+          "response.completed",
+          "response.completed",
+          "response.completed"
+        ],
+        "finalCatalog": [
+          [
+            {
+              "id": "s1",
+              "source": "kis:NAS:AAPL"
+            },
+            {
+              "id": "s2",
+              "source": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000018/aapl-20260730.htm"
+            }
+          ]
+        ],
+        "originalInputOnly": true
+      },
+      "judgments": [
+        {
+          "exchange": "NAS",
+          "symbol": "AAPL",
+          "expectedType": "common",
+          "observedType": "common",
+          "included": true,
+          "identity": "confirmed",
+          "applicable": true,
+          "evidence": [
+            {
+              "sourceId": "s2",
+              "source": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000018/aapl-20260730.htm"
+            },
+            {
+              "sourceId": "s1",
+              "source": "kis:NAS:AAPL"
+            }
+          ],
+          "sourceLinkage": "passed: completed page-read URL registered in list_sources and delivered in subsequent model request; final IDs resolve to that registry.",
+          "semanticReview": {
+            "identity": "SEC 2026-07-30 8-K cover explicitly connects Apple common stock, AAPL and Nasdaq; the independently fetched current directory corroborates AAPL common stock.",
+            "type": "common",
+            "currentApplicability": "Current directory creation time 1023202621:31 corroborates continued listing and type. The model used an older dated filing; no conflicting class change was found in reviewed material.",
+            "adrUnderlyingRights": "not_applicable",
+            "knownContraryEvidence": "None identified in the reviewed material. Apple FAQ exchange/ticker and absence of preferred shares were not standalone type proof."
+          },
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "case": "03-adr-rights.json",
+      "command": [
+        "node",
+        "--env-file=.env",
+        "--import",
+        "<private-task-record>/observe.mjs",
+        "scripts/llm-security-probe.ts",
+        "<existing-auth-dir>",
+        "gpt-6-luna",
+        "--evaluation-input",
+        "<private-task-record>/run-02-adr/input.json"
+      ],
+      "workingDirectory": "repository root",
+      "startedAt": "2026-10-26T04:37:32.654067+00:00",
+      "finishedAt": "2026-10-26T04:37:51.129262+00:00",
+      "inputSha256": "48af04496390fb526ffa875f2f0345b4832a7424f8fc54efb03158ec5d07d8b9",
+      "runtimeSourceSha256": {
+        "scripts/diagnostic-error.ts": "f98ca4a778f2a3d64d4d3ec55f4165c888609443b05c3c3615cd33859b5dcc25",
+        "scripts/kis-auth.ts": "dc744f3005622bd675a01ac530abcf7b113d504102a1fec6aba41f068d71282b",
+        "scripts/kis-observe.ts": "bb3bc77987bf7cb15465bd050a048f7d1885276367243985eb90845c5b056b86",
+        "scripts/kis-probe.ts": "b277e165c6f1915dd1c04f9a7e32e7a143111a384d0b42c4cb757e18cf0c04b1",
+        "scripts/kis-query.ts": "ae9b132a9431f449758f8a0fc614d6e417c7937971e5e0da2a8a9785a008e11c",
+        "scripts/llm-security-probe.ts": "36c86c6a474edfe9faebff9cbcdc86134275c539f6139944e2c8e08babecf64c",
+        "scripts/pre-push.ts": "5a37cf5ba9bfafe2477cec7b226aeb489406d7f4d426f5c1996121a951799a48",
+        "scripts/security-type-assessment.ts": "6e1453cc7937fb03eaef0d44917aedf3106d8747f12d39180c815e9e54883b87",
+        "scripts/security-type-probe.ts": "84a073c2160aeba776739c435b856a08536a865b8a5acecf02788d00d04b89a2",
+        "scripts/siwc-auth.ts": "632206effdd2b274c7b002d1a598eb82d4333c1f779d84249e3bdfc5421c2c3d",
+        "package-lock.json": "97e075d474240fa1633aa5839dcd835a392e783966e09de8fe9d6e73aeb211da"
+      },
+      "inputUnchanged": true,
+      "sourceUnchanged": true,
+      "exitCode": 0,
+      "processElapsedSeconds": 18.457,
+      "status": "assessed",
+      "statistics": {
+        "status": "completed",
+        "elapsedMs": 18340,
+        "modelRequests": 3,
+        "infoToolCalls": 2,
+        "observedWebToolCalls": 2
+      },
+      "coverage": {
+        "input": 2,
+        "included": 1,
+        "excluded": 1,
+        "unconfirmed": 0,
+        "individualLookupFailures": 0,
+        "inclusionRate": 0.5
+      },
+      "model": {
+        "id": "gpt-6-luna",
+        "requests": 3,
+        "completions": 3
+      },
+      "stdoutSha256": "1c90fce3430901d9a07e0f51425212434655ed66c7cf11767d4925c4a548097d",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "observationSha256": "330ccfb727ccc10b9fd9ea18d0b8821cd731b856fa55cf3b8e43252d14d470cf",
+      "observedHttp": {
+        "modelResponses": [
+          200,
+          200,
+          200
+        ],
+        "modelTerminals": [
+          "response.completed",
+          "response.completed",
+          "response.completed"
+        ],
+        "finalCatalog": [
+          [
+            {
+              "id": "s1",
+              "source": "kis:NYS:BBD"
+            },
+            {
+              "id": "s2",
+              "source": "kis:NYS:BBDO"
+            },
+            {
+              "id": "s3",
+              "source": "https://www.bradescori.com.br/en/services/bradesco-shares/"
+            }
+          ]
+        ],
+        "originalInputOnly": true
+      },
+      "judgments": [
+        {
+          "exchange": "NYS",
+          "symbol": "BBD",
+          "expectedType": "preferred_adr",
+          "observedType": "preferred_adr",
+          "included": false,
+          "identity": "confirmed",
+          "applicable": true,
+          "evidence": [
+            {
+              "sourceId": "s1",
+              "source": "kis:NYS:BBD"
+            },
+            {
+              "sourceId": "s3",
+              "source": "https://www.bradescori.com.br/en/services/bradesco-shares/"
+            }
+          ],
+          "sourceLinkage": "passed: completed page-read URL registered in list_sources and delivered in subsequent model request; final IDs resolve to that registry.",
+          "semanticReview": {
+            "identity": "Current directory and KIS original NYS/BBD record agree with the separate NYSE ADR identified by the issuer.",
+            "type": "preferred_adr",
+            "currentApplicability": "Current directory creation time 1023202621:31 and issuer share information corroborate continued NYSE listing and underlying class. Issuer page has no explicit publication date and includes 1H26 information.",
+            "adrUnderlyingRights": "Issuer share page explicitly distinguishes BBD preferred ADR and BBDO common ADR; independently read FAQ confirms common/preferred underlying rights and 1:1 ratio.",
+            "knownContraryEvidence": "KIS broad 01 and product names do not independently establish the class. Generic FAQ venue wording was resolved using the explicit NYSE share page and current directory."
+          },
+          "result": "passed"
+        },
+        {
+          "exchange": "NYS",
+          "symbol": "BBDO",
+          "expectedType": "common_adr",
+          "observedType": "common_adr",
+          "included": true,
+          "identity": "confirmed",
+          "applicable": true,
+          "evidence": [
+            {
+              "sourceId": "s2",
+              "source": "kis:NYS:BBDO"
+            },
+            {
+              "sourceId": "s3",
+              "source": "https://www.bradescori.com.br/en/services/bradesco-shares/"
+            }
+          ],
+          "sourceLinkage": "passed: completed page-read URL registered in list_sources and delivered in subsequent model request; final IDs resolve to that registry.",
+          "semanticReview": {
+            "identity": "Current directory and KIS original NYS/BBDO record agree with the separate NYSE ADR identified by the issuer.",
+            "type": "common_adr",
+            "currentApplicability": "Current directory creation time 1023202621:31 and issuer share information corroborate continued NYSE listing and underlying class. Issuer page has no explicit publication date and includes 1H26 information.",
+            "adrUnderlyingRights": "Issuer share page explicitly distinguishes BBD preferred ADR and BBDO common ADR; independently read FAQ confirms common/preferred underlying rights and 1:1 ratio.",
+            "knownContraryEvidence": "KIS broad 01 and product names do not independently establish the class. Generic FAQ venue wording was resolved using the explicit NYSE share page and current directory."
+          },
+          "result": "passed"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Only two selected cases and three securities; not all eight cases or repeated accuracy estimation.",
+    "Not an end-to-end ranking quality, market-session, recommendation, or product acceptance result.",
+    "Web source-ID membership and semantic evidence review were performed separately.",
+    "KIS code 01 and product names were not accepted as standalone proof of type.",
+    "Issuer web-tool reads do not establish successful direct anonymous collection or full HTML retention.",
+    "Known later changes were checked within available current directory and issuer material, not an exhaustive corporate-action audit."
+  ]
+}
