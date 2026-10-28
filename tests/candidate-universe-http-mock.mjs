@@ -17,11 +17,20 @@ const identityKeys =
     : undefined;
 let refreshRequests = 0;
 let refreshedIdentity;
-const samples = [
-  { exchange: 'NAS', symbol: 'AAPL', name: 'Apple', type: 'common' },
-  { exchange: 'NYS', symbol: 'BBDO', name: 'Bradesco', type: 'common_adr' },
-  { exchange: 'AMS', symbol: 'SPY', name: 'SPDR', type: 'etf' },
-];
+const samples = process.env.REPORT_COUNT
+  ? [
+      { exchange: 'NAS', symbol: 'AAPL', name: 'Apple', type: 'common' },
+      { exchange: 'NYS', symbol: 'BBDO', name: 'Bradesco', type: 'common_adr' },
+      { exchange: 'AMS', symbol: 'SPY', name: 'SPDR', type: 'common' },
+      { exchange: 'NAS', symbol: 'MSFT', name: 'Microsoft', type: 'common' },
+      { exchange: 'NYS', symbol: 'IBM', name: 'IBM', type: 'common' },
+      { exchange: 'AMS', symbol: 'IWM', name: 'Controlled company', type: 'common' },
+    ]
+  : [
+      { exchange: 'NAS', symbol: 'AAPL', name: 'Apple', type: 'common' },
+      { exchange: 'NYS', symbol: 'BBDO', name: 'Bradesco', type: 'common_adr' },
+      { exchange: 'AMS', symbol: 'SPY', name: 'SPDR', type: 'etf' },
+    ];
 const dates = [
   '20260921',
   '20260922',
@@ -187,7 +196,9 @@ globalThis.fetch = async (url, init = {}) => {
   assert.equal(init.headers.authorization, `Bearer ${token}`);
   assert.equal(init.redirect, 'error');
   assert.ok(init.signal instanceof AbortSignal);
-  const sample = samples.find((s) => s.exchange === address.searchParams.get('EXCD'));
+  const matchedSamples = samples.filter((s) => s.exchange === address.searchParams.get('EXCD'));
+  const sample =
+    matchedSamples[process.env.REPORT_COUNT && address.pathname.endsWith('trade-pbmn') ? 1 : 0];
   if (address.pathname.includes('/ranking/')) {
     if (scenario === 'rank-expired' && !expired) {
       expired = true;

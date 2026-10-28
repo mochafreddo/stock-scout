@@ -7,6 +7,7 @@ export class CandidateRuntime {
     official: 0,
     calendarModel: 0,
     typeModel: 0,
+    recommendationModel: 0,
     refresh: 0,
   };
   readonly limits = {
@@ -15,6 +16,7 @@ export class CandidateRuntime {
     official: 100,
     calendarModel: 1,
     typeModel: 12,
+    recommendationModel: 4,
     refresh: 2,
   };
   private target = Infinity;

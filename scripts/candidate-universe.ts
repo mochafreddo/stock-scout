@@ -1,4 +1,6 @@
 import { isAbsolute } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { recommendCandidates } from './buy-candidate-assessment.ts';
 import { CandidateRuntime } from './candidate-runtime.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
@@ -6,78 +8,23 @@ import { marketCalendar } from './market-calendar.ts';
 import { assessSecurityTypes, type Security } from './security-type-assessment.ts';
 import { readSiwcCredentials } from './siwc-auth.ts';
 
-const runtime = new CandidateRuntime();
-const context = { runtime };
-let stage = 'input';
-const safeCodes = [
-  'USAGE',
-  'TARGET_OPEN',
-  'EXECUTION_LIMIT',
-  'REQUEST_LIMIT',
-  'MARKET_ACTIVE',
-  'RANKING_FAILED',
-  'RANKING_INCOMPLETE',
-  'IDENTITY_AMBIGUOUS',
-  'DATA_NOT_READY',
-  'ANALYSIS_INSUFFICIENT',
-  'SENSITIVE_OUTPUT',
-  'SOURCE_SHAPE',
-  'SOURCE_HTTP_FAILURE',
-  'CALENDAR_RANGE',
-  'EXCHANGE_MISMATCH',
-  'NOTICE_UNRESOLVED',
-  'COLLECTION_LIMIT',
-  'XML_PARSER_UNAVAILABLE',
-  'PDF_PARSER_UNAVAILABLE',
-  'MODEL_OUTPUT',
-  'MODEL_INCOMPLETE',
-  'MODEL_LIMIT',
-  'MODEL_INPUT_LIMIT',
-  'MODEL_FAILED',
-  'MODEL_UNAVAILABLE',
-  'AUTH_FAILED',
-  'SUBSCRIPTION_LIMIT',
-  'SEARCH_FAILED',
-  'SEARCH_UNSUPPORTED',
-  'QUERY_FAILED',
-  'PAID_BUDGET_UNPROVABLE',
-  'HTTP_FAILURE',
-  'KIS_FAILURE',
-  'RESPONSE_SHAPE',
-  'CREDENTIALS_MISSING',
-];
-try {
-  const options = new Map<string, string>();
-  const args = process.argv.slice(2);
-  for (let index = 0; index < args.length; index += 2) {
-    if (
-      !['--auth-dir', '--model'].includes(args[index]) ||
-      !args[index + 1] ||
-      options.has(args[index])
-    )
-      throw new Error('USAGE');
-    options.set(args[index], args[index + 1]);
-  }
-  const directory = options.get('--auth-dir');
-  const model = options.get('--model');
-  if (!directory || !isAbsolute(directory) || !/^[a-zA-Z0-9._-]{1,100}$/.test(model ?? ''))
-    throw new Error('USAGE');
-  for (const secret of [
-    process.env.KIS_APP_KEY,
-    process.env.KIS_APP_SECRET,
-    process.env.OPENAI_API_KEY,
-  ])
-    if (secret) runtime.secrets.add(secret);
-  stage = 'calendar';
+export async function candidateUniverse(
+  directory: string,
+  model: string,
+  runtime: CandidateRuntime,
+  onStage: (stage: string) => void,
+) {
+  const context = { runtime };
+  onStage('calendar');
   const calendar = await marketCalendar({
     directory,
-    model: model as string,
+    model,
     history: 20,
     context,
   });
   if (!calendar.result.analysisEligible) throw new Error('MARKET_ACTIVE');
   runtime.targetOpen(calendar.result.targetSession.open);
-  stage = 'ranking';
+  onStage('ranking');
   const securities = new Map<string, Security>();
   const identities = new Map<string, string>();
   const observations: unknown[] = [];
@@ -144,13 +91,13 @@ try {
         scope: 'discovery ranking at query time; not the data-session ranking',
       });
     }
-  stage = 'authentication';
+  onStage('authentication');
   const credentials = await readSiwcCredentials(directory, undefined, context);
   const secrets = [...runtime.secrets];
-  stage = 'assessment';
+  onStage('assessment');
   const assessment = await assessSecurityTypes({
     securities: [...securities.values()],
-    model: model as string,
+    model,
     accessToken: credentials.accessToken,
     secrets,
     inputMode: 'rankings',
@@ -161,7 +108,7 @@ try {
   });
   runtime.check();
   if (assessment.status === 'analysis_insufficient') throw new Error('ANALYSIS_INSUFFICIENT');
-  stage = 'daily';
+  onStage('daily');
   const included = [];
   for (const security of assessment.securities.filter((security) => security.included)) {
     const daily = await queryKis(
@@ -216,8 +163,8 @@ try {
       },
     });
   }
-  stage = 'output';
-  const output = {
+  onStage('output');
+  return {
     status: included.length ? 'candidate_universe' : 'empty_candidate_universe',
     evaluatedAt: new Date(Date.now()).toISOString(),
     dataSession: calendar.result.dataSession,
@@ -231,32 +178,113 @@ try {
     limits: { ...runtime.limits, topPerRanking: 1, historySessions: 20, executionSeconds: 600 },
     usage: runtime.counts,
   };
-  const serialized = runtime.safe(output);
-  runtime.check();
-  console.log(serialized);
-} catch (error) {
-  let failure = error;
+}
+
+export type CandidateUniverse = Awaited<ReturnType<typeof candidateUniverse>>;
+
+export async function runCandidateCli(report = false) {
+  const runtime = new CandidateRuntime();
+  let stage = 'input';
+  const safeCodes = [
+    'USAGE',
+    'TARGET_OPEN',
+    'EXECUTION_LIMIT',
+    'REQUEST_LIMIT',
+    'MARKET_ACTIVE',
+    'RANKING_FAILED',
+    'RANKING_INCOMPLETE',
+    'IDENTITY_AMBIGUOUS',
+    'DATA_NOT_READY',
+    'ANALYSIS_INSUFFICIENT',
+    'SENSITIVE_OUTPUT',
+    'SOURCE_SHAPE',
+    'SOURCE_HTTP_FAILURE',
+    'CALENDAR_RANGE',
+    'EXCHANGE_MISMATCH',
+    'NOTICE_UNRESOLVED',
+    'COLLECTION_LIMIT',
+    'XML_PARSER_UNAVAILABLE',
+    'PDF_PARSER_UNAVAILABLE',
+    'MODEL_OUTPUT',
+    'REPORT_UNSUPPORTED',
+    'MODEL_INCOMPLETE',
+    'MODEL_LIMIT',
+    'MODEL_INPUT_LIMIT',
+    'MODEL_FAILED',
+    'MODEL_UNAVAILABLE',
+    'AUTH_FAILED',
+    'SUBSCRIPTION_LIMIT',
+    'SEARCH_FAILED',
+    'SEARCH_UNSUPPORTED',
+    'QUERY_FAILED',
+    'PAID_BUDGET_UNPROVABLE',
+    'HTTP_FAILURE',
+    'KIS_FAILURE',
+    'RESPONSE_SHAPE',
+    'CREDENTIALS_MISSING',
+  ];
   try {
+    const options = new Map<string, string>();
+    const args = process.argv.slice(2);
+    for (let index = 0; index < args.length; index += 2) {
+      if (
+        !['--auth-dir', '--model'].includes(args[index]) ||
+        !args[index + 1] ||
+        options.has(args[index])
+      )
+        throw new Error('USAGE');
+      options.set(args[index], args[index + 1]);
+    }
+    const directory = options.get('--auth-dir');
+    const model = options.get('--model');
+    if (!directory || !isAbsolute(directory) || !/^[a-zA-Z0-9._-]{1,100}$/.test(model ?? ''))
+      throw new Error('USAGE');
+    for (const secret of [
+      process.env.KIS_APP_KEY,
+      process.env.KIS_APP_SECRET,
+      process.env.OPENAI_API_KEY,
+    ])
+      if (secret) runtime.secrets.add(secret);
+    const universe = await candidateUniverse(directory, model as string, runtime, (next) => {
+      stage = next;
+    });
+    const output = report
+      ? await recommendCandidates(universe, directory, model as string, runtime, (next) => {
+          stage = next;
+        })
+      : universe;
+    stage = 'output';
+    const serialized = runtime.safe(output);
     runtime.check();
-  } catch (limit) {
-    failure = limit;
-  }
-  const code =
-    failure instanceof AuthError
-      ? failure.message
-      : failure instanceof Error &&
-          (safeCodes.includes(failure.message) || /^siwc_[a-z_]+$/.test(failure.message))
+    console.log(serialized);
+  } catch (error) {
+    let failure = error;
+    try {
+      runtime.check();
+    } catch (limit) {
+      failure = limit;
+    }
+    const code =
+      failure instanceof AuthError
         ? failure.message
-        : 'REQUEST_FAILED';
-  console.error(
-    JSON.stringify({
-      error: code,
-      stage,
-      usage: runtime.counts,
-      ...(failure instanceof AuthError && failure.retryAfterSeconds
-        ? { retryAfterSeconds: failure.retryAfterSeconds }
-        : {}),
-    }),
-  );
-  process.exitCode = code === 'ANALYSIS_INSUFFICIENT' ? 2 : 1;
+        : failure instanceof Error &&
+            (safeCodes.includes(failure.message) || /^siwc_[a-z_]+$/.test(failure.message))
+          ? failure.message
+          : 'REQUEST_FAILED';
+    console.error(
+      JSON.stringify({
+        error: code,
+        stage,
+        usage: runtime.counts,
+        ...(failure instanceof AuthError && failure.retryAfterSeconds
+          ? { retryAfterSeconds: failure.retryAfterSeconds }
+          : {}),
+      }),
+    );
+    process.exitCode = code === 'ANALYSIS_INSUFFICIENT' ? 2 : 1;
+  }
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  await runCandidateCli();
 }

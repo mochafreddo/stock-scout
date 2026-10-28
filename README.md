@@ -11,7 +11,7 @@
 | KIS 자동 토큰 발급·캐시 | [#247](https://github.com/mochafreddo/stock-scout/issues/247)에서 발급·캐시 재사용을, [#248](https://github.com/mochafreddo/stock-scout/issues/248)에서 명시적 만료의 한 번 복구를 구현했습니다. 첫 실행은 5분 대기를 기록하며 복구에도 같은 발급 제한을 적용합니다. 실제 만료 복구는 미검증입니다. |
 | 장전 후보군 조회 | [후보군 CLI](docs/candidate-universe.md)는 공식 일정·여섯 탐색 순위·유형 판단·완료 세션 일봉 검사를 연결합니다. 통합 실연동과 매수 추천·제품 인수는 별도 검증 대상입니다. |
 | LLM 종목 유형 검증 | [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 작은 검증 흐름을 구현했습니다. 공식 로그인과 실제 KIS·검색 도구 연결은 확인했습니다. 단일 모델 흐름으로 고정 입력의 최종 결과를 확인했습니다. 후속 실제 여섯 순위 실행은 6종목의 결과와 집계를 출력했지만 전부 미확인으로 분석 불충분이었습니다. 유용한 실제 유형 판단 완료와 독립 정확도 점검이 남아 있습니다. [현재 검증 상태](docs/llm-security-probe.md#현재-검증-상태)를 확인하세요. |
-| AI 매수 후보 추천 | #237의 계획입니다. 유형 검증 흐름을 추천·장전 보고서에 연결하는 작업은 남아 있습니다. |
+| AI 매수 후보 추천 | [보고서 CLI](docs/buy-candidates.md)는 후보군과 완료 일봉으로 최대 5개 후보 또는 후보 없음을 출력합니다. 실제 통합 실행 1회는 일정 수집 오류로 종료되어 구독·KIS 보고서 연결 성공과 추천 품질은 미검증입니다. |
 
 ## 시작하기
 
@@ -29,6 +29,7 @@ Node.js 24 이상과 npm이 필요합니다. [처음 실행하고 검증하기](
 - [KIS 데이터 검증](docs/kis-data-validation.md): 실제 관측 근거, 자동 검사 범위와 한계, 후속 차단 조건
 - [공식 거래 일정 CLI](docs/market-calendar.md): SIWC·모델 인수, 공식 자료·수집 상한·근거 검사·실패 조건과 현재 한계
 - [후보군 조회 CLI](docs/candidate-universe.md): 실행 순서, 탐색 순위와 완료 세션 일봉, 공통 마감·실패 조건과 검증 한계
+- [매수 후보 보고서 실행하기](docs/buy-candidates.md): 완료 일봉과 ChatGPT 구독으로 다음 정규장의 매수 검토 후보 또는 후보 없음 확인하기
 - [KIS 종목 유형과 식별 검증](docs/kis-security-identification.md): 공식 코드 정의, 실제 워런트·우선주 ADR 반례와 후속 차단 조건
 - [외부 공식 종목 유형 자료 조사](docs/official-security-type-validation.md): 공개 구조화 목록·증권별 공시의 실제 수집 결과와 자동 판별의 남은 조건
 - [제3자 종목 유형 자료 조사](docs/third-party-security-type-sources.md#2026-10-20-자동-이용보관-차단-범위-재검토): Massive 자동 이용·보관·공개의 차단 범위와 공급자 채택의 남은 조건
