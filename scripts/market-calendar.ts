@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { assessCalendarNotices, type CalendarNotice } from './calendar-notice-assessment.ts';
 
 type Session = { date: string; open: string; close: string };
 type Calendar = {
@@ -8,16 +9,10 @@ type Calendar = {
   early: Map<string, number>;
   open: number;
   close: number;
+  hours: Map<string, { open?: number; close?: number }>;
 };
 type Exchange = 'NAS' | 'NYS' | 'AMS';
-type Notice = {
-  id: string;
-  url: string;
-  exchanges: Exchange[];
-  bodies: string[];
-  correction: boolean;
-};
-const correctionPattern = /\b(?:correction|corrected|revised|supersedes?|replacement)\b/i;
+type Notice = CalendarNotice;
 const nyseUrl = 'https://www.nyse.com/trade/hours-calendars';
 const nasdaqUrl = 'https://www.nasdaqtrader.com/Trader.aspx?id=Calendar';
 const nasdaqHoursUrl =
@@ -41,7 +36,14 @@ type NoticeCollection = {
 };
 const noticeCollections: NoticeCollection[] = [];
 const notices: Notice[] = [];
-const scheduleChanges: { id: string; exchanges: Exchange[]; date: string; kind: 'closed' }[] = [];
+const scheduleChanges: {
+  id: string;
+  exchanges: Exchange[];
+  date: string;
+  kind: 'closed' | 'session_hours';
+  open: string | null;
+  close: string | null;
+}[] = [];
 const deferredNotices: {
   id: string;
   url: string;
@@ -245,7 +247,7 @@ function nyseCalendar(source: string): Calendar {
     return times[0];
   });
   if (JSON.stringify(hours[0]) !== JSON.stringify(hours[1])) fail('EXCHANGE_MISMATCH');
-  return { years, holidays, early, open: hours[0][0], close: hours[0][1] };
+  return { years, holidays, early, open: hours[0][0], close: hours[0][1], hours: new Map() };
 }
 function nasdaqCalendar(source: string, hours: { open: number; close: number }): Calendar {
   const heading = xml(source, 'normalize-space(//h1)', true);
@@ -265,7 +267,7 @@ function nasdaqCalendar(source: string, hours: { open: number; close: number }):
     else if (/^Early Close/.test(row[1])) early.set(date, minutes(row[2]));
     else fail('SOURCE_SHAPE');
   }
-  return { years: [year], holidays, early, ...hours };
+  return { years: [year], holidays, early, ...hours, hours: new Map() };
 }
 function published(value: unknown) {
   if (
@@ -293,7 +295,6 @@ function nyseNotices(source: string, channel: number, url: string) {
   let childCount = 0;
   for (const raw of page.data) {
     const notice = object(raw);
-    activeNotice = String(notice.id);
     if (
       !Number.isSafeInteger(notice.id) ||
       !Array.isArray(notice.marketLinks) ||
@@ -302,8 +303,8 @@ function nyseNotices(source: string, channel: number, url: string) {
       !Array.isArray(notice.childNotifications)
     )
       fail('SOURCE_SHAPE');
-    const bodies: string[] = [];
-    let correction = false;
+    activeNotice = String(notice.id);
+    const entries: CalendarNotice['entries'] = [];
     for (const rawEntry of [notice, ...notice.childNotifications]) {
       const entry = object(rawEntry);
       dates.push(published(entry.publishedDate));
@@ -316,8 +317,12 @@ function nyseNotices(source: string, channel: number, url: string) {
         fail('SOURCE_SHAPE');
       const body = text(entry.body);
       if (!body) fail('SOURCE_SHAPE');
-      correction ||= correctionPattern.test(entry.subject);
-      bodies.push(body);
+      entries.push({
+        id: `nyse:${channel}:${notice.id}:${entries.length}`,
+        publishedAt: published(entry.publishedDate),
+        subject: entry.subject,
+        body,
+      });
     }
     childCount += notice.childNotifications.length;
     const markets = (notice.marketLinks as string[]).map((market) => market.trim());
@@ -341,7 +346,7 @@ function nyseNotices(source: string, channel: number, url: string) {
     )
       fail('NOTICE_UNRESOLVED');
     if (exchanges.length)
-      notices.push({ id: String(notice.id), url, exchanges, bodies, correction });
+      notices.push({ id: `nyse:${channel}:${notice.id}`, url, exchanges, entries });
   }
   activeNotice = undefined;
   noticeCollections.push({
@@ -402,13 +407,17 @@ async function nasdaqNotices(source: string) {
     const body = xml(article, `normalize-space((${contents})[1])`, true);
     if (!body) fail('SOURCE_SHAPE');
     notices.push({
-      id: activeNotice,
+      id: `nasdaq:${activeNotice}`,
       url: link,
       exchanges: ['NAS'],
-      bodies: [body],
-      correction:
-        correctionPattern.test(field('title')) ||
-        correctionPattern.test(xml(article, 'normalize-space(/html/head/title)', true)),
+      entries: [
+        {
+          id: `nasdaq:${activeNotice}:0`,
+          publishedAt: published(Date.parse(field('pubDate'))),
+          subject: field('title'),
+          body,
+        },
+      ],
     });
   }
   activeNotice = undefined;
@@ -424,49 +433,68 @@ async function nasdaqNotices(source: string) {
     continuousCoverage: 'unverified',
   });
 }
-function applyNotices(calendars: Record<Exchange, Calendar>) {
-  for (const notice of notices) {
+function applyNotices(
+  calendars: Record<Exchange, Calendar>,
+  assessments: import('./calendar-notice-assessment.ts').NoticeAssessment[],
+) {
+  if (assessments.some((record) => record.status === 'unresolved')) fail('NOTICE_UNRESOLVED');
+  const superseded = new Set(assessments.flatMap((record) => record.supersedes));
+  const applied = new Map<string, { closed: boolean; open?: number; close?: number }>();
+  const minute = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+  for (const record of assessments) {
+    if (superseded.has(record.id)) continue;
+    const notice = notices.find((notice) => notice.id === record.id) as Notice;
     activeSource = notice.url;
     activeNotice = notice.id;
-    for (const body of notice.bodies) {
-      const expansion =
-        /^To prepare for the launch of nearly continuous 23-hour, 5-day trading on the Nasdaq Stock Market beginning ((?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}), Nasdaq is offering the following testing opportunities\.$/.exec(
-          body,
-        );
-      if (expansion && notice.exchanges.length === 1 && notice.exchanges[0] === 'NAS') {
-        if (notice.correction) fail('NOTICE_UNRESOLVED');
-        deferredNotices.push({
-          id: notice.id,
-          url: notice.url,
-          effectiveDate: dateIn(expansion[1]),
-          reason: 'regular_session_scope_unresolved',
+    if (record.status === 'future_effective')
+      deferredNotices.push({
+        id: record.id,
+        url: notice.url,
+        effectiveDate: record.effectiveDate as string,
+        reason: 'regular_session_scope_unresolved',
+      });
+    for (const change of record.changes) {
+      for (const exchange of change.exchanges) {
+        const key = `${exchange}:${change.date}`;
+        const previous = applied.get(key);
+        const closed = change.kind === 'closed';
+        const open = change.open === null ? undefined : minute(change.open);
+        const close = change.close === null ? undefined : minute(change.close);
+        if (
+          previous &&
+          (previous.closed !== closed ||
+            (open !== undefined && previous.open !== undefined && open !== previous.open) ||
+            (close !== undefined && previous.close !== undefined && close !== previous.close))
+        )
+          fail('NOTICE_UNRESOLVED');
+        const calendar = calendars[exchange];
+        if (closed) calendar.holidays.add(change.date);
+        else {
+          if (
+            [0, 6].includes(new Date(change.date).getUTCDay()) ||
+            calendar.holidays.has(change.date)
+          )
+            fail('NOTICE_UNRESOLVED');
+          const hours = {
+            ...calendar.hours.get(change.date),
+            ...(open === undefined ? {} : { open }),
+            ...(close === undefined ? {} : { close }),
+          };
+          if (
+            (hours.open ?? calendar.open) >=
+            (hours.close ?? calendar.early.get(change.date) ?? calendar.close)
+          )
+            fail('NOTICE_UNRESOLVED');
+          calendar.hours.set(change.date, hours);
+        }
+        applied.set(key, {
+          ...previous,
+          closed,
+          ...(open === undefined ? {} : { open }),
+          ...(close === undefined ? {} : { close }),
         });
-        continue;
       }
-      const nasdaqClosure =
-        /^Nasdaq U\.S\. equities and options markets will be closed on ((?:Monday|Tuesday|Wednesday|Thursday|Friday), (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}), in observance of (?:a National Day of Mourning|the passing of President [A-Za-z]+ [A-Za-z]+)\.$/.exec(
-          body,
-        );
-      const nyseClosure =
-        /^On ((?:Monday|Tuesday|Wednesday|Thursday|Friday), (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}), The New York Stock Exchange, NYSE American Equities will close in observance of the National Day of Mourning\.$/.exec(
-          body,
-        );
-      const closure = notice.exchanges[0] === 'NAS' ? nasdaqClosure : nyseClosure;
-      if (closure) {
-        if (notice.correction || notice.bodies.length > 1) fail('NOTICE_UNRESOLVED');
-        const date = dateIn(closure[1]);
-        for (const exchange of notice.exchanges) calendars[exchange].holidays.add(date);
-        scheduleChanges.push({ id: notice.id, exchanges: notice.exchanges, date, kind: 'closed' });
-      } else {
-        const scopedNonSession = [
-          /^NYSE markets are operational(?: and we expect a normal open this morning)?\.$/,
-          /^(?:The previously reported issue has been resolved\. )?All systems are currently operational\.$/,
-          /^NYSE American has determined that the shares are part of a new security offering that will trade under the ticker [A-Z0-9. -]{1,20} with CUSIP [A-Z0-9]{9}\.$/,
-          /^Nasdaq will begin listing and trading the following exchange-traded funds: [A-Za-z0-9 ()-]{1,100}\.$/,
-          /^Effective (?:Monday|Tuesday|Wednesday|Thursday|Friday), (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}, Nasdaq will list the following ETF: [A-Za-z0-9 -]{1,100} \(Ticker: [A-Z0-9.]{1,10}\)\.$/,
-        ];
-        if (!scopedNonSession.some((pattern) => pattern.test(body))) fail('NOTICE_UNRESOLVED');
-      }
+      scheduleChanges.push({ id: record.id, ...change });
     }
   }
   activeNotice = undefined;
@@ -485,12 +513,25 @@ function checkAgreement(calendars: Record<Exchange, Calendar>) {
     const other = calendars[exchange];
     if (reference.open !== other.open || reference.close !== other.close) fail('EXCHANGE_MISMATCH');
     const years = reference.years.filter((year) => other.years.includes(year));
-    const dates = (calendar: Calendar) => ({
-      holidays: [...calendar.holidays].filter((d) => years.includes(Number(d.slice(0, 4)))).sort(),
-      early: [...calendar.early].filter(([d]) => years.includes(Number(d.slice(0, 4)))).sort(),
-    });
-    if (JSON.stringify(dates(reference)) !== JSON.stringify(dates(other)))
+    const holidays = (calendar: Calendar) =>
+      [...calendar.holidays].filter((date) => years.includes(Number(date.slice(0, 4)))).sort();
+    if (JSON.stringify(holidays(reference)) !== JSON.stringify(holidays(other)))
       fail('EXCHANGE_MISMATCH');
+    const dates = new Set([
+      ...reference.early.keys(),
+      ...other.early.keys(),
+      ...reference.hours.keys(),
+      ...other.hours.keys(),
+    ]);
+    for (const date of dates) {
+      if (!years.includes(Number(date.slice(0, 4))) || reference.holidays.has(date)) continue;
+      const hours = (calendar: Calendar) => [
+        calendar.hours.get(date)?.open ?? calendar.open,
+        calendar.hours.get(date)?.close ?? calendar.early.get(date) ?? calendar.close,
+      ];
+      if (JSON.stringify(hours(reference)) !== JSON.stringify(hours(other)))
+        fail('EXCHANGE_MISMATCH');
+    }
   }
 }
 const newYork = new Intl.DateTimeFormat('en-CA', {
@@ -534,8 +575,11 @@ function sessions(calendar: Calendar, at: number) {
       if ([0, 6].includes(current.getUTCDay()) || calendar.holidays.has(date)) continue;
       const session = {
         date,
-        open: instant(date, calendar.open),
-        close: instant(date, calendar.early.get(date) ?? calendar.close),
+        open: instant(date, calendar.hours.get(date)?.open ?? calendar.open),
+        close: instant(
+          date,
+          calendar.hours.get(date)?.close ?? calendar.early.get(date) ?? calendar.close,
+        ),
       };
       if (Date.parse(session.open) >= Date.parse(session.close)) fail('SOURCE_SHAPE');
       if (at >= Date.parse(session.open) && at < Date.parse(session.close)) active = true;
@@ -561,7 +605,21 @@ function commonSchedule(calendars: Record<Exchange, Calendar>, at: number) {
   return schedule;
 }
 try {
-  const args = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  const options = new Map<string, string>();
+  for (let index = 0; index < rawArgs.length; index += 2) {
+    if (
+      !['--at', '--auth-dir', '--model'].includes(rawArgs[index]) ||
+      !rawArgs[index + 1] ||
+      options.has(rawArgs[index])
+    )
+      fail('USAGE');
+    options.set(rawArgs[index], rawArgs[index + 1]);
+  }
+  const directory = options.get('--auth-dir');
+  const model = options.get('--model');
+  if (!directory?.startsWith('/') || !/^[a-zA-Z0-9._-]{1,100}$/.test(model ?? '')) fail('USAGE');
+  const args = options.has('--at') ? ['--at', options.get('--at') as string] : [];
   if (
     args.length &&
     (args.length !== 2 ||
@@ -594,9 +652,23 @@ try {
   const calendars = {
     NAS: nasdaq,
     NYS: nyse,
-    AMS: { ...nyse, holidays: new Set(nyse.holidays), early: new Map(nyse.early) },
+    AMS: {
+      ...nyse,
+      holidays: new Set(nyse.holidays),
+      early: new Map(nyse.early),
+      hours: new Map(),
+    },
   };
-  applyNotices(calendars);
+  activeSource = undefined;
+  activeNotice = undefined;
+  const assessment = await assessCalendarNotices(
+    notices,
+    directory,
+    model as string,
+    300_000 - (performance.now() - startedAt),
+  );
+  if (assessment.assessments.length !== notices.length) fail('MODEL_OUTPUT');
+  applyNotices(calendars, assessment.assessments);
   checkAgreement(calendars);
   let at = fixed ?? Date.now();
   let schedule = commonSchedule(calendars, at);
@@ -605,9 +677,9 @@ try {
     at = outputAt;
     schedule = commonSchedule(calendars, at);
   }
-  if (performance.now() - startedAt >= 120_000) fail('COLLECTION_LIMIT');
+  if (performance.now() - startedAt >= 300_000) fail('EXECUTION_LIMIT');
   console.log(
-    JSON.stringify({
+    assessment.safe({
       evaluatedAt: new Date(at).toISOString(),
       timeZone: 'America/New_York',
       calendarCoverage: {
@@ -620,6 +692,11 @@ try {
       noticeCollections,
       scheduleChanges,
       deferredNotices,
+      noticeAssessment: assessment.provenance,
+      noticeAssessments: assessment.assessments.map((record) => ({
+        ...record,
+        url: notices.find((notice) => notice.id === record.id)?.url,
+      })),
       sources,
     }),
   );
@@ -634,6 +711,16 @@ try {
     'COLLECTION_LIMIT',
     'XML_PARSER_UNAVAILABLE',
     'PDF_PARSER_UNAVAILABLE',
+    'MODEL_OUTPUT',
+    'MODEL_INCOMPLETE',
+    'MODEL_LIMIT',
+    'MODEL_INPUT_LIMIT',
+    'MODEL_FAILED',
+    'MODEL_UNAVAILABLE',
+    'AUTH_FAILED',
+    'SUBSCRIPTION_LIMIT',
+    'SENSITIVE_OUTPUT',
+    'EXECUTION_LIMIT',
   ];
   console.error(
     JSON.stringify({

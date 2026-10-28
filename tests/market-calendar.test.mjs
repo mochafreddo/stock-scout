@@ -79,16 +79,6 @@ test('current snapshots include NYSE children and fetched Nasdaq article bodies,
   );
 });
 
-test('a supported dated official mourning closure moves all three exchanges to Tuesday without using Monday data', () => {
-  const result = run(['--at', '2026-10-26T22:00:00Z'], { SCENARIO: 'closure' });
-  assert.equal(result.status, 0, result.stderr);
-  const record = JSON.parse(result.stdout);
-  assert.equal(record.dataSession.date, '2026-10-23');
-  assert.equal(record.targetSession.date, '2026-10-27');
-  assert.equal(record.targetSession.open, '2026-10-27T13:30:00.000Z');
-  assert.equal(record.scheduleChanges.length, 2);
-});
-
 test('the output uses the current clock after collection crosses the opening boundary', () => {
   const result = run([], { SCENARIO: 'final-open' });
   assert.equal(result.status, 0, result.stderr);
@@ -107,9 +97,8 @@ test('a final clock advance across open invalidates the initially calculated eli
   assert.equal(record.targetSession.date, '2026-10-27');
 });
 
-test('unknown notices, truncated pages, source failures, exchange disagreement and final year changes never leave partial success', () => {
+test('truncated pages, source failures, exchange disagreement and final year changes never leave partial success', () => {
   for (const [scenario, error, args] of [
-    ['unknown-notice', 'NOTICE_UNRESOLVED', []],
     ['truncated-nyse', 'SOURCE_SHAPE', []],
     ['http-failure', 'SOURCE_HTTP_FAILURE', []],
     ['transport-failure', 'REQUEST_FAILED', []],
@@ -126,7 +115,7 @@ test('unknown notices, truncated pages, source failures, exchange disagreement a
   }
 });
 
-test('the supported full-body security listing and normal-operations formats do not require session hours', () => {
+test('model-assessed listings and normal-operations notices preserve the annual sessions', () => {
   for (const body of [
     'NYSE markets are operational and we expect a normal open this morning.',
     'NYSE American has determined that the shares are part of a new security offering that will trade under the ticker GUNN with CUSIP 402880207.',
@@ -143,25 +132,6 @@ test('the supported full-body security listing and normal-operations formats do 
   assert.equal(listing.status, 0, listing.stderr);
 });
 
-test('an announced future expansion is deferred only before its effective date and never treated as a test-only notice', () => {
-  const body =
-    'To prepare for the launch of nearly continuous 23-hour, 5-day trading on the Nasdaq Stock Market beginning December 6, 2026, Nasdaq is offering the following testing opportunities.';
-  const before = run([], { SCENARIO: 'article', NASDAQ_BODY: body });
-  assert.equal(before.status, 0, before.stderr);
-  assert.equal(JSON.parse(before.stdout).deferredNotices[0].effectiveDate, '2026-12-06');
-  const effective = run(['--at', '2026-12-04T22:00:00Z'], {
-    SCENARIO: 'article',
-    NASDAQ_BODY: body,
-  });
-  assert.equal(effective.status, 1);
-  assert.equal(effective.stdout, '');
-  assert.equal(JSON.parse(effective.stderr).error, 'NOTICE_UNRESOLVED');
-  const correction = run([], { SCENARIO: 'marked-expansion', NASDAQ_BODY: body });
-  assert.equal(correction.status, 1);
-  assert.equal(correction.stdout, '');
-  assert.equal(JSON.parse(correction.stderr).error, 'NOTICE_UNRESOLVED');
-});
-
 test('trailing whitespace in the official NYSE market label keeps the explicit venue identity', () => {
   const result = run([], {
     SCENARIO: 'trailing-market',
@@ -170,55 +140,9 @@ test('trailing whitespace in the official NYSE market label keeps the explicit v
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('a known non-session clause cannot hide an unresolved calendar change in the same body or a child update', () => {
-  for (const env of [
-    { NYSE_BODY: 'NYSE markets are operational. NYSE will not open tomorrow.' },
-    {
-      NYSE_BODY: 'NYSE markets are operational.',
-      NYSE_CHILD: 'The regular trading session is postponed; timing is not yet confirmed.',
-    },
-    {
-      SCENARIO: 'article',
-      NASDAQ_BODY:
-        'Nasdaq will begin listing and trading the following exchange-traded funds: Example ETF (TEST). Nasdaq will not open tomorrow.',
-    },
-    {
-      SCENARIO: 'article',
-      NASDAQ_BODY:
-        'Nasdaq U.S. equities and options markets will be closed on Monday, October 26, 2026, in observance of a National Day of Mourning. The next opening auction has been moved to 10:00 a.m.',
-    },
-    {
-      SCENARIO: 'article',
-      NASDAQ_BODY:
-        'To prepare for the launch of nearly continuous 23-hour, 5-day trading on the Nasdaq Stock Market beginning December 6, 2026, Nasdaq is offering the following testing opportunities. Another immediate schedule change will be announced.',
-    },
-  ]) {
-    const result = run([], env);
-    assert.equal(result.status, 1, result.stdout);
-    assert.equal(result.stdout, '');
-    assert.equal(JSON.parse(result.stderr).error, 'NOTICE_UNRESOLVED');
-  }
-});
-
-test('a closure whose weekday conflicts with its numeric date fails instead of choosing either interpretation', () => {
-  const result = run(['--at', '2026-10-27T22:00:00Z'], {
-    SCENARIO: 'closure',
-    CLOSURE_DATE: 'Monday, October 27, 2026',
-  });
-  assert.equal(result.status, 1, result.stdout);
+test('an annual calendar footnote whose weekday conflicts with its numeric date fails', () => {
+  const result = run(['--at', '2026-11-27T17:00:00Z'], { SCENARIO: 'footnote-weekday' });
+  assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
   assert.equal(JSON.parse(result.stderr).error, 'SOURCE_SHAPE');
-  const footnote = run(['--at', '2026-11-27T17:00:00Z'], { SCENARIO: 'footnote-weekday' });
-  assert.equal(footnote.status, 1);
-  assert.equal(footnote.stdout, '');
-  assert.equal(JSON.parse(footnote.stderr).error, 'SOURCE_SHAPE');
-});
-
-test('a replacement child closure is not inferred to be an additional holiday even if other exchange dates match the union', () => {
-  for (const scenario of ['correction', 'ambiguous-child', 'marked-closure']) {
-    const result = run(['--at', '2026-10-26T22:00:00Z'], { SCENARIO: scenario });
-    assert.equal(result.status, 1, scenario);
-    assert.equal(result.stdout, '');
-    assert.equal(JSON.parse(result.stderr).error, 'NOTICE_UNRESOLVED');
-  }
 });

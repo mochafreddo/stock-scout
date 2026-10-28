@@ -1,4 +1,9 @@
+import assert from 'node:assert/strict';
 import { appendFileSync, readFileSync } from 'node:fs';
+import { mock } from 'node:test';
+
+let elapsedMs = 0;
+mock.method(performance, 'now', () => elapsedMs);
 
 const fixture = (name) =>
   readFileSync(new URL(`./fixtures/market-calendar/${name}.html.txt`, import.meta.url), 'utf8');
@@ -30,9 +35,107 @@ Date.now = () => Date.parse(process.env.TEST_NOW || '2026-10-26T06:00:00Z');
 globalThis.fetch = async (url, options) => {
   appendFileSync(
     process.env.TEST_TRACE,
-    `${JSON.stringify({ url, method: options?.method || 'GET' })}\n`,
+    `${JSON.stringify({ url, method: options?.method || 'GET', ...(String(url).endsWith('/responses') ? { body: JSON.parse(options.body) } : {}) })}\n`,
   );
   const address = new URL(url);
+  if (address.href === 'https://api.openai.com/v1/responses') {
+    assert.equal(
+      new Headers(options.headers).get('authorization'),
+      'Bearer synthetic-subscription',
+    );
+    elapsedMs += Number(process.env.MODEL_ELAPSED || 0);
+    if (scenario === 'model-final-open') Date.now = () => Date.parse('2026-10-26T13:30:00Z');
+    if (scenario === 'model-calculation-open') {
+      let reads = 0;
+      Date.now = () => Date.parse(++reads === 1 ? '2026-10-26T13:29:59Z' : '2026-10-26T13:30:00Z');
+    }
+    if (scenario === 'model-final-future') Date.now = () => Date.parse('2026-12-04T22:00:00Z');
+    if (scenario === 'model-http-failure')
+      return Response.json(
+        { error: { code: 'private_error', message: 'synthetic-subscription' } },
+        { status: 503 },
+      );
+    if (scenario === 'model-quota')
+      return Response.json(
+        {
+          error: {
+            code: 'subscription_sharing_usage_limit_exceeded',
+            message: 'synthetic-subscription',
+          },
+        },
+        { status: 429 },
+      );
+    if (scenario === 'model-rate-limit')
+      return Response.json(
+        { error: { code: 'rate_limit_exceeded', message: 'synthetic-subscription' } },
+        { status: 429 },
+      );
+    if (scenario === 'model-unavailable')
+      return Response.json(
+        { error: { code: 'model_not_found', message: 'synthetic-subscription' } },
+        { status: 404 },
+      );
+    const request = JSON.parse(options.body);
+    const input = JSON.parse(request.input.find((item) => item.role === 'user').content[0].text);
+    const value = process.env.MODEL_RESPONSE
+      ? JSON.parse(process.env.MODEL_RESPONSE)
+      : {
+          assessments: input.notices.map((notice) => ({
+            id: notice.id,
+            status: 'no_schedule_impact',
+            reason: 'Routine notice.',
+            spanIds: notice.entries.map((entry) => entry.spans[0].id),
+            changes: [],
+            effectiveDate: null,
+            supersedes: [],
+          })),
+        };
+    const events = [
+      {
+        type: 'response.created',
+        response: { id: 'resp_result', model: 'gpt-6-luna', created_at: 1 },
+      },
+      {
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: { type: 'message', id: 'msg_result' },
+      },
+      {
+        type: 'response.output_text.delta',
+        output_index: 0,
+        item_id: 'msg_result',
+        delta: scenario === 'model-partial-json' ? '{"assessments":[' : JSON.stringify(value),
+      },
+      ...(scenario === 'model-no-completion'
+        ? []
+        : [
+            {
+              type:
+                scenario === 'model-incomplete'
+                  ? 'response.incomplete'
+                  : scenario === 'model-failed'
+                    ? 'response.failed'
+                    : 'response.completed',
+              response: { usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 } },
+            },
+          ]),
+      ...(scenario === 'model-error-after-completion'
+        ? [{ type: 'error', code: 'private_error', message: 'synthetic-subscription' }]
+        : []),
+    ];
+    return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  }
+  if (address.href === 'https://auth.openai.com/api/accounts/oauth/token') {
+    elapsedMs += Number(process.env.AUTH_ELAPSED || 0);
+    return Response.json({
+      access_token: 'synthetic-subscription',
+      refresh_token: 'synthetic-refresh',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    });
+  }
   if (scenario === 'transport-failure') throw new Error('PRIVATE-TRANSPORT-CONTENT');
   if (scenario === 'http-failure') return new Response('PRIVATE-HTTP-CONTENT', { status: 503 });
   if (scenario === 'oversize') return new Response('x'.repeat(2_000_001));
@@ -116,12 +219,15 @@ globalThis.fetch = async (url, options) => {
         marketLinks: ['NYSE'],
         childNotifications: [],
       });
-    if (process.env.NYSE_BODY && address.pathname.includes('/system/1/'))
+    if (
+      (process.env.NYSE_BODY || process.env.LARGE_NOTICE_BYTES) &&
+      address.pathname.includes('/system/1/')
+    )
       data.push({
         id: 103,
         publishedDate: 1792706400000,
         subject: 'Informational notice',
-        body: `<p>${process.env.NYSE_BODY}</p>`,
+        body: `<p>${process.env.NYSE_BODY || (process.env.NOTICE_CHARACTER || 'x').repeat(Number(process.env.LARGE_NOTICE_BYTES))}</p>`,
         marketLinks:
           scenario === 'trailing-market' ? ['NYSE '] : ['NYSE', 'NYSE AMERICAN EQUITIES'],
         childNotifications: process.env.NYSE_CHILD
@@ -134,6 +240,8 @@ globalThis.fetch = async (url, options) => {
             ]
           : [],
       });
+    if (process.env.NYSE_EXTRA && address.pathname.includes('/system/1/'))
+      data.push(...JSON.parse(process.env.NYSE_EXTRA));
     return Response.json({
       data,
       totalCount: scenario === 'truncated-nyse' ? 1 : data.length,
@@ -141,6 +249,7 @@ globalThis.fetch = async (url, options) => {
     });
   }
   if (address.hostname === 'www.nasdaqtrader.com' && address.pathname === '/rss.aspx') {
+    elapsedMs += Number(process.env.COLLECTION_ELAPSED || 0);
     if (scenario === 'final-open') Date.now = () => Date.parse('2026-10-26T13:30:00Z');
     if (scenario === 'calculation-open') {
       let reads = 0;
