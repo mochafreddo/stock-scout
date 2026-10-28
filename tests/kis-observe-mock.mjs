@@ -36,7 +36,7 @@ if (!child) {
         killSignal: options.killSignal,
         snapshotMode: fs.statSync(snapshot).mode & 0o777,
         snapshotFiles: Object.fromEntries(
-          ['kis-probe.ts', 'kis-query.ts', 'kis-auth.ts'].map((name) => [
+          ['kis-probe.ts', 'kis-query.ts', 'kis-auth.ts', 'candidate-runtime.ts'].map((name) => [
             name,
             {
               sha256: createHash('sha256')

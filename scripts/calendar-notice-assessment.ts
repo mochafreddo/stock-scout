@@ -1,5 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, jsonSchema, Output, streamText, wrapLanguageModel } from 'ai';
+import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { readSiwcCredentials } from './siwc-auth.ts';
 
 export type CalendarNotice = {
@@ -228,6 +229,7 @@ export async function assessCalendarNotices(
   directory: string,
   model: string,
   remainingMs: number,
+  context: ExecutionContext = {},
 ) {
   const executionDeadline = performance.now() + remainingMs;
   const spans = new Map<string, NoticeSpan>();
@@ -256,7 +258,8 @@ export async function assessCalendarNotices(
     256 * 1024
   )
     throw new Error('MODEL_INPUT_LIMIT');
-  const credentials = await readSiwcCredentials(directory).catch(() => {
+  const credentials = await readSiwcCredentials(directory, undefined, context).catch(() => {
+    context.runtime?.check();
     throw new Error('AUTH_FAILED');
   });
   if (performance.now() >= executionDeadline) throw new Error('EXECUTION_LIMIT');
@@ -275,6 +278,7 @@ export async function assessCalendarNotices(
     return serialized;
   };
   safe(notices);
+  context.runtime?.safe(notices);
   let requests = 0;
   let completions = 0;
   let failed = false;
@@ -285,7 +289,9 @@ export async function assessCalendarNotices(
         throw new Error('MODEL_INPUT_LIMIT');
       if (String(url) !== 'https://api.openai.com/v1/responses' || ++requests > 1)
         throw new Error('MODEL_LIMIT');
-      return fetch(url, init);
+      const signal = requestSignal(context, modelBudget, init?.signal);
+      context.runtime?.take('calendarModel');
+      return fetch(url, { ...init, signal });
     },
   });
   try {
@@ -324,7 +330,7 @@ export async function assessCalendarNotices(
       providerOptions: { openai: { store: false, systemMessageMode: 'developer' } },
       maxRetries: 0,
       include: { rawChunks: true },
-      abortSignal: AbortSignal.timeout(Math.max(1, Math.floor(modelBudget))),
+      abortSignal: requestSignal(context, modelBudget),
       onError: () => {},
     });
     const output = Promise.resolve(result.output).then(
@@ -350,6 +356,7 @@ export async function assessCalendarNotices(
       safe,
     };
   } catch (error) {
+    context.runtime?.check();
     if (APICallError.isInstance(error)) {
       if ([401, 403].includes(error.statusCode ?? 0)) throw new Error('AUTH_FAILED');
       let code: unknown;

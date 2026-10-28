@@ -8,6 +8,7 @@ import {
   tool,
   wrapLanguageModel,
 } from 'ai';
+import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { DiagnosticError } from './diagnostic-error.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
@@ -45,7 +46,13 @@ export type Security = {
   exchange: KisExchange;
   symbol: string;
   rsym?: string;
-  rankings?: { kind: 'volume' | 'amount'; rank: number; requestedAt: string; source: string }[];
+  rankings?: {
+    kind: 'volume' | 'amount';
+    rank: number;
+    requestedAt: string;
+    source: string;
+    row?: Record<string, string>;
+  }[];
 };
 const textSchema = { type: 'string' };
 const identityProperties = {
@@ -170,6 +177,7 @@ export async function assessSecurityTypes({
   observations,
   topPerRanking,
   onStage,
+  context = {},
 }: {
   securities: Security[];
   model: string;
@@ -179,6 +187,7 @@ export async function assessSecurityTypes({
   observations: unknown[];
   topPerRanking?: number;
   onStage: (stage: AssessmentStage, statistics: AssessmentStatistics) => void;
+  context?: ExecutionContext;
 }) {
   const statistics: AssessmentStatistics = {
     status: 'failed',
@@ -228,10 +237,12 @@ export async function assessSecurityTypes({
         throw failure;
       }
       statistics.modelRequests++;
-      return fetch(url, init);
+      context.runtime?.safe(String(init?.body ?? ''));
+      const signal = requestSignal(context, 180_000, init?.signal);
+      context.runtime?.take('typeModel');
+      return fetch(url, { ...init, signal });
     },
   });
-  const startedAt = Date.now();
   const tools = {
     get_info: tool({
       description:
@@ -266,7 +277,14 @@ export async function assessSecurityTypes({
         }
         const source = `kis:${keyOf(exchange, symbol)}`;
         try {
-          const record = await queryKis('info', exchange, symbol);
+          const record = await queryKis('info', exchange, symbol, {
+            ...context,
+            signal: requestSignal(
+              context,
+              180_000 - (performance.now() - stageStartedAt),
+              controller.signal,
+            ),
+          });
           const output = { source, exchange, symbol, record };
           safe(output, secrets);
           const result = { ...output, sourceId: registerSource(source) };
@@ -279,6 +297,8 @@ export async function assessSecurityTypes({
           lookups.push(result);
           return result;
         } catch (error) {
+          context.runtime?.check();
+          context.signal?.throwIfAborted();
           if (error instanceof Error && 'status' in error && error.status === 404) {
             individualLookupFailures++;
             const output = { source, exchange, symbol, error: 'SECURITY_LOOKUP_FAILED' };
@@ -452,7 +472,7 @@ export async function assessSecurityTypes({
       stopWhen: isStepCount(12),
       maxRetries: 0,
       include: { rawChunks: true },
-      abortSignal: controller.signal,
+      abortSignal: requestSignal(context, 180_000, controller.signal),
       onError: () => {},
     });
     const output = Promise.resolve(result.output).then(
@@ -463,8 +483,10 @@ export async function assessSecurityTypes({
       if (part.type === 'error') failure ??= modelFailure(part.error);
     }
     const parsed = await output;
+    context.runtime?.check();
+    context.signal?.throwIfAborted();
     if (failure) throw failure;
-    if (controller.signal.aborted || Date.now() - startedAt >= 180_000)
+    if (controller.signal.aborted || performance.now() - stageStartedAt >= 180_000)
       throw new DiagnosticError('MODEL_INCOMPLETE');
     if (!requests || completions !== requests) throw new DiagnosticError('MODEL_INCOMPLETE');
     if (!parsed.value)

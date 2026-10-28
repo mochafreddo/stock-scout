@@ -24,6 +24,7 @@ import { createServer } from 'node:http';
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { setTimeout as delay, setImmediate as yieldTurn } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { DiagnosticError } from './diagnostic-error.ts';
 
 const issuer = 'https://auth.openai.com';
@@ -279,6 +280,7 @@ function loadSession(directory: string): SiwcRegistration | SiwcCredentials {
 export async function readSiwcCredentials(
   directory: string,
   observation?: SiwcAuthObservation,
+  context: ExecutionContext = {},
 ): Promise<SiwcCredentials> {
   const cancellation = new AbortController();
   const stop = () => cancellation.abort(new Error('siwc_refresh_cancelled'));
@@ -291,9 +293,17 @@ export async function readSiwcCredentials(
     } catch {
       fail('siwc_invalid_credentials');
     }
-    unlock = await sessionLock(directory, cancellation.signal);
+    context.runtime?.check();
+    unlock = await sessionLock(
+      directory,
+      context.runtime || context.signal
+        ? requestSignal(context, 30_000, cancellation.signal)
+        : cancellation.signal,
+    );
     const credentials = loadSession(directory);
     if (!('accessToken' in credentials)) fail('siwc_relogin_required');
+    for (const secret of [credentials.accessToken, credentials.idToken, credentials.refreshToken])
+      context.runtime?.secrets.add(secret);
     const refreshedEarliest = refreshTime(credentials.earliestRefreshAt);
     if (observation) observation.expiresAt = new Date(credentials.expiresAt).toISOString();
     if (credentials.expiresAt - Date.now() > 300_000) {
@@ -302,10 +312,11 @@ export async function readSiwcCredentials(
     }
     if (refreshedEarliest !== undefined && refreshedEarliest > Date.now())
       fail('siwc_refresh_not_allowed', refreshedEarliest);
-    const signal = AbortSignal.any([cancellation.signal, AbortSignal.timeout(30_000)]);
+    const signal = requestSignal(context, 30_000, cancellation.signal);
     let tokens: Record<string, unknown>;
     try {
       if (observation) observation.refreshRequests++;
+      context.runtime?.take('refresh');
       tokens = await request(
         `${issuer}/api/accounts/oauth/token`,
         {
@@ -361,6 +372,8 @@ export async function readSiwcCredentials(
       if (subject !== credentials.subject) fail('siwc_account_mismatch');
       refreshed.idToken = tokens.id_token;
     }
+    for (const secret of [refreshed.accessToken, refreshed.idToken, refreshed.refreshToken])
+      context.runtime?.secrets.add(secret);
     if (refreshed.expiresAt <= Date.now()) fail('siwc_credentials_expired');
     if (observation) {
       observation.responseValidated = true;
@@ -385,6 +398,8 @@ export async function readSiwcCredentials(
     signal.throwIfAborted();
     return refreshed;
   } catch (error) {
+    context.runtime?.check();
+    context.signal?.throwIfAborted();
     if (cancellation.signal.aborted) fail('siwc_refresh_cancelled');
     if (error instanceof Error && /^siwc_[a-z_]+$/.test(error.message)) throw error;
     return fail('siwc_refresh_failed');

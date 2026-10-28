@@ -1,3 +1,4 @@
+import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { accessToken, invalidateToken } from './kis-auth.ts';
 
 const sourceCommit = '2077773a69a428daf63e148182511f068cc45de3';
@@ -50,9 +51,9 @@ function object(value: unknown): Record<string, unknown> {
 }
 function select(value: unknown, keys: string[]) {
   const row = object(value);
-  return Object.fromEntries(
-    keys.filter((key) => typeof row[key] === 'string').map((key) => [key, row[key]]),
-  );
+  const result: Record<string, string> = {};
+  for (const key of keys) if (typeof row[key] === 'string') result[key] = row[key];
+  return result;
 }
 function kisFailure(body: Record<string, unknown>) {
   const error = new Error('KIS_FAILURE');
@@ -61,7 +62,14 @@ function kisFailure(body: Record<string, unknown>) {
     : error;
 }
 
-export async function queryKis(kind: KisQueryKind, exchange: KisExchange, symbol = '') {
+export async function queryKis(
+  kind: KisQueryKind,
+  exchange: KisExchange,
+  symbol = '',
+  context: ExecutionContext = {},
+) {
+  context.runtime?.check();
+  context.signal?.throwIfAborted();
   if (
     !kind ||
     !Object.hasOwn(kinds, kind) ||
@@ -86,11 +94,14 @@ export async function queryKis(kind: KisQueryKind, exchange: KisExchange, symbol
   }
   const { KIS_APP_KEY, KIS_APP_SECRET } = process.env;
   if (!KIS_APP_KEY || !KIS_APP_SECRET) throw new Error('CREDENTIALS_MISSING');
-  let token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET);
+  let token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, undefined, context);
+  context.runtime?.secrets.add(token);
   const url = new URL(`https://openapi.koreainvestment.com:9443/uapi/${path}`);
   url.search = new URLSearchParams(params).toString();
   const requestedAt = new Date().toISOString();
   const query = async () => {
+    const signal = requestSignal(context, 15_000);
+    context.runtime?.take('kis');
     const response = await fetch(url, {
       headers: {
         authorization: `Bearer ${token}`,
@@ -99,12 +110,14 @@ export async function queryKis(kind: KisQueryKind, exchange: KisExchange, symbol
         tr_id: trId,
         custtype: 'P',
       },
-      signal: AbortSignal.timeout(15_000),
+      signal,
       redirect: 'error',
     });
     let body: Record<string, unknown>;
     try {
       body = object(await response.json());
+      context.runtime?.check();
+      context.signal?.throwIfAborted();
     } catch (error) {
       if (!response.ok) throw Object.assign(new Error('HTTP_FAILURE'), { status: response.status });
       throw error;
@@ -119,7 +132,8 @@ export async function queryKis(kind: KisQueryKind, exchange: KisExchange, symbol
   };
   let result = await query();
   if (result.expired) {
-    token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, token);
+    token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, token, context);
+    context.runtime?.secrets.add(token);
     result = await query();
     if (result.expired) {
       await invalidateToken(KIS_APP_KEY, KIS_APP_SECRET, token);
