@@ -4,6 +4,7 @@ import { DiagnosticError } from './diagnostic-error.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 import {
+  type AssessmentDiagnostics,
   type AssessmentStage,
   type AssessmentStatistics,
   assessSecurityTypes,
@@ -31,6 +32,19 @@ const safeCodes = [
   'ANALYSIS_INSUFFICIENT',
 ];
 const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
+const startedAt = performance.now();
+let typeAssessment: AssessmentDiagnostics = {
+  statistics: {
+    status: 'not_started',
+    elapsedMs: null,
+    modelRequests: 0,
+    infoToolCalls: 0,
+    observedWebToolCalls: 0,
+  },
+  cause: 'unknown',
+  lastProgress: 'not_started',
+  requests: [],
+};
 let statistics: AssessmentStatistics | undefined;
 let inputSnapshot: Record<string, unknown> | undefined;
 let snapshotSecrets: (string | undefined)[] = [];
@@ -179,9 +193,10 @@ try {
     model,
     accessToken: credentials.accessToken,
     secrets,
-    onStage: (next, measured) => {
+    onStage: (next, measured, diagnostics) => {
       stage = next;
       statistics = measured;
+      typeAssessment = diagnostics;
     },
     inputMode: evaluation ? 'evaluation' : 'rankings',
     observations,
@@ -199,6 +214,8 @@ try {
     JSON.stringify({
       error: code,
       diagnostic: {
+        elapsedMs: Math.round(performance.now() - startedAt),
+        typeAssessment,
         stage,
         reason: error instanceof DiagnosticError ? error.reason : 'unknown',
         location: error instanceof DiagnosticError ? error.location : null,

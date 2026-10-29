@@ -2,17 +2,22 @@ import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { recommendCandidates } from './buy-candidate-assessment.ts';
 import { CandidateRuntime } from './candidate-runtime.ts';
+import { DiagnosticError } from './diagnostic-error.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 import { marketCalendar } from './market-calendar.ts';
-import { assessSecurityTypes, type Security } from './security-type-assessment.ts';
+import {
+  type AssessmentDiagnostics,
+  assessSecurityTypes,
+  type Security,
+} from './security-type-assessment.ts';
 import { readSiwcCredentials } from './siwc-auth.ts';
 
 export async function candidateUniverse(
   directory: string,
   model: string,
   runtime: CandidateRuntime,
-  onStage: (stage: string) => void,
+  onStage: (stage: string, diagnostics?: AssessmentDiagnostics) => void,
 ) {
   const context = { runtime };
   onStage('calendar');
@@ -103,7 +108,7 @@ export async function candidateUniverse(
     inputMode: 'rankings',
     observations,
     topPerRanking: 1,
-    onStage: () => {},
+    onStage: (_next, _statistics, diagnostics) => onStage('assessment', diagnostics),
     context,
   });
   runtime.check();
@@ -184,6 +189,18 @@ export type CandidateUniverse = Awaited<ReturnType<typeof candidateUniverse>>;
 
 export async function runCandidateCli(report = false) {
   const runtime = new CandidateRuntime();
+  let typeAssessment: AssessmentDiagnostics = {
+    statistics: {
+      status: 'not_started',
+      elapsedMs: null,
+      modelRequests: 0,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+    cause: 'unknown',
+    lastProgress: 'not_started',
+    requests: [],
+  };
   let stage = 'input';
   const safeCodes = [
     'USAGE',
@@ -245,9 +262,15 @@ export async function runCandidateCli(report = false) {
       process.env.OPENAI_API_KEY,
     ])
       if (secret) runtime.secrets.add(secret);
-    const universe = await candidateUniverse(directory, model as string, runtime, (next) => {
-      stage = next;
-    });
+    const universe = await candidateUniverse(
+      directory,
+      model as string,
+      runtime,
+      (next, diagnostics) => {
+        stage = next;
+        if (diagnostics) typeAssessment = diagnostics;
+      },
+    );
     const output = report
       ? await recommendCandidates(universe, directory, model as string, runtime, (next) => {
           stage = next;
@@ -276,6 +299,13 @@ export async function runCandidateCli(report = false) {
         error: code,
         stage,
         usage: runtime.counts,
+        diagnostic: {
+          stage,
+          reason: failure instanceof DiagnosticError ? failure.reason : 'unknown',
+          location: failure instanceof DiagnosticError ? failure.location : null,
+          elapsedMs: Math.round(performance.now() - runtime.startedAt),
+          typeAssessment,
+        },
         ...(failure instanceof AuthError && failure.retryAfterSeconds
           ? { retryAfterSeconds: failure.retryAfterSeconds }
           : {}),

@@ -13,6 +13,7 @@ function tickClock(milliseconds) {
 const usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
 const completed = { type: 'response.completed', response: { usage } };
 let modelRequests = 0;
+let streamSignal;
 let infoResponses = 0;
 const sourceIds = new Map();
 const scenario = process.env.SCENARIO;
@@ -39,6 +40,7 @@ if (process.env.TEST_ARGUMENTS)
 if (process.env.TEST_ARGUMENT_EXCEPTION)
   Object.defineProperty(process.argv, '2', {
     get() {
+      if (process.env.TEST_INPUT_DELAY) tickClock(Number(process.env.TEST_INPUT_DELAY));
       throw new Error(process.env.TEST_ARGUMENT_EXCEPTION);
     },
   });
@@ -73,7 +75,7 @@ if (process.env.TEST_STORAGE_EXCEPTION) {
   };
   syncBuiltinESMExports();
 }
-if (['info-blocked', 'model-blocked'].includes(scenario)) {
+if (['info-blocked', 'model-blocked', 'body-blocked', 'provider-then-blocked'].includes(scenario)) {
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, delay, ...args) =>
     originalSetTimeout(
@@ -192,6 +194,57 @@ if (scenario.startsWith('types') || identityExclusion)
     ],
   }));
 function sse(events) {
+  const requestIndex = modelRequests;
+  const signal = streamSignal;
+  const delays = JSON.parse(process.env.TEST_STREAM_DELAYS ?? '[]');
+  const delay = delays[requestIndex - 1];
+  const ending = process.env.TEST_STREAM_END;
+  if (ending && requestIndex === 2) {
+    if (ending === 'missing')
+      events = events.filter((event) => event.type !== 'response.completed');
+    else if (ending !== 'transport')
+      events.push({
+        type: ending,
+        response: { usage, error: { code: 'private-code synthetic-subscription' } },
+        error: { message: 'private-message synthetic-subscription' },
+      });
+  }
+  const encoded = new TextEncoder().encode(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+  );
+  if (scenario === 'provider-then-blocked' && requestIndex === 2) {
+    setTimeout(() => {}, 30);
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoded);
+          signal.addEventListener('abort', () => controller.close(), { once: true });
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  }
+  if (delay !== undefined || (ending === 'transport' && requestIndex === 2)) {
+    let sent = false;
+    return new Response(
+      new ReadableStream({
+        async pull(controller) {
+          if (!sent) {
+            sent = true;
+            controller.enqueue(encoded);
+          } else {
+            if (ending === 'transport' && requestIndex === 2)
+              await new Promise((resolve) => setImmediate(resolve));
+            tickClock(delay ?? 0);
+            if (ending === 'transport' && requestIndex === 2)
+              controller.error(new Error('private-transport synthetic-subscription'));
+            else controller.close();
+          }
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  }
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
     headers: { 'content-type': 'text/event-stream' },
   });
@@ -351,6 +404,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (request.pathname === '/v1/models')
     return Response.json({ models: [{ slug: 'gpt-6-luna', visibility: 'list' }] });
   assert.equal(request.pathname, '/v1/responses');
+  streamSignal = init.signal;
   if (process.env.SCENARIO === 'auth-failure')
     return Response.json(
       { error: { code: 'invalid_api_key', message: 'synthetic-subscription' } },
@@ -393,6 +447,17 @@ globalThis.fetch = async (url, init = {}) => {
   if (scenario === 'model-blocked') {
     setTimeout(() => {}, 30);
     return new Promise(() => {});
+  }
+  if (scenario === 'body-blocked') {
+    setTimeout(() => {}, 30);
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          init.signal.addEventListener('abort', () => controller.close(), { once: true });
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
   }
   if (process.env.TEST_WALL_CLOCK_SHIFT && modelRequests > 0)
     mock.timers.setTime(Date.now() + Number(process.env.TEST_WALL_CLOCK_SHIFT));

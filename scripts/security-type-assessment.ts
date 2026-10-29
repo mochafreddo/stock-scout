@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createOpenAI } from '@ai-sdk/openai';
 import {
   APICallError,
@@ -41,6 +42,39 @@ export type AssessmentStatistics = {
   modelRequests: number;
   infoToolCalls: number;
   observedWebToolCalls: number;
+};
+type AssessmentCause =
+  | 'unknown'
+  | 'missing_completion'
+  | 'duplicate_completion'
+  | 'deadline_exceeded'
+  | 'provider_failed'
+  | 'provider_incomplete'
+  | 'provider_error'
+  | 'transport_error'
+  | 'http_error';
+type AssessmentRequest = {
+  index: number;
+  elapsedMs: number;
+  httpStatus: number | null;
+  completionEvents: number | null;
+  status: 'unknown' | 'completed' | 'failed' | 'cancelled';
+  cause: AssessmentCause;
+};
+export type AssessmentDiagnostics = {
+  statistics: Omit<AssessmentStatistics, 'status' | 'elapsedMs'> & {
+    status: AssessmentStatistics['status'] | 'not_started';
+    elapsedMs: number | null;
+  };
+  cause: AssessmentCause;
+  lastProgress:
+    | 'not_started'
+    | 'model_request'
+    | 'model_stream'
+    | 'info_tool'
+    | 'validation'
+    | 'output';
+  requests: AssessmentRequest[];
 };
 export type Security = {
   exchange: KisExchange;
@@ -186,7 +220,11 @@ export async function assessSecurityTypes({
   inputMode: 'evaluation' | 'rankings';
   observations: unknown[];
   topPerRanking?: number;
-  onStage: (stage: AssessmentStage, statistics: AssessmentStatistics) => void;
+  onStage: (
+    stage: AssessmentStage,
+    statistics: AssessmentStatistics,
+    diagnostics: AssessmentDiagnostics,
+  ) => void;
   context?: ExecutionContext;
 }) {
   const statistics: AssessmentStatistics = {
@@ -198,7 +236,34 @@ export async function assessSecurityTypes({
   };
   let activeStage: AssessmentStage = 'assessment';
   const stageStartedAt = performance.now();
-  onStage('assessment', statistics);
+  const diagnostics: AssessmentDiagnostics = {
+    statistics,
+    cause: 'unknown',
+    lastProgress: 'model_request',
+    requests: [],
+  };
+  const requestScope = new AsyncLocalStorage<{ record?: AssessmentRequest }>();
+  const openRequests = new Map<AssessmentRequest, { startedAt: number; signal: AbortSignal }>();
+  let observedFailure = false;
+  const failedRequests = new Set<AssessmentRequest>();
+  const observeCause = (cause: AssessmentCause, record?: AssessmentRequest) => {
+    if (!observedFailure) {
+      diagnostics.cause = cause;
+      observedFailure = true;
+    }
+    if (record && !failedRequests.has(record)) {
+      record.cause = cause;
+      failedRequests.add(record);
+    }
+  };
+  const closeRequest = (record: AssessmentRequest, status: AssessmentRequest['status']) => {
+    const timing = openRequests.get(record);
+    if (!timing) return;
+    record.elapsedMs = Math.round(performance.now() - timing.startedAt);
+    record.status = status;
+    openRequests.delete(record);
+  };
+  onStage('assessment', statistics, diagnostics);
   const evaluation = inputMode === 'evaluation';
   const securities = new Map(
     inputs.map((security) => [keyOf(security.exchange, security.symbol), security]),
@@ -227,12 +292,16 @@ export async function assessSecurityTypes({
   const webFailures: { action: string; url: string | null; status: string }[] = [];
   let failure: Error | undefined;
   const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), 180_000);
+  const deadline = setTimeout(() => {
+    observeCause('deadline_exceeded');
+    controller.abort();
+  }, 180_000);
   deadline.unref();
   const provider = createOpenAI({
     apiKey: accessToken,
     fetch: async (url, init) => {
       if (String(url) !== 'https://api.openai.com/v1/responses' || ++requests > 12) {
+        observeCause('unknown');
         failure = new DiagnosticError('MODEL_LIMIT');
         throw failure;
       }
@@ -240,7 +309,52 @@ export async function assessSecurityTypes({
       context.runtime?.safe(String(init?.body ?? ''));
       const signal = requestSignal(context, 180_000, init?.signal);
       context.runtime?.take('typeModel');
-      return fetch(url, { ...init, signal });
+      const record: AssessmentRequest = {
+        index: requests,
+        elapsedMs: 0,
+        httpStatus: null,
+        completionEvents: null,
+        status: 'unknown',
+        cause: 'unknown',
+      };
+      diagnostics.requests.push(record);
+      openRequests.set(record, { startedAt: performance.now(), signal });
+      const scope = requestScope.getStore();
+      if (scope) scope.record = record;
+      diagnostics.lastProgress = 'model_request';
+      try {
+        const response = await fetch(url, { ...init, signal });
+        record.httpStatus = response.status;
+        if (!response.ok) observeCause('http_error', record);
+        if (!response.body) return response;
+        const reader = response.body.getReader();
+        return new Response(
+          new ReadableStream({
+            async pull(streamController) {
+              try {
+                const next = await reader.read();
+                if (next.done) streamController.close();
+                else streamController.enqueue(next.value);
+              } catch (error) {
+                if (!signal.aborted) observeCause('transport_error', record);
+                streamController.error(error);
+              }
+            },
+            cancel: (reason) => reader.cancel(reason),
+          }),
+          { status: response.status, statusText: response.statusText, headers: response.headers },
+        );
+      } catch (error) {
+        if (controller.signal.aborted || signal.aborted) {
+          if (performance.now() - stageStartedAt >= 180_000)
+            observeCause('deadline_exceeded', record);
+          closeRequest(record, 'cancelled');
+        } else {
+          observeCause('transport_error', record);
+          closeRequest(record, 'failed');
+        }
+        throw error;
+      }
     },
   });
   const tools = {
@@ -265,13 +379,16 @@ export async function assessSecurityTypes({
         },
       },
       execute: async ({ exchange, symbol }) => {
+        diagnostics.lastProgress = 'info_tool';
         statistics.infoToolCalls++;
         if (failure) throw failure;
         if (!securities.has(keyOf(exchange, symbol))) {
+          observeCause('unknown');
           failure = new Error('MODEL_OUTPUT');
           throw failure;
         }
         if (++queryCount > 32) {
+          observeCause('unknown');
           failure = new DiagnosticError('MODEL_LIMIT');
           throw failure;
         }
@@ -311,6 +428,7 @@ export async function assessSecurityTypes({
               : error instanceof AuthError
                 ? new DiagnosticError('AUTH_FAILED')
                 : new Error('QUERY_FAILED');
+          observeCause('unknown');
           controller.abort();
           throw failure;
         }
@@ -341,7 +459,9 @@ export async function assessSecurityTypes({
     web_search: provider.tools.webSearch({ externalWebAccess: true }),
   };
   const runAssessment = async () => {
-    const observeRaw = (rawValue: unknown) => {
+    const observeRaw = (rawValue: unknown, record: AssessmentRequest) => {
+      diagnostics.lastProgress = 'model_stream';
+      record.completionEvents ??= 0;
       const raw = rawValue as {
         type?: string;
         response?: { error?: { code?: string } };
@@ -358,6 +478,7 @@ export async function assessSecurityTypes({
         if (raw.item.id) webCalls.add(raw.item.id);
         statistics.observedWebToolCalls = webCalls.size;
         if (webCalls.size > 32) {
+          observeCause('unknown', record);
           failure = new DiagnosticError('MODEL_LIMIT');
           controller.abort();
         }
@@ -368,6 +489,7 @@ export async function assessSecurityTypes({
               !raw.item.action?.url
             ) {
               failure = new DiagnosticError('SEARCH_FAILED');
+              observeCause('unknown', record);
               controller.abort();
             }
             webFailures.push({
@@ -391,11 +513,23 @@ export async function assessSecurityTypes({
         }
       }
       if (raw.type === 'response.completed') {
-        if (completedRequests.has(requests)) failure = new DiagnosticError('MODEL_INCOMPLETE');
-        completedRequests.add(requests);
+        record.completionEvents++;
+        if (completedRequests.has(record.index)) {
+          observeCause('duplicate_completion', record);
+          failure = new DiagnosticError('MODEL_INCOMPLETE');
+        }
+        completedRequests.add(record.index);
         completions = completedRequests.size;
       }
       if (['response.failed', 'response.incomplete', 'error'].includes(raw.type ?? '')) {
+        observeCause(
+          raw.type === 'response.failed'
+            ? 'provider_failed'
+            : raw.type === 'response.incomplete'
+              ? 'provider_incomplete'
+              : 'provider_error',
+          record,
+        );
         const code = raw.response?.error?.code ?? raw.error?.code ?? raw.code;
         failure = new DiagnosticError(
           code === 'subscription_sharing_usage_limit_exceeded'
@@ -411,23 +545,69 @@ export async function assessSecurityTypes({
         model: provider.responses(model),
         middleware: {
           wrapStream: async ({ doStream }) => {
-            const result = await doStream();
+            const scope: { record?: AssessmentRequest } = {};
+            let result: Awaited<ReturnType<typeof doStream>>;
+            try {
+              result = await requestScope.run(scope, doStream);
+            } catch (error) {
+              if (scope.record) closeRequest(scope.record, 'failed');
+              throw error;
+            }
+            const record = scope.record;
+            const reader = result.stream.getReader();
             return {
               ...result,
-              stream: result.stream.pipeThrough(
-                new TransformStream({
-                  transform(part, streamController) {
-                    try {
-                      if (part.type === 'raw') observeRaw(part.rawValue);
-                    } catch (error) {
-                      failure = error instanceof Error ? error : new Error('MODEL_OUTPUT');
-                      controller.abort();
-                      throw failure;
+              stream: new ReadableStream({
+                async pull(streamController) {
+                  try {
+                    const next = await reader.read();
+                    if (next.done) {
+                      if (record) {
+                        if (openRequests.get(record)?.signal.aborted) {
+                          if (performance.now() - stageStartedAt >= 180_000)
+                            observeCause('deadline_exceeded', record);
+                          closeRequest(record, 'cancelled');
+                        } else {
+                          record.completionEvents ??= 0;
+                          if (record.completionEvents === 0)
+                            observeCause('missing_completion', record);
+                          closeRequest(record, failedRequests.has(record) ? 'failed' : 'completed');
+                        }
+                      }
+                      streamController.close();
+                      return;
                     }
+                    const part = next.value;
+                    if (record && part.type === 'raw') {
+                      try {
+                        observeRaw(part.rawValue, record);
+                      } catch (error) {
+                        failure = error instanceof Error ? error : new Error('MODEL_OUTPUT');
+                        observeCause('unknown', record);
+                        controller.abort();
+                        throw failure;
+                      }
+                    }
+                    if (record && part.type === 'error') observeCause('unknown', record);
                     streamController.enqueue(part);
-                  },
-                }),
-              ),
+                  } catch (error) {
+                    if (record) {
+                      closeRequest(
+                        record,
+                        openRequests.get(record)?.signal.aborted ? 'cancelled' : 'failed',
+                      );
+                    }
+                    streamController.error(error);
+                  }
+                },
+                async cancel(reason) {
+                  try {
+                    await reader.cancel(reason);
+                  } finally {
+                    if (record) closeRequest(record, 'cancelled');
+                  }
+                },
+              }),
             };
           },
         },
@@ -486,8 +666,10 @@ export async function assessSecurityTypes({
     context.runtime?.check();
     context.signal?.throwIfAborted();
     if (failure) throw failure;
-    if (controller.signal.aborted || performance.now() - stageStartedAt >= 180_000)
+    if (controller.signal.aborted || performance.now() - stageStartedAt >= 180_000) {
+      if (performance.now() - stageStartedAt >= 180_000) observeCause('deadline_exceeded');
       throw new DiagnosticError('MODEL_INCOMPLETE');
+    }
     if (!requests || completions !== requests) throw new DiagnosticError('MODEL_INCOMPLETE');
     if (!parsed.value)
       throw requests >= 12 ? new DiagnosticError('MODEL_LIMIT') : new Error('MODEL_OUTPUT');
@@ -495,6 +677,7 @@ export async function assessSecurityTypes({
   };
   try {
     const parsed = await runAssessment();
+    diagnostics.lastProgress = 'validation';
     if (!Array.isArray(parsed.judgments))
       throw new DiagnosticError(
         Object.hasOwn(parsed, 'judgments') ? 'unknown' : 'missing_required_field',
@@ -567,7 +750,8 @@ export async function assessSecurityTypes({
     statistics.status = 'completed';
     statistics.elapsedMs = Math.round(performance.now() - stageStartedAt);
     activeStage = 'output';
-    onStage('output', statistics);
+    diagnostics.lastProgress = 'output';
+    onStage('output', statistics, diagnostics);
     const status = assessed.every((item) => item.type === 'unknown' || !item.applicable)
       ? 'analysis_insufficient'
       : 'assessed';
@@ -607,10 +791,16 @@ export async function assessSecurityTypes({
     safe(result, secrets);
     return result;
   } finally {
+    if (performance.now() - stageStartedAt >= 180_000) observeCause('deadline_exceeded');
+    for (const record of openRequests.keys()) {
+      if (performance.now() - stageStartedAt >= 180_000) observeCause('deadline_exceeded', record);
+      closeRequest(record, 'cancelled');
+    }
     if (activeStage !== 'output') {
       statistics.status = 'failed';
       statistics.elapsedMs = Math.round(performance.now() - stageStartedAt);
     }
     clearTimeout(deadline);
+    requestScope.disable();
   }
 }

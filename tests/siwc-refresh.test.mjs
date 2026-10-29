@@ -86,6 +86,25 @@ function check(f, mode = 'ok', extraEnv = {}) {
   ]);
 }
 
+function authenticationFailure(stderr) {
+  const output = JSON.parse(stderr);
+  const { elapsedMs, typeAssessment, ...diagnostic } = output.diagnostic;
+  assert.ok(Number.isFinite(elapsedMs) && elapsedMs >= 0);
+  assert.deepEqual(typeAssessment, {
+    statistics: {
+      status: 'not_started',
+      elapsedMs: null,
+      modelRequests: 0,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+    cause: 'unknown',
+    lastProgress: 'not_started',
+    requests: [],
+  });
+  return { ...output, diagnostic };
+}
+
 test('subscription check refreshes once and the next process lists models with the stored token', (t) => {
   const f = session(t);
   const first = check(f);
@@ -391,7 +410,7 @@ test('CLI reuses tokens above the five-minute boundary, refreshes expired tokens
     const before = readFileSync(f.path, 'utf8');
     const result = run(f);
     assert.equal(result.status, 1);
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(authenticationFailure(result.stderr), {
       error: 'siwc_refresh_not_allowed',
       diagnostic: { stage: 'authentication', reason: 'siwc_refresh_not_allowed', location: null },
       retryAt: '2026-10-18T00:01:00.000Z',
@@ -412,7 +431,7 @@ test('CLI reuses tokens above the five-minute boundary, refreshes expired tokens
     const f = session(t, { earliestRefreshAt });
     const result = run(f);
     assert.equal(result.status, 1, String(earliestRefreshAt));
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(authenticationFailure(result.stderr), {
       error: 'siwc_invalid_refresh_time',
       diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
     });
@@ -496,7 +515,7 @@ test('CLI waits at most thirty seconds for a shared login lock and preserves an 
   const before = readFileSync(f.path, 'utf8');
   const result = run(f, 'locked');
   assert.equal(result.status, 1);
-  assert.deepEqual(JSON.parse(result.stderr), {
+  assert.deepEqual(authenticationFailure(result.stderr), {
     error: 'siwc_session_locked',
     diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
   });
@@ -520,7 +539,7 @@ test('official refresh invalidation clears tokens but retains registration while
     const before = JSON.parse(readFileSync(f.path, 'utf8'));
     const result = run(f, `error:400:${error}`);
     assert.equal(result.status, 1, error);
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(authenticationFailure(result.stderr), {
       error: 'siwc_relogin_required',
       diagnostic: { stage: 'authentication', reason: 'siwc_relogin_required', location: null },
       action: 'login',
@@ -534,7 +553,7 @@ test('official refresh invalidation clears tokens but retains registration while
     });
     assert.equal(result.requests.length, 1);
     const again = run(f);
-    assert.deepEqual(JSON.parse(again.stderr), {
+    assert.deepEqual(authenticationFailure(again.stderr), {
       error: 'siwc_relogin_required',
       action: 'login',
       diagnostic: { stage: 'authentication', reason: 'siwc_relogin_required', location: null },
@@ -614,7 +633,7 @@ test('cancellation while waiting for another session preserves its lock and star
     const result = await running.done;
     assert.equal(result.status, 1);
     assert.equal(result.signal, null);
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(authenticationFailure(result.stderr), {
       error: 'siwc_refresh_cancelled',
       diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
     });
@@ -661,7 +680,7 @@ test('SIGINT and SIGTERM cancel refresh and identity phases while preserving cre
       const result = await running.done;
       assert.equal(result.status, 1, phase + signal);
       assert.equal(result.signal, null);
-      assert.deepEqual(JSON.parse(result.stderr), {
+      assert.deepEqual(authenticationFailure(result.stderr), {
         error: 'siwc_refresh_cancelled',
         diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
       });
@@ -681,7 +700,7 @@ test('validated rotation is stored before cancellation is honored and no data re
     const result = run(f, `postvalidation-${signal}`);
     assert.equal(result.status, 1);
     assert.equal(result.signal, null);
-    assert.deepEqual(JSON.parse(result.stderr), {
+    assert.deepEqual(authenticationFailure(result.stderr), {
       error: 'siwc_refresh_cancelled',
       diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
     });

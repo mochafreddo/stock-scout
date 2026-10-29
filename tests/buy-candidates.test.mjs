@@ -5,6 +5,43 @@ import { run as runCandidate } from './candidate-cli-helper.mjs';
 const run = (t, scenario = 'ok', env = {}, args) =>
   runCandidate(t, scenario, env, args, 'buy-candidates');
 
+test('buy CLI preserves shared type deadline diagnostics before recommending', (t) => {
+  const result = run(t, 'type-limit', { TYPE_BEFORE_MS: '31' });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'MODEL_INCOMPLETE');
+  assert.equal(output.diagnostic.elapsedMs, 180031);
+  assert.equal(output.diagnostic.typeAssessment.cause, 'deadline_exceeded');
+  assert.equal(output.diagnostic.typeAssessment.statistics.elapsedMs, 180000);
+  assert.equal(output.usage.recommendationModel, 0);
+});
+
+test('buy CLI preserves unstarted and completed type measurements across other failures', (t) => {
+  const input = run(t, 'ok', {}, []);
+  assert.equal(input.status, 1, input.stderr);
+  assert.deepEqual(JSON.parse(input.stderr).diagnostic.typeAssessment, {
+    statistics: {
+      status: 'not_started',
+      elapsedMs: null,
+      modelRequests: 0,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+    cause: 'unknown',
+    lastProgress: 'not_started',
+    requests: [],
+  });
+  assert.equal(input.requests.length, 0);
+  const report = run(t, 'report-incomplete');
+  assert.equal(report.status, 1, report.stderr);
+  assert.equal(report.stdout, '');
+  const type = JSON.parse(report.stderr).diagnostic.typeAssessment;
+  assert.equal(type.statistics.status, 'completed');
+  assert.equal(type.cause, 'unknown');
+  assert.equal(type.requests[0].status, 'completed');
+});
+
 test('buy report uses verified completed KIS data through a namespaced tool and prints one grounded candidate', (t) => {
   const result = run(t);
   assert.equal(result.status, 0, result.stderr);

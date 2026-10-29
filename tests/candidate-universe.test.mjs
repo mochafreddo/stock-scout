@@ -2,6 +2,41 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { run } from './candidate-cli-helper.mjs';
 
+test('candidate CLI includes shared type diagnostics and whole execution time on type failure', (t) => {
+  const result = run(t, 'type-limit', { TYPE_BEFORE_MS: '31' });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'MODEL_INCOMPLETE');
+  assert.equal(output.stage, 'assessment');
+  assert.equal(output.diagnostic.elapsedMs, 180031);
+  assert.equal(output.diagnostic.typeAssessment.statistics.elapsedMs, 180000);
+  assert.equal(output.diagnostic.typeAssessment.cause, 'deadline_exceeded');
+  assert.equal(output.diagnostic.typeAssessment.requests.length, 1);
+  assert.equal(output.usage.typeModel, 1);
+});
+
+test('candidate CLI leaves unstarted type measurements null on input failure', (t) => {
+  const result = run(t, 'ok', {}, []);
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const diagnostic = JSON.parse(result.stderr).diagnostic;
+  assert.equal(diagnostic.elapsedMs, 0);
+  assert.deepEqual(diagnostic.typeAssessment, {
+    statistics: {
+      status: 'not_started',
+      elapsedMs: null,
+      modelRequests: 0,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+    cause: 'unknown',
+    lastProgress: 'not_started',
+    requests: [],
+  });
+  assert.equal(result.requests.length, 0);
+});
+
 test('candidate CLI connects official sessions, six discovery rankings, types and 20 completed daily rows', (t) => {
   const result = run(t);
   assert.equal(result.status, 0, result.stderr);

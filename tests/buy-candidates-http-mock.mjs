@@ -1,10 +1,6 @@
-import './candidate-universe-http-mock.mjs';
 import assert from 'node:assert/strict';
 import { appendFileSync } from 'node:fs';
-import { mock } from 'node:test';
-
-let elapsed = 0;
-mock.method(performance, 'now', () => elapsed);
+import { advanceElapsed } from './candidate-universe-http-mock.mjs';
 
 const candidateFetch = globalThis.fetch;
 let recommendationRequests = 0;
@@ -54,8 +50,8 @@ globalThis.fetch = async (url, init = {}) => {
   assert.equal(body.stream, true);
   assert.ok(body.input.every((item) => item.role !== 'system'));
   assert.equal(body.model, 'gpt-6-luna');
-  if (scenario === 'report-time') elapsed = 180_000;
-  if (scenario === 'report-execution-time') elapsed = 600_000;
+  if (scenario === 'report-time') advanceElapsed(180_000);
+  if (scenario === 'report-execution-time') advanceElapsed(600_000);
   if (scenario === 'report-open') Date.now = () => Date.parse('2026-10-19T13:30:00Z');
   if (scenario === 'report-auth')
     return Response.json(

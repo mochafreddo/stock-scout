@@ -8,7 +8,11 @@ const calendarFetch = globalThis.fetch;
 const scenario = process.env.SCENARIO;
 let elapsed = 0;
 mock.method(performance, 'now', () => elapsed);
+export function advanceElapsed(milliseconds) {
+  elapsed += milliseconds;
+}
 let typeRequests = 0;
+let advancedBeforeType = false;
 let expired = false;
 let token = 'test-token';
 const identityKeys =
@@ -200,6 +204,10 @@ globalThis.fetch = async (url, init = {}) => {
   const sample =
     matchedSamples[process.env.REPORT_COUNT && address.pathname.endsWith('trade-pbmn') ? 1 : 0];
   if (address.pathname.includes('/ranking/')) {
+    if (!advancedBeforeType && process.env.TYPE_BEFORE_MS) {
+      advancedBeforeType = true;
+      advanceElapsed(Number(process.env.TYPE_BEFORE_MS));
+    }
     if (scenario === 'rank-expired' && !expired) {
       expired = true;
       return Response.json({ rt_cd: '1', msg_cd: 'EGW00123' });

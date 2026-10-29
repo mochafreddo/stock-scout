@@ -40,6 +40,8 @@ node scripts/candidate-universe.ts --auth-dir /absolute/private/stock-scout --mo
 
 정상 후보군과 정상 빈 후보군의 종료 코드는 0, 분석 불충분은 2, 나머지 실패는 1입니다. `MARKET_ACTIVE`는 장중 시작, `TARGET_OPEN`은 실행 중 대상 개장 도달, `DATA_NOT_READY`는 필수 일봉 준비 실패를 뜻합니다. 오류에는 실패 단계와 전송 집계가 포함됩니다. 분석 불충분도 stdout에 부분 후보군을 출력하지 않습니다.
 
+실패의 `diagnostic.elapsedMs`는 CLI 전체 경과 시간이며 `diagnostic.typeAssessment.statistics.elapsedMs`는 유형 판단에 걸린 시간입니다. 유형 판단을 시작하지 않았으면 상태는 `not_started`, 시간은 `null`, 호출 수는 0입니다. `typeAssessment`의 `cause`·`lastProgress`와 `requests`에서 관측한 중단 사유·마지막 진행 단계·모델 요청별 시간·HTTP 상태·완료 이벤트 수·종료 상태를 확인하세요. 요청 시간은 응답 헤더 수신에서 끝나지 않고 스트림 종료·중단까지 포함합니다. 확인하지 못한 상태는 `unknown` 또는 `null`로 남기며 요청 수를 완료 응답 수로 해석하지 마세요. 상세 의미와 한계는 [유형 판단 진단 안내](llm-security-probe.md#유형-판단의-요청별-진단-읽기)를 따릅니다.
+
 공통 마감은 작업 시작부터 600초와 판단 대상 개장 중 이른 시각입니다. 실제 전송 시도를 KIS·공식 일정 HTTP·일정 모델·유형 모델·SIWC 갱신으로 나누어 제한하고 기존 단계별 한도도 적용합니다. 합의값의 권위는 [ADR 0014](adr/0014-candidate-runtime-budget.md)입니다. 실패한 전송과 허용된 재조회도 세며 서버 내부 웹 요청 수를 사전에 보장하지 않습니다.
 
 ## 검증 범위와 한계

@@ -22,12 +22,236 @@ test('type assessment CLI rejects missing arguments without credentials or netwo
 function legacyFailure(stderr) {
   const output = JSON.parse(stderr);
   delete output.diagnostic.inputSnapshot;
+  delete output.diagnostic.elapsedMs;
+  delete output.diagnostic.typeAssessment;
   if (['assessment'].includes(output.diagnostic.stage)) {
     assert.ok(output.diagnostic.statistics);
     delete output.diagnostic.statistics;
   }
   return output;
 }
+
+test('CLI diagnoses missing completion with request-specific stream observations', (t) => {
+  const result = run(t, 'missing-final-completion');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'MODEL_INCOMPLETE');
+  assert.equal(output.diagnostic.reason, 'MODEL_INCOMPLETE');
+  assert.equal(output.diagnostic.elapsedMs, 0);
+  assert.deepEqual(output.diagnostic.typeAssessment, {
+    statistics: {
+      status: 'failed',
+      elapsedMs: 0,
+      modelRequests: 2,
+      infoToolCalls: 1,
+      observedWebToolCalls: 1,
+    },
+    cause: 'missing_completion',
+    lastProgress: 'model_stream',
+    requests: [
+      {
+        index: 1,
+        elapsedMs: 0,
+        httpStatus: 200,
+        completionEvents: 1,
+        status: 'completed',
+        cause: 'unknown',
+      },
+      {
+        index: 2,
+        elapsedMs: 0,
+        httpStatus: 200,
+        completionEvents: 0,
+        status: 'failed',
+        cause: 'missing_completion',
+      },
+    ],
+  });
+});
+
+test('CLI measures each model request through body EOF rather than HTTP headers', (t) => {
+  const result = run(t, 'missing-final-completion', {
+    TEST_STATISTICS_CLOCK: '1',
+    TEST_STREAM_DELAYS: '[13,29]',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const diagnostic = JSON.parse(result.stderr).diagnostic;
+  assert.equal(diagnostic.elapsedMs, 67);
+  assert.equal(diagnostic.typeAssessment.statistics.elapsedMs, 67);
+  assert.deepEqual(diagnostic.typeAssessment.requests, [
+    {
+      index: 1,
+      elapsedMs: 20,
+      httpStatus: 200,
+      completionEvents: 1,
+      status: 'completed',
+      cause: 'unknown',
+    },
+    {
+      index: 2,
+      elapsedMs: 36,
+      httpStatus: 200,
+      completionEvents: 0,
+      status: 'failed',
+      cause: 'missing_completion',
+    },
+  ]);
+});
+
+test('CLI preserves the first observed provider failure after valid JSON and completion', (t) => {
+  for (const [ending, cause] of [
+    ['response.failed', 'provider_failed'],
+    ['response.incomplete', 'provider_incomplete'],
+    ['error', 'provider_error'],
+  ]) {
+    const result = run(t, 'ok', { TEST_STREAM_END: ending, TEST_STREAM_DELAYS: '[3,5]' });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, 'MODEL_INCOMPLETE');
+    assert.equal(output.diagnostic.typeAssessment.cause, cause);
+    assert.deepEqual(output.diagnostic.typeAssessment.requests.at(-1), {
+      index: 2,
+      elapsedMs: 5,
+      httpStatus: 200,
+      completionEvents: 1,
+      status: 'failed',
+      cause,
+    });
+    assert.doesNotMatch(result.stderr, /private-code|private-message|synthetic-subscription/);
+  }
+});
+
+test('CLI distinguishes HTTP rejection and transport failures without exposing external errors', (t) => {
+  for (const [scenario, env, status, httpStatus, completionEvents, cause] of [
+    ['auth-failure', {}, 'AUTH_FAILED', 401, null, 'http_error'],
+    [
+      'ok',
+      {
+        TEST_HTTP_EXCEPTION_STAGE: 'assessment',
+        TEST_HTTP_EXCEPTION: 'private-field synthetic-subscription',
+      },
+      'MODEL_FAILED',
+      null,
+      null,
+      'transport_error',
+    ],
+    [
+      'ok',
+      { TEST_STREAM_END: 'transport', TEST_STREAM_DELAYS: '[3,5]' },
+      'MODEL_FAILED',
+      200,
+      1,
+      'transport_error',
+    ],
+  ]) {
+    const result = run(t, scenario, env);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, status);
+    assert.equal(
+      output.diagnostic.typeAssessment.cause,
+      cause,
+      `${scenario}: ${JSON.stringify(env)}`,
+    );
+    const record = output.diagnostic.typeAssessment.requests.at(-1);
+    assert.equal(record.httpStatus, httpStatus);
+    assert.equal(record.completionEvents, completionEvents);
+    assert.equal(record.cause, cause);
+    assert.equal(record.status, 'failed');
+    assert.doesNotMatch(result.stderr, /private-field|private-transport|synthetic-subscription/);
+  }
+});
+
+test('CLI distinguishes blocked model, body and information deadlines from missing completion', (t) => {
+  for (const [
+    scenario,
+    httpStatus,
+    completionEvents,
+    requestElapsed,
+    requestStatus,
+    lastProgress,
+  ] of [
+    ['model-blocked', null, null, 180000, 'cancelled', 'model_request'],
+    ['body-blocked', 200, null, 180000, 'cancelled', 'model_request'],
+    ['info-blocked', 200, 1, 0, 'completed', 'info_tool'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const diagnostic = JSON.parse(result.stderr).diagnostic;
+    assert.equal(diagnostic.elapsedMs, 180000);
+    assert.equal(diagnostic.typeAssessment.cause, 'deadline_exceeded', scenario);
+    assert.equal(diagnostic.typeAssessment.lastProgress, lastProgress);
+    assert.equal(diagnostic.typeAssessment.statistics.elapsedMs, 180000);
+    assert.deepEqual(diagnostic.typeAssessment.requests, [
+      {
+        index: 1,
+        elapsedMs: requestElapsed,
+        httpStatus,
+        completionEvents,
+        status: requestStatus,
+        cause: requestStatus === 'completed' ? 'unknown' : 'deadline_exceeded',
+      },
+    ]);
+  }
+});
+
+test('CLI measures input failures from execution start and leaves unstarted types unobserved', (t) => {
+  const result = run(t, 'ok', {
+    TEST_ARGUMENT_EXCEPTION: 'private-input synthetic-subscription',
+    TEST_INPUT_DELAY: '41',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const diagnostic = JSON.parse(result.stderr).diagnostic;
+  assert.equal(diagnostic.elapsedMs, 41);
+  assert.deepEqual(diagnostic.typeAssessment, {
+    statistics: {
+      status: 'not_started',
+      elapsedMs: null,
+      modelRequests: 0,
+      infoToolCalls: 0,
+      observedWebToolCalls: 0,
+    },
+    cause: 'unknown',
+    lastProgress: 'not_started',
+    requests: [],
+  });
+  assert.equal(result.requests.length, 0);
+  assert.doesNotMatch(result.stderr, /private-input|synthetic-subscription/);
+});
+
+test('CLI retains duplicate-completion observations and unknown causes without guessing from model text', (t) => {
+  const duplicate = run(t, 'duplicate-completion');
+  assert.equal(duplicate.status, 1, duplicate.stderr);
+  const repeated = JSON.parse(duplicate.stderr).diagnostic.typeAssessment;
+  assert.equal(repeated.cause, 'duplicate_completion');
+  assert.equal(repeated.requests[0].completionEvents, 2);
+  assert.equal(repeated.requests[0].status, 'failed');
+  const validation = run(t, 'missing-explanation');
+  assert.equal(validation.status, 1, validation.stderr);
+  const diagnostic = JSON.parse(validation.stderr).diagnostic;
+  assert.equal(diagnostic.reason, 'missing_required_field');
+  assert.equal(diagnostic.location, 'judgments[0].evidence[0].explanation');
+  assert.equal(diagnostic.typeAssessment.cause, 'unknown');
+  assert.equal(diagnostic.typeAssessment.lastProgress, 'validation');
+});
+
+test('CLI keeps the provider failure when the stream is later cancelled at the deadline', (t) => {
+  const result = run(t, 'provider-then-blocked', { TEST_STREAM_END: 'response.failed' });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'MODEL_INCOMPLETE');
+  assert.equal(output.diagnostic.typeAssessment.cause, 'provider_failed');
+  assert.equal(output.diagnostic.typeAssessment.requests[1].cause, 'provider_failed');
+  assert.equal(output.diagnostic.typeAssessment.requests[1].elapsedMs, 180000);
+  assert.equal(output.diagnostic.typeAssessment.requests[1].status, 'cancelled');
+});
 
 function run(t, scenario = 'ok', extraEnv = {}, evaluationInput, credentialOverrides = {}) {
   const f = fixture();
@@ -347,7 +571,7 @@ test('CLI leaves input after valid evaluation data for authentication and subseq
   const auth = run(t, 'ok', { TEST_STORAGE_EXCEPTION: 'siwc_relogin_required' }, input);
   assert.equal(auth.status, 1, auth.stderr);
   assert.equal(auth.stdout, '');
-  assert.deepEqual(JSON.parse(auth.stderr), {
+  assert.deepEqual(legacyFailure(auth.stderr), {
     error: 'siwc_relogin_required',
     action: 'login',
     diagnostic: { stage: 'authentication', reason: 'unknown', location: null },
@@ -672,7 +896,7 @@ test('CLI preserves retry time and login guidance with confirmed authentication 
   });
   assert.equal(blocked.status, 1, blocked.stderr);
   assert.equal(blocked.stdout, '');
-  assert.deepEqual(JSON.parse(blocked.stderr), {
+  assert.deepEqual(legacyFailure(blocked.stderr), {
     error: 'siwc_refresh_not_allowed',
     retryAt,
     diagnostic: { stage: 'authentication', reason: 'siwc_refresh_not_allowed', location: null },
@@ -687,7 +911,7 @@ test('CLI preserves retry time and login guidance with confirmed authentication 
   const relogin = run(t, 'ok', {}, undefined, registration);
   assert.equal(relogin.status, 1, relogin.stderr);
   assert.equal(relogin.stdout, '');
-  assert.deepEqual(JSON.parse(relogin.stderr), {
+  assert.deepEqual(legacyFailure(relogin.stderr), {
     error: 'siwc_relogin_required',
     action: 'login',
     diagnostic: { stage: 'authentication', reason: 'siwc_relogin_required', location: null },
@@ -1195,6 +1419,7 @@ test('CLI statistics preserve the existing request and tool ceilings', (t) => {
   ]) {
     const result = run(t, scenario);
     assert.equal(result.status, 1, result.stderr);
+    assert.equal(JSON.parse(result.stderr).diagnostic.typeAssessment.requests.length, models);
     assert.deepEqual(JSON.parse(result.stderr).diagnostic.statistics, {
       status: 'failed',
       elapsedMs: 0,
@@ -1428,6 +1653,8 @@ test('CLI retains original six-ranking input and settings when assessment times 
 function withoutSnapshot(stderr) {
   const output = JSON.parse(stderr);
   delete output.diagnostic.inputSnapshot;
+  delete output.diagnostic.elapsedMs;
+  delete output.diagnostic.typeAssessment;
   return output;
 }
 
