@@ -69,6 +69,106 @@ function installCommitHook(root) {
   assert.equal(result.status, 0, result.stderr);
 }
 
+test('docs CLI checks selected working documents and untracked targets without changing the index', (t) => {
+  const { root } = fixture(t);
+  const document = '# Guide\n\n[Details](details.md#details)\n';
+  writeFileSync(join(root, 'README.md'), document);
+  writeFileSync(join(root, 'details.md'), '# Details\n');
+  const index = readFileSync(join(root, '.git/index'));
+  const result = spawnSync(process.execPath, [cli, '--docs', 'README.md', 'details.md'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readFileSync(join(root, '.git/index')), index);
+  assert.equal(readFileSync(join(root, 'README.md'), 'utf8'), document);
+  assert.equal(git(root, 'diff', '--cached'), '');
+  assert.equal(existsSync(join(root, '.git/hooks/pre-commit')), false);
+});
+
+test('docs CLI rejects a missing heading in an untracked working document', (t) => {
+  const { root } = fixture(t);
+  writeFileSync(join(root, 'guide.md'), '# Guide\n\n[Missing](README.md#absent)\n');
+  const result = spawnSync(process.execPath, [cli, '--docs', 'guide.md'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /missing heading/);
+});
+
+test('docs CLI rejects missing local files and working-copy whitespace', (t) => {
+  const { root } = fixture(t);
+  for (const [body, diagnostic] of [
+    ['# Guide\n\n[Missing](absent.md)\n', /missing local target/],
+    ['# Guide  \n', /trailing whitespace/],
+  ]) {
+    writeFileSync(join(root, 'guide.md'), body);
+    const result = spawnSync(process.execPath, [cli, '--docs', 'guide.md'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, diagnostic);
+    assert.equal(readFileSync(join(root, 'guide.md'), 'utf8'), body);
+  }
+});
+
+test('docs CLI checks only selected files and resolves paths from a nested directory', (t) => {
+  const { root } = fixture(t);
+  writeFileSync(join(root, 'README.md'), '# Start\n\n[Unselected](absent.md)\n');
+  mkdirSync(join(root, 'docs'));
+  writeFileSync(
+    join(root, 'docs/guide.md'),
+    '# 안내\n\n[설명](#설명)\n\n## 설명\n\n```md\n[Example](absent.md)\n```\n',
+  );
+  const result = spawnSync(process.execPath, [cli, '--docs', 'guide.md'], {
+    cwd: join(root, 'docs'),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('docs CLI rejects outside files and symlink escapes before reading their content', (t) => {
+  const { root } = fixture(t);
+  const outside = mkdtempSync(join(tmpdir(), 'stock-scout-docs-outside-'));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  writeFileSync(join(outside, 'outside.md'), '# PRIVATE_DOCUMENT_CONTENT  \n');
+  symlinkSync(join(outside, 'outside.md'), join(root, 'escape.md'));
+  mkdirSync(join(root, 'directory.md'));
+  for (const path of [join(outside, 'outside.md'), 'escape.md', 'directory.md', 'package.json']) {
+    const result = spawnSync(process.execPath, [cli, '--docs', path], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 1, path);
+    assert.match(result.stderr, /Markdown files inside the repository/);
+    assert.doesNotMatch(result.stderr, /PRIVATE_DOCUMENT_CONTENT/);
+  }
+});
+
+test('docs CLI rejects missing files and mixed operational flags without changing hooks or index', (t) => {
+  const { root } = fixture(t);
+  const index = readFileSync(join(root, '.git/index'));
+  const hooks = readdirSync(join(root, '.git/hooks')).sort();
+  for (const args of [
+    ['--docs'],
+    ['--docs', 'README.md', '--staged'],
+    ['--docs', 'README.md', '--install'],
+    ['--install', '--docs', 'README.md'],
+    ['--staged', '--docs', 'README.md'],
+  ]) {
+    const result = spawnSync(process.execPath, [cli, ...args], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Usage: --docs/);
+  }
+  assert.deepEqual(readFileSync(join(root, '.git/index')), index);
+  assert.deepEqual(readdirSync(join(root, '.git/hooks')).sort(), hooks);
+});
+
 for (const mode of ['staged', 'push']) {
   for (const failure of [false, true]) {
     test(`${mode} CLI removes its observed runner workspace after ${failure ? 'failed' : 'successful'} checks`, (t) => {

@@ -144,6 +144,33 @@ function checkLinks(root: string, files: string[]) {
   }
 }
 
+function checkDocuments(root: string, paths: string[]) {
+  if (!paths.length || paths.some((path) => path.startsWith('--')))
+    throw new Error('Usage: --docs FILE.md ...');
+  const files = [...new Set(paths.map((path) => relative(root, resolve(path))))];
+  for (const file of files) {
+    if (
+      !file.endsWith('.md') ||
+      file === '..' ||
+      file.startsWith('../') ||
+      isAbsolute(file) ||
+      !realpathSync(join(root, file)).startsWith(`${root}/`) ||
+      !lstatSync(realpathSync(join(root, file))).isFile()
+    )
+      throw new Error('Documentation must be Markdown files inside the repository');
+    const check = spawnSync(
+      'git',
+      ['diff', '--no-index', '--check', '--', '/dev/null', realpathSync(join(root, file))],
+      { encoding: 'utf8' },
+    );
+    if (check.error) throw check.error;
+    if (check.status !== 0 && check.status !== 1)
+      throw new Error(check.stderr || check.stdout || 'Git whitespace check failed');
+  }
+  checkLinks(root, files);
+  process.stderr.write(`Verified ${files.length} working documents\n`);
+}
+
 function skillFile(path: string) {
   if (!existsSync(path) || !lstatSync(path).isFile())
     throw new Error(`${path}: skill metadata must be a regular file`);
@@ -340,6 +367,12 @@ function checkSnapshot(
 }
 
 try {
+  if (process.argv.includes('--docs')) {
+    if (process.argv[2] !== '--docs') throw new Error('Usage: --docs FILE.md ...');
+    const root = git(['rev-parse', '--show-toplevel']).toString().trim();
+    checkDocuments(realpathSync(root), process.argv.slice(3));
+    process.exit(0);
+  }
   if (process.argv.includes('--install') || process.argv.includes('--install-pre-commit')) {
     installHook(process.argv.includes('--install-pre-commit'));
     process.exit(0);
@@ -374,7 +407,7 @@ try {
   }
 } catch (error) {
   process.stderr.write(
-    `${process.argv.includes('--staged') || process.argv.includes('--install-pre-commit') ? 'Commit' : 'Push'} check failed: ${(error as Error).message}\n`,
+    `${process.argv[2] === '--docs' ? 'Documentation' : process.argv.includes('--staged') || process.argv.includes('--install-pre-commit') ? 'Commit' : 'Push'} check failed: ${(error as Error).message}\n`,
   );
   process.exitCode = 1;
 }
