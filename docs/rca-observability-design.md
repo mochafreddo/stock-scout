@@ -39,3 +39,25 @@ Metrics·Events·Logs·Traces의 정보는 하나의 제한된 진단 기록에�
 공개 검증 경계는 네 CLI의 입력·stdout·stderr·종료 코드와 외부 HTTP·시계 목업이다. 기존 CLI 자식 프로세스와 합성 인증·HTTP·시계 검사를 재사용한다. 불완전 응답·헤더 후 정지·자연 EOF와 취소·중첩 기한·복구된 실패·관측 실패·용량 초과·비밀값 비노출을 검증하고 기존 요청 인자·종류별 집계·한도·비용 정책을 보존한다. 진단 누락·조기 완료·잘못된 원인·요청 연결을 잡는 음성 대조를 수행한다.
 
 향후 구현 검토 기준은 `3343281ab3380f0174bdcf7595efac219acb5358` 이후 이 작업의 설계·구현 변경이다. 형식·린트·타입·관련 검사와 Standards·Spec 두 축 리뷰를 마친 뒤 소스를 고정하고 최종 전체 모의 검사를 수행한다. 모의 통과를 실제 공급자 원인 확인이나 보고서 연결 성공으로 표시하지 않는다. 이 절은 후속 구현의 검증 계약이며 이번 명세 게시에서 해당 검사를 수행했다는 뜻이 아니다.
+
+## #273의 공통 구현 계약
+
+`scripts/execution-observation.ts`의 `ExecutionObservation`이 실행별 관측 상태를 소유한다. 통합 CLI는 `CandidateRuntime.observation`을 사용하고 독립 일정 CLI는 관측 소유자만 생성한다. 독립 CLI에 통합 600초·요청 예산을 새로 적용하지 않는다. `ExecutionContext`의 `observation`과 `parentId`가 같은 소유자와 부모 작업 ID를 전달하며, `runtime`이 있는 기존 호출에서는 그 관측 소유자를 재사용한다. 모듈이 반환하는 작업 토큰은 읽기 전용이며 변경은 소유자의 메서드를 통한다.
+
+실패 JSON의 최상위 `observation`은 기존 `diagnostic`, `reason`, `location`, `usage`와 별개다. `runId`와 실행 시작 시각, 실행 경과 시간, `operations`, `firstFailure`, `finalError`, `coverage`, `degraded`, `truncated`, `omittedOperations`를 제공한다. 작업의 `startedAt`, `endedAt`, `headersAt`, `firstEventAt`, `lastEventAt`은 실행 시작부터의 단조 시계 밀리초 오프셋이고 `elapsedMs`는 그 작업의 경과 시간이다. 시간 값 `null`은 미관측이다. 부모와 자식의 시간은 중첩된다.
+
+`start(name, parentId, kind)`는 고정 이름의 논리 작업·실제 요청·논리 도구 호출을 구분한다. 실제 전송 기록은 기존 정책 검사와 전송 집계 뒤, `fetch` 직전에 생성한다. `headers`는 상태 코드와 헤더 수신 시점만 기록하며 작업을 완료하지 않는다. `streamEnd`는 처음 관측한 `eof`, `read_error`, `cancelled`를 보존한다. `end`는 업무의 기존 검증을 마친 뒤 호출하며 `fail`은 허용한 오류 코드만 기록한다. 결과 검증 실패는 검증 작업과 모델 작업의 실패이며, 이미 정상 EOF로 끝난 HTTP 전송을 뒤늦게 통신 실패로 바꾸지 않는다.
+
+모델 HTTP 응답은 `observeResponse(response, observation, request, signal, true)`를 한 번 통과한다. 반환된 응답은 기존 소비자에게 전달한다. 래퍼는 소비자의 읽기 요구마다 원래 리더를 한 번 읽고, 추가 선읽기 없이 원래 취소를 전달한다. 받은 SSE의 완성된 이벤트에서 첫·마지막 시점, `completionEvents`와 `errorEvents`를 세며 본문·외부 오류 문자열·헤더·URL은 기록하지 않는다. 이 관측을 사용하는 경로에서는 기존 SDK 미들웨어에 같은 관측 계수를 다시 추가하지 않는다. 단계가 기존에 사용하던 완료 이벤트 계수와 완료 판정은 그대로 유지한다. 공급자 실패 이벤트를 본 뒤 읽기 오류나 취소가 발생해도 최초 관측 실패를 유지한다.
+
+SSE 메타데이터의 임시 버퍼에도 상한을 적용한다. 큰 이벤트나 해석 실패 때문에 정확한 계수를 보장할 수 없으면 관측만 `degraded`로 표시하고 계수는 `null`로 둔다. SDK에 전달하는 원래 바이트, 모델 결과와 완료 판정은 바꾸지 않는다. 요청별 관측 토큰은 해당 `fetch` 호출의 클로저에 고정하며 다음 도구 왕복 요청의 가변 전역 포인터로 바꾸지 않는다.
+
+`requestSignal`의 선택 인수는 제한 소유자를 전달한다. `tagSignal`은 실제 abort 이벤트가 발생한 순간의 출처를 저장한다. 이후 다른 제한이 취소되더라도 처음 출처를 바꾸지 않는다. `execution_limit`, `target_open`, `stage_limit`, `request_limit`은 직접 연결한 제한에만 쓰며 외부 취소나 출처를 잃은 신호는 `unknown`이다. 시간 경과만으로 공급자 오류나 취소 출처를 추정하지 않는다.
+
+`fail(operation, error)`는 최초 실패를 남기고, `propagate(mappedError, originalError)`는 기존 오류 매핑을 유지하면서 공개 오류와 관측 실패의 연결을 전달한다. 정책상 정상 복구한 실패에는 `recover(operation)`을 사용한다. 최상위 catch는 기존 우선순위로 공개 코드를 먼저 정한 뒤 `finish(code, error)`를 호출한다. `firstFailure`는 근본 원인이라는 뜻이 아니며 `failure.recovered`와 `failure.propagated`가 복구 및 최종 중단 전달 여부를 구분한다.
+
+작업·요청은 최대 512개를 보관하고 `snapshot()`은 추가 관측 JSON을 최대 256KiB로 제한한다. 최초 실패·실패한 작업·최종 오류 연결을 우선하며 생략은 계수로 남긴다. 기록 생성과 직렬화가 실패하면 가능한 최소 실패 요약과 `degraded`를 제공한다. 관측 메서드는 원래 오류를 대신 던지지 않는다. 인증 저장·잠금 해제와 원래 리더 취소는 기존 정리 경로에서 실행한다.
+
+현재 적용 범위는 일정·SIWC 인증과 이를 호출하는 후보군·매수 후보 CLI의 실패 출력이다. `coverage`는 실제 관측 작업이 시작된 영역을 나열하며, 없는 작업은 성공이나 미시작의 증거가 아니다. 유형·추천·의미 검토·KIS의 상세 관측은 후속 티켓에서 같은 소유자·토큰·전송 래퍼를 사용한다. 독립 인증·KIS 관측 CLI의 출력 계약은 유지한다. KIS 관측 도구의 실행 소스 스냅샷에는 새 공통 모듈도 포함된다.
+
+공통 모의 경계는 기존 `runCalendar`와 `run` CLI 프로세스 도우미다. 일정 도우미는 기존 요청 추적 외에 합성 인증의 만료 시각·잠금 존재 여부와 스트림 취소 기록을 반환한다. `market-calendar-http-mock.mjs`는 헤더 후 정지, 완료 뒤 읽기 오류, 중복 완료, 불완전 이벤트 뒤 취소, 청크 경계와 큰 이벤트, 관측 생성·직렬화 실패를 제공한다. 제한 타이머 주입은 `TEST_TIMEOUT_MATCH`와 선택한 발생 순서 `TEST_TIMEOUT_OCCURRENCE`로 실제 abort를 일으킨다. 이는 모의 전송과 모의 시계 검증이며 실제 공급자 호환성·과거 중단 원인·보고서 연결·추천 품질을 입증하지 않는다. 최종 통합 리뷰·변이 음성 대조·전체 모의 검사는 모든 후속 변경이 합쳐진 소스로 별도 수행한다.

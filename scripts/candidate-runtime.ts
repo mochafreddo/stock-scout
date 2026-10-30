@@ -1,4 +1,12 @@
+import {
+  type CancellationSource,
+  cancellationSource,
+  ExecutionObservation,
+  tagSignal,
+} from './execution-observation.ts';
+
 export class CandidateRuntime {
+  readonly observation = new ExecutionObservation();
   readonly startedAt = performance.now();
   readonly startedWall = Date.now();
   readonly counts = {
@@ -56,10 +64,28 @@ export class CandidateRuntime {
     this.counts[kind]++;
     if (kind === 'issuance') this.counts.kis++;
   }
-  signal(ms: number, parent?: AbortSignal | null) {
+  signal(ms: number, parent?: AbortSignal | null, source: CancellationSource = 'request_limit') {
     this.check();
-    const timeout = AbortSignal.timeout(Math.max(1, Math.floor(Math.min(ms, this.remaining()))));
-    return parent ? AbortSignal.any([timeout, parent]) : timeout;
+    const remaining = this.remaining();
+    const owner =
+      remaining <= ms
+        ? this.target - Date.now() <=
+          Math.min(
+            600_000 - (performance.now() - this.startedAt),
+            this.startedWall + 600_000 - Date.now(),
+          )
+          ? 'target_open'
+          : 'execution_limit'
+        : source;
+    const timeout = tagSignal(
+      AbortSignal.timeout(Math.max(1, Math.floor(Math.min(ms, remaining)))),
+      () => owner,
+    );
+    return parent
+      ? tagSignal(AbortSignal.any([timeout, parent]), () =>
+          timeout.aborted ? owner : cancellationSource(parent),
+        )
+      : timeout;
   }
   safe(value: unknown) {
     this.check();
@@ -70,18 +96,35 @@ export class CandidateRuntime {
   }
 }
 
-export type ExecutionContext = { runtime?: CandidateRuntime; signal?: AbortSignal };
+export type ExecutionContext = {
+  runtime?: CandidateRuntime;
+  signal?: AbortSignal;
+  observation?: ExecutionObservation;
+  parentId?: string;
+};
 
-export function requestSignal(context: ExecutionContext, ms: number, signal?: AbortSignal | null) {
+export function requestSignal(
+  context: ExecutionContext,
+  ms: number,
+  signal?: AbortSignal | null,
+  source: CancellationSource = 'request_limit',
+) {
   context.signal?.throwIfAborted();
   const parent =
     context.signal && signal
-      ? AbortSignal.any([context.signal, signal])
+      ? tagSignal(AbortSignal.any([context.signal, signal]), () =>
+          context.signal?.aborted ? cancellationSource(context.signal) : cancellationSource(signal),
+        )
       : (context.signal ?? signal);
   return (
-    context.runtime?.signal(ms, parent) ??
+    context.runtime?.signal(ms, parent, source) ??
     (parent
-      ? AbortSignal.any([parent, AbortSignal.timeout(Math.max(1, Math.floor(ms)))])
-      : AbortSignal.timeout(Math.max(1, Math.floor(ms))))
+      ? (() => {
+          const timeout = tagSignal(AbortSignal.timeout(Math.max(1, Math.floor(ms))), () => source);
+          return tagSignal(AbortSignal.any([parent, timeout]), () =>
+            parent.aborted ? cancellationSource(parent) : source,
+          );
+        })()
+      : tagSignal(AbortSignal.timeout(Math.max(1, Math.floor(ms))), () => source))
   );
 }

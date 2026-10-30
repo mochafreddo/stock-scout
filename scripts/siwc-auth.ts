@@ -26,6 +26,7 @@ import { setTimeout as delay, setImmediate as yieldTurn } from 'node:timers/prom
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { DiagnosticError } from './diagnostic-error.ts';
+import { type ObservedOperation, observeResponse } from './execution-observation.ts';
 
 const issuer = 'https://auth.openai.com';
 const resource = 'https://api.openai.com/v1';
@@ -282,11 +283,30 @@ export async function readSiwcCredentials(
   observation?: SiwcAuthObservation,
   context: ExecutionContext = {},
 ): Promise<SiwcCredentials> {
+  const observer = context.observation ?? context.runtime?.observation;
+  const authOperation = observer?.start('auth', context.parentId);
+  context = { ...context, observation: observer, parentId: authOperation?.id };
+  let lockOperation: ObservedOperation | undefined;
+  let loadOperation: ObservedOperation | undefined;
+  let refreshOperation: ObservedOperation | undefined;
+  let validationOperation: ObservedOperation | undefined;
+  let storeOperation: ObservedOperation | undefined;
   const cancellation = new AbortController();
   const stop = () => cancellation.abort(new Error('siwc_refresh_cancelled'));
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
   let unlock: (() => void) | undefined;
+  function releaseLock() {
+    const operation = unlock ? observer?.start('auth.unlock', authOperation?.id) : undefined;
+    try {
+      unlock?.();
+      observer?.end(operation);
+    } catch (error) {
+      observer?.fail(operation, error);
+      observer?.fail(authOperation, error);
+      throw error;
+    }
+  }
   try {
     try {
       directoryPath(directory, false);
@@ -294,19 +314,24 @@ export async function readSiwcCredentials(
       fail('siwc_invalid_credentials');
     }
     context.runtime?.check();
+    lockOperation = observer?.start('auth.lock', authOperation?.id);
     unlock = await sessionLock(
       directory,
       context.runtime || context.signal
         ? requestSignal(context, 30_000, cancellation.signal)
         : cancellation.signal,
     );
+    observer?.end(lockOperation);
+    loadOperation = observer?.start('auth.load', authOperation?.id);
     const credentials = loadSession(directory);
+    observer?.end(loadOperation);
     if (!('accessToken' in credentials)) fail('siwc_relogin_required');
     for (const secret of [credentials.accessToken, credentials.idToken, credentials.refreshToken])
       context.runtime?.secrets.add(secret);
     const refreshedEarliest = refreshTime(credentials.earliestRefreshAt);
     if (observation) observation.expiresAt = new Date(credentials.expiresAt).toISOString();
     if (credentials.expiresAt - Date.now() > 300_000) {
+      observer?.end(observer.start('auth.reuse', authOperation?.id));
       if (observation) observation.status = 'reused';
       return credentials;
     }
@@ -314,6 +339,7 @@ export async function readSiwcCredentials(
       fail('siwc_refresh_not_allowed', refreshedEarliest);
     const signal = requestSignal(context, 30_000, cancellation.signal);
     let tokens: Record<string, unknown>;
+    refreshOperation = observer?.start('auth.refresh', authOperation?.id);
     try {
       if (observation) observation.refreshRequests++;
       context.runtime?.take('refresh');
@@ -331,11 +357,15 @@ export async function readSiwcCredentials(
           }),
         },
         true,
+        131_072,
+        { ...context, parentId: refreshOperation?.id },
       );
+      observer?.end(refreshOperation);
     } catch (error) {
       if (error instanceof Error && error.message === 'siwc_relogin_required') {
         const { schemaVersion, issuer, subject, clientId, hostId } = credentials;
         directoryPath(directory, false);
+        storeOperation = observer?.start('auth.store', authOperation?.id);
         atomicWrite(directory, 'credentials.json', {
           schemaVersion,
           issuer,
@@ -343,10 +373,12 @@ export async function readSiwcCredentials(
           clientId,
           hostId,
         });
+        observer?.end(storeOperation);
       }
       throw error;
     }
     const receivedAt = Date.now();
+    validationOperation = observer?.start('auth.validation', authOperation?.id);
     if (
       !text(tokens.access_token) ||
       !text(tokens.refresh_token) ||
@@ -368,19 +400,24 @@ export async function readSiwcCredentials(
     if ('scope' in tokens) refreshed.scopes = tokenScopes(tokens.scope);
     if ('id_token' in tokens) {
       if (!text(tokens.id_token)) fail('siwc_invalid_identity');
-      const subject = await identity(tokens.id_token, credentials.clientId, undefined, signal);
+      const subject = await identity(tokens.id_token, credentials.clientId, undefined, signal, {
+        ...context,
+        parentId: validationOperation?.id,
+      });
       if (subject !== credentials.subject) fail('siwc_account_mismatch');
       refreshed.idToken = tokens.id_token;
     }
     for (const secret of [refreshed.accessToken, refreshed.idToken, refreshed.refreshToken])
       context.runtime?.secrets.add(secret);
     if (refreshed.expiresAt <= Date.now()) fail('siwc_credentials_expired');
+    observer?.end(validationOperation);
     if (observation) {
       observation.responseValidated = true;
       observation.accessTokenChanged = refreshed.accessToken !== credentials.accessToken;
       observation.refreshTokenChanged = refreshed.refreshToken !== credentials.refreshToken;
     }
     directoryPath(directory, false);
+    storeOperation = observer?.start('auth.store', authOperation?.id);
     atomicWrite(directory, 'credentials.json', refreshed);
     if (observation) {
       observation.credentialsStored = true;
@@ -394,17 +431,28 @@ export async function readSiwcCredentials(
       observation.expiresAt = new Date(refreshed.expiresAt).toISOString();
       observation.status = 'refreshed';
     }
+    observer?.end(storeOperation);
     await yieldTurn();
     signal.throwIfAborted();
     return refreshed;
   } catch (error) {
+    for (const operation of [
+      lockOperation,
+      loadOperation,
+      refreshOperation,
+      validationOperation,
+      storeOperation,
+    ])
+      if (operation?.status === 'in_progress') observer?.fail(operation, error);
+    observer?.fail(authOperation, error);
     context.runtime?.check();
     context.signal?.throwIfAborted();
     if (cancellation.signal.aborted) fail('siwc_refresh_cancelled');
     if (error instanceof Error && /^siwc_[a-z_]+$/.test(error.message)) throw error;
     return fail('siwc_refresh_failed');
   } finally {
-    unlock?.();
+    releaseLock();
+    observer?.end(authOperation);
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
   }
@@ -415,43 +463,63 @@ async function request(
   options: RequestInit = {},
   refresh = false,
   maximumBytes = 131_072,
+  context: ExecutionContext = {},
 ) {
-  options.signal?.throwIfAborted();
-  const response = await fetch(url, {
-    ...options,
-    redirect: 'error',
-    signal: options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(15_000)])
-      : AbortSignal.timeout(15_000),
-  });
-  const body = await response.text();
-  options.signal?.throwIfAborted();
-  if (Buffer.byteLength(body) > maximumBytes) fail('siwc_invalid_response');
-  if (!response.ok) {
-    if (refresh && response.status >= 400 && response.status < 500 && response.status !== 429) {
-      let code: unknown;
-      try {
-        code = object(JSON.parse(body)).error;
-      } catch {}
-      if (
-        [
-          'invalid_grant',
-          'invalid_refresh_token',
-          'token_expired',
-          'refresh_token_expired',
-          'refresh_token_invalidated',
-          'refresh_token_reused',
-        ].includes(code as string)
-      )
-        fail('siwc_relogin_required');
-      if (code === 'invalid_client') fail('siwc_client_configuration');
-    }
-    fail('siwc_authentication_failed');
-  }
+  const observer = context.observation ?? context.runtime?.observation;
+  const operation = observer?.start(
+    refresh ? 'auth.refresh.http' : 'auth.identity.http',
+    context.parentId,
+    'request',
+  );
+  let signal: AbortSignal | undefined;
   try {
-    return object(JSON.parse(body));
-  } catch {
-    fail('siwc_invalid_response');
+    options.signal?.throwIfAborted();
+    signal = requestSignal(context, 15_000, options.signal);
+    const response = observeResponse(
+      await fetch(url, {
+        ...options,
+        redirect: 'error',
+        signal,
+      }),
+      observer,
+      operation,
+      signal,
+    );
+    const body = await response.text();
+    options.signal?.throwIfAborted();
+    if (Buffer.byteLength(body) > maximumBytes) fail('siwc_invalid_response');
+    if (!response.ok) {
+      if (refresh && response.status >= 400 && response.status < 500 && response.status !== 429) {
+        let code: unknown;
+        try {
+          code = object(JSON.parse(body)).error;
+        } catch {}
+        if (
+          [
+            'invalid_grant',
+            'invalid_refresh_token',
+            'token_expired',
+            'refresh_token_expired',
+            'refresh_token_invalidated',
+            'refresh_token_reused',
+          ].includes(code as string)
+        )
+          fail('siwc_relogin_required');
+        if (code === 'invalid_client') fail('siwc_client_configuration');
+      }
+      fail('siwc_authentication_failed');
+    }
+    try {
+      const result = object(JSON.parse(body));
+      observer?.end(operation);
+      return result;
+    } catch {
+      fail('siwc_invalid_response');
+    }
+  } catch (error) {
+    if (operation?.streamEnd === null) observer?.streamEnd(operation, 'read_error', signal);
+    observer?.fail(operation, error);
+    throw error;
   }
 }
 
@@ -460,60 +528,76 @@ async function identity(
   issuedClient: string,
   nonce: string | undefined,
   signal: AbortSignal,
+  context: ExecutionContext = {},
 ) {
-  const parts = idToken.split('.');
-  if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part)))
-    fail('siwc_invalid_identity');
-  const header = object(JSON.parse(Buffer.from(parts[0], 'base64url').toString()));
-  const claims = object(JSON.parse(Buffer.from(parts[1], 'base64url').toString()));
-  if (header.alg !== 'RS256' || !text(header.kid)) fail('siwc_invalid_identity');
-  const discovery = await request(`${issuer}/.well-known/openid-configuration`, { signal });
-  if (discovery.issuer !== issuer || typeof discovery.jwks_uri !== 'string')
-    fail('siwc_invalid_identity');
-  const jwksUri = new URL(discovery.jwks_uri);
-  if (
-    jwksUri.origin !== issuer ||
-    jwksUri.username ||
-    jwksUri.password ||
-    jwksUri.hash ||
-    jwksUri.search
-  )
-    fail('siwc_invalid_identity');
-  const jwks = await request(jwksUri.href, { signal });
-  if (!Array.isArray(jwks.keys)) fail('siwc_invalid_identity');
-  const keys = jwks.keys
-    .map(object)
-    .filter(
-      (key) =>
-        key.kid === header.kid &&
-        key.kty === 'RSA' &&
-        (key.use === undefined || key.use === 'sig') &&
-        (key.alg === undefined || key.alg === 'RS256'),
+  const observer = context.observation ?? context.runtime?.observation;
+  const operation = observer?.start('auth.identity', context.parentId);
+  context = { ...context, parentId: operation?.id };
+  try {
+    const parts = idToken.split('.');
+    if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part)))
+      fail('siwc_invalid_identity');
+    const header = object(JSON.parse(Buffer.from(parts[0], 'base64url').toString()));
+    const claims = object(JSON.parse(Buffer.from(parts[1], 'base64url').toString()));
+    if (header.alg !== 'RS256' || !text(header.kid)) fail('siwc_invalid_identity');
+    const discovery = await request(
+      `${issuer}/.well-known/openid-configuration`,
+      { signal },
+      false,
+      131_072,
+      context,
     );
-  if (
-    keys.length !== 1 ||
-    !verify(
-      'RSA-SHA256',
-      Buffer.from(`${parts[0]}.${parts[1]}`),
-      createPublicKey({ key: keys[0], format: 'jwk' }),
-      Buffer.from(parts[2], 'base64url'),
+    if (discovery.issuer !== issuer || typeof discovery.jwks_uri !== 'string')
+      fail('siwc_invalid_identity');
+    const jwksUri = new URL(discovery.jwks_uri);
+    if (
+      jwksUri.origin !== issuer ||
+      jwksUri.username ||
+      jwksUri.password ||
+      jwksUri.hash ||
+      jwksUri.search
     )
-  )
-    fail('siwc_invalid_identity');
-  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  if (
-    claims.iss !== issuer ||
-    !audiences.includes(issuedClient) ||
-    (audiences.length > 1 && claims.azp !== issuedClient) ||
-    (claims.azp !== undefined && claims.azp !== issuedClient) ||
-    typeof claims.exp !== 'number' ||
-    !Number.isFinite(claims.exp) ||
-    claims.exp <= Date.now() / 1000 ||
-    (nonce !== undefined && claims.nonce !== nonce) ||
-    !text(claims.sub)
-  )
-    fail('siwc_invalid_identity');
-  return claims.sub;
+      fail('siwc_invalid_identity');
+    const jwks = await request(jwksUri.href, { signal }, false, 131_072, context);
+    if (!Array.isArray(jwks.keys)) fail('siwc_invalid_identity');
+    const keys = jwks.keys
+      .map(object)
+      .filter(
+        (key) =>
+          key.kid === header.kid &&
+          key.kty === 'RSA' &&
+          (key.use === undefined || key.use === 'sig') &&
+          (key.alg === undefined || key.alg === 'RS256'),
+      );
+    if (
+      keys.length !== 1 ||
+      !verify(
+        'RSA-SHA256',
+        Buffer.from(`${parts[0]}.${parts[1]}`),
+        createPublicKey({ key: keys[0], format: 'jwk' }),
+        Buffer.from(parts[2], 'base64url'),
+      )
+    )
+      fail('siwc_invalid_identity');
+    const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    if (
+      claims.iss !== issuer ||
+      !audiences.includes(issuedClient) ||
+      (audiences.length > 1 && claims.azp !== issuedClient) ||
+      (claims.azp !== undefined && claims.azp !== issuedClient) ||
+      typeof claims.exp !== 'number' ||
+      !Number.isFinite(claims.exp) ||
+      claims.exp <= Date.now() / 1000 ||
+      (nonce !== undefined && claims.nonce !== nonce) ||
+      !text(claims.sub)
+    )
+      fail('siwc_invalid_identity');
+    observer?.end(operation);
+    return claims.sub;
+  } catch (error) {
+    observer?.fail(operation, error);
+    throw error;
+  }
 }
 
 async function login(directory: string) {

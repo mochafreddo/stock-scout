@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, jsonSchema, Output, streamText, wrapLanguageModel } from 'ai';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
+import { type ObservedOperation, observeResponse } from './execution-observation.ts';
 import { readSiwcCredentials } from './siwc-auth.ts';
 
 export type CalendarNotice = {
@@ -231,154 +232,203 @@ export async function assessCalendarNotices(
   remainingMs: number,
   context: ExecutionContext = {},
 ) {
-  const executionDeadline = performance.now() + remainingMs;
-  const spans = new Map<string, NoticeSpan>();
-  const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' });
-  const input = notices.map((notice) => ({
-    ...notice,
-    entries: notice.entries.map(({ body, ...entry }) => {
-      const bodySpans: { id: string; text: string }[] = [];
-      for (const sentence of segmenter.segment(body)) {
-        const points = Array.from(sentence.segment);
-        for (let offset = 0; offset < points.length; offset += 240) {
-          const id = `${entry.id}:s${bodySpans.length}`;
-          const text = points.slice(offset, offset + 240).join('');
-          bodySpans.push({ id, text });
-          spans.set(id, { entryId: entry.id, groupId: notice.id, quote: text });
-        }
-      }
-      return { ...entry, spans: bodySpans };
-    }),
-  }));
-  const prompt = JSON.stringify({ notices: input });
-  if (
-    Buffer.byteLength(prompt) +
-      Buffer.byteLength(instructions) +
-      Buffer.byteLength(JSON.stringify(schemaValue)) >
-    256 * 1024
-  )
-    throw new Error('MODEL_INPUT_LIMIT');
-  const credentials = await readSiwcCredentials(directory, undefined, context).catch(() => {
-    context.runtime?.check();
-    throw new Error('AUTH_FAILED');
-  });
-  if (performance.now() >= executionDeadline) throw new Error('EXECUTION_LIMIT');
-  const modelStartedAt = performance.now();
-  const modelBudget = Math.min(180_000, executionDeadline - modelStartedAt);
-  const secrets = [
-    credentials.accessToken,
-    credentials.idToken,
-    credentials.refreshToken,
-    process.env.OPENAI_API_KEY,
-  ];
-  const safe = (value: unknown) => {
-    const serialized = JSON.stringify(value);
-    if (secrets.some((secret) => secret && serialized.includes(secret)))
-      throw new Error('SENSITIVE_OUTPUT');
-    return serialized;
-  };
-  safe(notices);
-  context.runtime?.safe(notices);
-  let requests = 0;
-  let completions = 0;
-  let failed = false;
-  const provider = createOpenAI({
-    apiKey: credentials.accessToken,
-    fetch: async (url, init) => {
-      if (Buffer.byteLength(String(init?.body ?? '')) > 256 * 1024)
-        throw new Error('MODEL_INPUT_LIMIT');
-      if (String(url) !== 'https://api.openai.com/v1/responses' || ++requests > 1)
-        throw new Error('MODEL_LIMIT');
-      const signal = requestSignal(context, modelBudget, init?.signal);
-      context.runtime?.take('calendarModel');
-      return fetch(url, { ...init, signal });
-    },
-  });
+  const observation = context.observation ?? context.runtime?.observation;
+  const operation = observation?.start('calendar.model', context.parentId);
+  context = { ...context, observation, parentId: operation?.id };
+  let request: ObservedOperation | undefined;
+  let modelSignal: AbortSignal | undefined;
+  let validation: ObservedOperation | undefined;
   try {
-    const result = streamText({
-      model: wrapLanguageModel({
-        model: provider.responses(model),
-        middleware: {
-          wrapStream: async ({ doStream }) => {
-            const stream = await doStream();
-            return {
-              ...stream,
-              stream: stream.stream.pipeThrough(
-                new TransformStream({
-                  transform(part, controller) {
-                    if (part.type === 'raw') {
-                      const raw = part.rawValue as { type?: string };
-                      if (raw.type === 'response.completed') completions++;
-                      if (
-                        ['response.failed', 'response.incomplete', 'error'].includes(raw.type ?? '')
-                      )
-                        failed = true;
-                    }
-                    controller.enqueue(part);
-                  },
-                }),
-              ),
-            };
-          },
-        },
+    const executionDeadline = performance.now() + remainingMs;
+    const spans = new Map<string, NoticeSpan>();
+    const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' });
+    const input = notices.map((notice) => ({
+      ...notice,
+      entries: notice.entries.map(({ body, ...entry }) => {
+        const bodySpans: { id: string; text: string }[] = [];
+        for (const sentence of segmenter.segment(body)) {
+          const points = Array.from(sentence.segment);
+          for (let offset = 0; offset < points.length; offset += 240) {
+            const id = `${entry.id}:s${bodySpans.length}`;
+            const text = points.slice(offset, offset + 240).join('');
+            bodySpans.push({ id, text });
+            spans.set(id, { entryId: entry.id, groupId: notice.id, quote: text });
+          }
+        }
+        return { ...entry, spans: bodySpans };
       }),
-      system: instructions,
-      prompt,
-      output: Output.object({
-        schema: jsonSchema<{ assessments: ModelAssessment[] }>(schemaValue),
-      }),
-      providerOptions: { openai: { store: false, systemMessageMode: 'developer' } },
-      maxRetries: 0,
-      include: { rawChunks: true },
-      abortSignal: requestSignal(context, modelBudget),
-      onError: () => {},
-    });
-    const output = Promise.resolve(result.output).then(
-      (value) => ({ value }),
-      () => ({ value: undefined }),
-    );
-    for await (const part of result.stream) if (part.type === 'error') throw part.error;
-    const { value } = await output;
-    if (performance.now() >= executionDeadline) throw new Error('EXECUTION_LIMIT');
-    if (performance.now() - modelStartedAt >= modelBudget) throw new Error('MODEL_INCOMPLETE');
-    if (failed || completions !== 1 || requests !== 1) throw new Error('MODEL_INCOMPLETE');
-    if (!value || !Array.isArray(value.assessments)) throw new Error('MODEL_OUTPUT');
-    safe(value);
-    return {
-      assessments: validate(value, notices, spans),
-      provenance: {
-        provider: 'openai',
-        authentication: 'siwc',
-        model,
-        semanticReliability: 'unverified',
-        requests,
-      },
-      safe,
-    };
-  } catch (error) {
-    context.runtime?.check();
-    if (APICallError.isInstance(error)) {
-      if ([401, 403].includes(error.statusCode ?? 0)) throw new Error('AUTH_FAILED');
-      let code: unknown;
-      try {
-        code = JSON.parse(error.responseBody ?? '{}').error?.code;
-      } catch {}
-      if (code === 'subscription_sharing_usage_limit_exceeded')
-        throw new Error('SUBSCRIPTION_LIMIT');
-      if (error.statusCode === 404) throw new Error('MODEL_UNAVAILABLE');
-    }
+    }));
+    const prompt = JSON.stringify({ notices: input });
     if (
-      error instanceof Error &&
-      [
-        'MODEL_INCOMPLETE',
-        'MODEL_OUTPUT',
-        'MODEL_LIMIT',
-        'MODEL_INPUT_LIMIT',
-        'SENSITIVE_OUTPUT',
-        'EXECUTION_LIMIT',
-      ].includes(error.message)
+      Buffer.byteLength(prompt) +
+        Buffer.byteLength(instructions) +
+        Buffer.byteLength(JSON.stringify(schemaValue)) >
+      256 * 1024
     )
-      throw error;
-    throw new Error('MODEL_FAILED');
+      throw new Error('MODEL_INPUT_LIMIT');
+    const credentials = await readSiwcCredentials(directory, undefined, context).catch((error) => {
+      context.runtime?.check();
+      const mapped = new Error('AUTH_FAILED');
+      observation?.propagate(mapped, error);
+      throw mapped;
+    });
+    if (performance.now() >= executionDeadline) throw new Error('EXECUTION_LIMIT');
+    const modelStartedAt = performance.now();
+    const modelBudget = Math.min(180_000, executionDeadline - modelStartedAt);
+    const modelAbortSignal = requestSignal(context, modelBudget, undefined, 'stage_limit');
+    const secrets = [
+      credentials.accessToken,
+      credentials.idToken,
+      credentials.refreshToken,
+      process.env.OPENAI_API_KEY,
+    ];
+    const safe = (value: unknown) => {
+      const serialized = JSON.stringify(value);
+      if (secrets.some((secret) => secret && serialized.includes(secret)))
+        throw new Error('SENSITIVE_OUTPUT');
+      return serialized;
+    };
+    safe(notices);
+    context.runtime?.safe(notices);
+    let requests = 0;
+    let completions = 0;
+    let failed = false;
+    const provider = createOpenAI({
+      apiKey: credentials.accessToken,
+      fetch: async (url, init) => {
+        if (Buffer.byteLength(String(init?.body ?? '')) > 256 * 1024)
+          throw new Error('MODEL_INPUT_LIMIT');
+        if (String(url) !== 'https://api.openai.com/v1/responses' || ++requests > 1)
+          throw new Error('MODEL_LIMIT');
+        const signal = requestSignal(
+          { ...context, signal: modelAbortSignal },
+          modelBudget,
+          init?.signal,
+        );
+        context.runtime?.take('calendarModel');
+        modelSignal = signal;
+        request = observation?.start('calendar.model.http', operation?.id, 'request');
+        try {
+          const response = await fetch(url, { ...init, signal });
+          return observeResponse(
+            response,
+            observation,
+            request,
+            signal,
+            response.headers.get('content-type')?.includes('text/event-stream'),
+          );
+        } catch (error) {
+          observation?.streamEnd(request, 'read_error', signal);
+          observation?.fail(request, error);
+          throw error;
+        }
+      },
+    });
+    try {
+      const result = streamText({
+        model: wrapLanguageModel({
+          model: provider.responses(model),
+          middleware: {
+            wrapStream: async ({ doStream }) => {
+              const stream = await doStream();
+              return {
+                ...stream,
+                stream: stream.stream.pipeThrough(
+                  new TransformStream({
+                    transform(part, controller) {
+                      if (part.type === 'raw') {
+                        const raw = part.rawValue as { type?: string };
+                        if (raw.type === 'response.completed') completions++;
+                        if (
+                          ['response.failed', 'response.incomplete', 'error'].includes(
+                            raw.type ?? '',
+                          )
+                        ) {
+                          failed = true;
+                        }
+                      }
+                      controller.enqueue(part);
+                    },
+                  }),
+                ),
+              };
+            },
+          },
+        }),
+        system: instructions,
+        prompt,
+        output: Output.object({
+          schema: jsonSchema<{ assessments: ModelAssessment[] }>(schemaValue),
+        }),
+        providerOptions: { openai: { store: false, systemMessageMode: 'developer' } },
+        maxRetries: 0,
+        include: { rawChunks: true },
+        abortSignal: modelAbortSignal,
+        onError: () => {},
+      });
+      const output = Promise.resolve(result.output).then(
+        (value) => ({ value }),
+        () => ({ value: undefined }),
+      );
+      for await (const part of result.stream) if (part.type === 'error') throw part.error;
+      const { value } = await output;
+      if (performance.now() >= executionDeadline) throw new Error('EXECUTION_LIMIT');
+      if (performance.now() - modelStartedAt >= modelBudget) throw new Error('MODEL_INCOMPLETE');
+      if (failed || completions !== 1 || requests !== 1) throw new Error('MODEL_INCOMPLETE');
+      if (!value || !Array.isArray(value.assessments)) throw new Error('MODEL_OUTPUT');
+      validation = observation?.start('calendar.validation', operation?.id);
+      safe(value);
+      const assessments = validate(value, notices, spans);
+      observation?.end(validation);
+      observation?.end(request);
+      observation?.end(operation);
+      return {
+        assessments,
+        provenance: {
+          provider: 'openai',
+          authentication: 'siwc',
+          model,
+          semanticReliability: 'unverified',
+          requests,
+        },
+        safe,
+      };
+    } catch (error) {
+      if (request?.streamEnd === null) observation?.streamEnd(request, 'read_error', modelSignal);
+      if (!validation) observation?.fail(request, error);
+      observation?.fail(validation, error);
+      observation?.fail(operation, error);
+      const raise = (code: string): never => {
+        const mapped = new Error(code);
+        observation?.propagate(mapped, error);
+        throw mapped;
+      };
+      context.runtime?.check();
+      if (APICallError.isInstance(error)) {
+        if ([401, 403].includes(error.statusCode ?? 0)) raise('AUTH_FAILED');
+        let code: unknown;
+        try {
+          code = JSON.parse(error.responseBody ?? '{}').error?.code;
+        } catch {}
+        if (code === 'subscription_sharing_usage_limit_exceeded') raise('SUBSCRIPTION_LIMIT');
+        if (error.statusCode === 404) raise('MODEL_UNAVAILABLE');
+      }
+      if (
+        error instanceof Error &&
+        [
+          'MODEL_INCOMPLETE',
+          'MODEL_OUTPUT',
+          'MODEL_LIMIT',
+          'MODEL_INPUT_LIMIT',
+          'SENSITIVE_OUTPUT',
+          'EXECUTION_LIMIT',
+        ].includes(error.message)
+      )
+        throw error;
+      return raise('MODEL_FAILED');
+    }
+  } catch (error) {
+    observation?.fail(operation, error);
+    throw error;
   }
 }

@@ -23,6 +23,7 @@ const files = [
   'kis-query.ts',
   'kis-auth.ts',
   'candidate-runtime.ts',
+  'execution-observation.ts',
 ];
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 function setup(t) {
@@ -129,7 +130,13 @@ test('observer collects one invocation per mode with linked private response and
     assert.equal(result.launches[0].timeout, 90_000);
     assert.equal(result.launches[0].killSignal, 'SIGKILL');
     assert.equal(result.launches[0].snapshotMode, 0o700);
-    for (const name of ['kis-probe.ts', 'kis-query.ts', 'kis-auth.ts', 'candidate-runtime.ts'])
+    for (const name of [
+      'kis-probe.ts',
+      'kis-query.ts',
+      'kis-auth.ts',
+      'candidate-runtime.ts',
+      'execution-observation.ts',
+    ])
       assert.deepEqual(result.launches[0].snapshotFiles[name], {
         sha256: receipt.source.files[`scripts/${name}`],
         mode: 0o600,

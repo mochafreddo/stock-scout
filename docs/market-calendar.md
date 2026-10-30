@@ -16,6 +16,10 @@ node scripts/market-calendar.ts --auth-dir /absolute/private/stock-scout --model
 
 `--auth-dir`과 `--model`은 필수다. 모델은 명시한 값만 사용하고 이용 불가·구독 한도·인증 실패 때 다른 모델이나 유료 API로 전환하지 않는다. 첫 후보 `gpt-6-luna`는 실제 전체 입력에서 근거 누락과 판단 불일치를 보였다. 사용자가 다음 후보로 선택한 `gpt-6.1-sol`은 작은 실제 표본과 전체 CLI를 한 번 통과했다. 이는 모델 접근 가능성·응답 시간·전체 공지 정확성의 보장이 아니다.
 
+실패 stderr JSON의 `observation`은 인증·공식 자료 수집·파싱·일정 모델·검증 작업의 부모 관계와 시간을 제공한다. HTTP 헤더 수신, 첫·마지막 SSE 이벤트, 완료·실패 이벤트 수, 자연 EOF·읽기 오류·취소를 구분하며 HTTP 200을 모델 완료로 표시하지 않는다. `firstFailure`는 최초 관측 사실이고 `finalError`는 기존 우선순위로 정한 공개 오류다. 확인하지 못한 시간·계수는 `null`, 취소 출처는 `unknown`으로 남는다. 관측 생성이나 해석에 문제가 있으면 `degraded`, 기록이 생략되면 `truncated`와 `omittedOperations`를 확인할 수 있다. 기존 성공 stdout·오류 코드·종료 코드는 유지한다.
+
+추가 관측에는 작업·요청 최대 512개와 JSON 최대 256KiB의 방어 상한이 있다. 부모·자식 시간은 중첩되므로 단순 합산하지 않는다. 프롬프트·응답 원문·헤더 원문·인증값·개인 경로는 관측 기록에 포함하지 않는다. [공통 관측 계약](rca-observability-design.md#273의-공통-구현-계약)은 필드의 의미와 후속 경로의 미관측 범위를 설명한다. 이 기능의 모의 검증은 과거 중단 원인이나 실제 공급자 내부 원인을 확인했다는 뜻이 아니다.
+
 ## 자료와 수집 한도
 
 매 실행은 [NYSE 휴장일·거래 시간](https://www.nyse.com/trade/hours-calendars), [Nasdaq 연간 일정](https://www.nasdaqtrader.com/Trader.aspx?id=Calendar), [Nasdaq 정규장 시간 레퍼런스](https://www.nasdaqtrader.com/content/productsservices/trading/oe_refguide.pdf)를 조회한다. NYSE와 NYSE American의 Core Trading Session을 각각 읽으며 Nasdaq의 Market Open·Market Close를 System Hours와 구분한다. 연간 표와 NYSE 조기 폐장 각주를 해석하고 세 거래소의 공통 지원 연도에서 휴장·조기 폐장·정규장 시간이 다르면 실패한다. 지원 연도는 조회 자료에서 정하며 고정 연도로 제한하지 않는다.

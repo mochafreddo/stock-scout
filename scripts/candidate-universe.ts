@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { recommendCandidates } from './buy-candidate-assessment.ts';
 import { CandidateRuntime } from './candidate-runtime.ts';
 import { DiagnosticError } from './diagnostic-error.ts';
+import type { ObservedOperation } from './execution-observation.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 import { marketCalendar } from './market-calendar.ts';
@@ -202,6 +203,7 @@ export async function runCandidateCli(report = false) {
     requests: [],
   };
   let stage = 'input';
+  let outputOperation: ObservedOperation | undefined;
   const safeCodes = [
     'USAGE',
     'TARGET_OPEN',
@@ -277,10 +279,13 @@ export async function runCandidateCli(report = false) {
         })
       : universe;
     stage = 'output';
+    outputOperation = runtime.observation.start('output');
     const serialized = runtime.safe(output);
     runtime.check();
     console.log(serialized);
+    runtime.observation.end(outputOperation);
   } catch (error) {
+    if (outputOperation?.status === 'in_progress') runtime.observation.fail(outputOperation, error);
     let failure = error;
     try {
       runtime.check();
@@ -294,11 +299,13 @@ export async function runCandidateCli(report = false) {
             (safeCodes.includes(failure.message) || /^siwc_[a-z_]+$/.test(failure.message))
           ? failure.message
           : 'REQUEST_FAILED';
+    runtime.observation.finish(code, failure);
     console.error(
       JSON.stringify({
         error: code,
         stage,
         usage: runtime.counts,
+        observation: runtime.observation.snapshot(),
         diagnostic: {
           stage,
           reason: failure instanceof DiagnosticError ? failure.reason : 'unknown',

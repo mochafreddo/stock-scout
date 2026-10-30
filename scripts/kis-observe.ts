@@ -25,6 +25,7 @@ const sourceNames = [
   'kis-query.ts',
   'kis-auth.ts',
   'candidate-runtime.ts',
+  'execution-observation.ts',
 ];
 const childCodes = [
   'USAGE',

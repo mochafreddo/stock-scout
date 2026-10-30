@@ -4,6 +4,34 @@ import { mock } from 'node:test';
 
 let elapsedMs = 0;
 mock.method(performance, 'now', () => elapsedMs);
+if (process.env.TEST_OBSERVATION_ID_FAILURE)
+  mock.method(crypto, 'randomUUID', () => {
+    throw new Error('synthetic-observation-creation');
+  });
+if (process.env.TEST_OBSERVATION_SERIALIZATION_FAILURE) {
+  const stringify = JSON.stringify;
+  let failed = false;
+  JSON.stringify = (value, ...args) => {
+    if (!failed && value?.runId && Array.isArray(value.operations)) {
+      failed = true;
+      throw new Error('synthetic-observation-serialization');
+    }
+    return stringify(value, ...args);
+  };
+}
+const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+let matchingTimeouts = 0;
+if (process.env.TEST_TIMEOUT_MATCH)
+  mock.method(AbortSignal, 'timeout', (ms) => {
+    if (ms === Number(process.env.TEST_TIMEOUT_MATCH)) matchingTimeouts++;
+    return originalTimeout(
+      ms === Number(process.env.TEST_TIMEOUT_MATCH) &&
+        (!process.env.TEST_TIMEOUT_OCCURRENCE ||
+          matchingTimeouts === Number(process.env.TEST_TIMEOUT_OCCURRENCE))
+        ? 5
+        : ms,
+    );
+  });
 
 const fixture = (name) =>
   readFileSync(new URL(`./fixtures/market-calendar/${name}.html.txt`, import.meta.url), 'utf8');
@@ -123,7 +151,82 @@ globalThis.fetch = async (url, options) => {
         ? [{ type: 'error', code: 'private_error', message: 'synthetic-subscription' }]
         : []),
     ];
-    return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    if (scenario === 'model-duplicate-completion') events.push(events.at(-1));
+    if (
+      ['model-header-stall', 'model-body-error', 'model-incomplete-then-cancel'].includes(scenario)
+    ) {
+      if (scenario === 'model-incomplete-then-cancel') events.at(-1).type = 'response.incomplete';
+      let sent = false;
+      let keepAlive;
+      return new Response(
+        new ReadableStream(
+          {
+            start(controller) {
+              if (scenario !== 'model-body-error')
+                keepAlive = setTimeout(
+                  () => controller.error(new Error('synthetic-stall-not-cancelled')),
+                  2000,
+                );
+              options.signal.addEventListener(
+                'abort',
+                () => {
+                  clearTimeout(keepAlive);
+                  controller.error(options.signal.reason);
+                },
+                { once: true },
+              );
+            },
+            pull(controller) {
+              if (scenario === 'model-header-stall') return;
+              if (!sent) {
+                sent = true;
+                elapsedMs += 10;
+                controller.enqueue(
+                  new TextEncoder().encode(
+                    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+                  ),
+                );
+              } else if (scenario === 'model-body-error')
+                controller.error(new Error('synthetic-private-transport'));
+            },
+            cancel() {
+              clearTimeout(keepAlive);
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    }
+    if (process.env.TEST_EVENT_PADDING_BYTES)
+      events[0].private = 'synthetic-private-event'.repeat(
+        Math.ceil(Number(process.env.TEST_EVENT_PADDING_BYTES) / 23),
+      );
+    const encoded = new TextEncoder().encode(
+      events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+    );
+    let offset = 0;
+    const body = process.env.TEST_SSE_CHUNK_BYTES
+      ? new ReadableStream(
+          {
+            pull(controller) {
+              if (offset >= encoded.length) {
+                controller.close();
+                return;
+              }
+              const next = Math.min(
+                encoded.length,
+                offset + Number(process.env.TEST_SSE_CHUNK_BYTES),
+              );
+              elapsedMs += 10;
+              controller.enqueue(encoded.slice(offset, next));
+              offset = next;
+            },
+          },
+          { highWaterMark: 0 },
+        )
+      : encoded;
+    return new Response(body, {
       headers: { 'content-type': 'text/event-stream' },
     });
   }
@@ -137,7 +240,27 @@ globalThis.fetch = async (url, options) => {
     });
   }
   if (scenario === 'transport-failure') throw new Error('PRIVATE-TRANSPORT-CONTENT');
-  if (scenario === 'http-failure') return new Response('PRIVATE-HTTP-CONTENT', { status: 503 });
+  if (scenario === 'official-body-limit') {
+    let sent = false;
+    return new Response(
+      new ReadableStream(
+        {
+          pull(controller) {
+            if (!sent) {
+              sent = true;
+              controller.enqueue(new Uint8Array(2_000_001));
+            }
+          },
+          cancel() {
+            appendFileSync(process.env.TEST_STREAM_TRACE, 'cancel\n');
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+    );
+  }
+  if (['http-failure', 'calendar-http-failure'].includes(scenario))
+    return new Response('PRIVATE-HTTP-CONTENT', { status: 503 });
   if (scenario === 'oversize') return new Response('x'.repeat(2_000_001));
   if (address.pathname === '/TraderNews.aspx' && address.searchParams.get('id') === 'ETA2026-1')
     return new Response(

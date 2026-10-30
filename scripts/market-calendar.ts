@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { assessCalendarNotices, type CalendarNotice } from './calendar-notice-assessment.ts';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
+import { ExecutionObservation, type ObservedOperation } from './execution-observation.ts';
 
 type Session = { date: string; open: string; close: string };
 type Calendar = {
@@ -38,7 +39,11 @@ export async function marketCalendar({
 }) {
   const sources: { url: string; receivedAt: string; sha256: string; bytes: number }[] = [];
   const startedAt = performance.now();
-  context = { ...context, signal: requestSignal(context, 300_000) };
+  const observation = context.observation ?? context.runtime?.observation;
+  const operation = observation?.start('calendar', context.parentId);
+  context = { ...context, observation, parentId: operation?.id };
+  let collection: ObservedOperation | undefined;
+  let validation: ObservedOperation | undefined;
   let totalBytes = 0;
   let activeSource: string | undefined;
   let activeNotice: string | undefined;
@@ -75,53 +80,88 @@ export async function marketCalendar({
     return value as Record<string, unknown>;
   }
   async function collectBytes(url: string) {
-    activeSource = url;
-    context.runtime?.check();
-    if (sources.length >= 100 || performance.now() - startedAt >= 120_000) fail('COLLECTION_LIMIT');
-    const signal = requestSignal(
-      context,
-      Math.min(15_000, startedAt + 120_000 - performance.now()),
-    );
-    context.runtime?.take('official');
-    const response = await fetch(url, {
-      redirect: 'error',
-      headers: { 'User-Agent': 'StockScout/0.1 (+https://github.com/mochafreddo/stock-scout)' },
-      signal,
-    });
-    if (response.status !== 200 || !response.body) fail('SOURCE_HTTP_FAILURE');
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let bytes = 0;
+    let request: ObservedOperation | undefined;
+    let signal: AbortSignal | undefined;
     try {
-      while (true) {
-        const part = await reader.read();
-        context.runtime?.check();
-        context.signal?.throwIfAborted();
-        if (part.done) break;
-        bytes += part.value.byteLength;
-        totalBytes += part.value.byteLength;
-        if (
-          bytes > 2_000_000 ||
-          totalBytes > 16_000_000 ||
-          performance.now() - startedAt >= 120_000
-        )
-          fail('COLLECTION_LIMIT');
-        chunks.push(part.value);
+      activeSource = url;
+      context.runtime?.check();
+      if (sources.length >= 100 || performance.now() - startedAt >= 120_000)
+        fail('COLLECTION_LIMIT');
+      signal = requestSignal(
+        context,
+        Math.min(15_000, startedAt + 120_000 - performance.now()),
+        undefined,
+        startedAt + 120_000 - performance.now() <= 15_000 ? 'stage_limit' : 'request_limit',
+      );
+      context.runtime?.take('official');
+      request = observation?.start('calendar.official.http', collection?.id, 'request');
+      const response = await fetch(url, {
+        redirect: 'error',
+        headers: { 'User-Agent': 'StockScout/0.1 (+https://github.com/mochafreddo/stock-scout)' },
+        signal,
+      });
+      observation?.headers(request, response.status);
+      if (response.status !== 200 || !response.body) fail('SOURCE_HTTP_FAILURE');
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let bytes = 0;
+      try {
+        while (true) {
+          const part = await reader.read().catch((error) => {
+            observation?.streamEnd(request, 'read_error', signal);
+            throw error;
+          });
+          context.runtime?.check();
+          context.signal?.throwIfAborted();
+          if (part.done) {
+            observation?.streamEnd(request, 'eof', signal);
+            break;
+          }
+          observation?.event(request);
+          observation?.bytes(request, part.value.byteLength);
+          bytes += part.value.byteLength;
+          totalBytes += part.value.byteLength;
+          if (
+            bytes > 2_000_000 ||
+            totalBytes > 16_000_000 ||
+            performance.now() - startedAt >= 120_000
+          )
+            fail('COLLECTION_LIMIT');
+          chunks.push(part.value);
+        }
+      } finally {
+        if (request?.streamEnd === null) observation?.streamEnd(request, 'cancelled', signal);
+        await reader.cancel();
       }
-    } finally {
-      await reader.cancel();
+      const buffer = Buffer.concat(chunks);
+      sources.push({
+        url,
+        receivedAt: new Date(Date.now()).toISOString(),
+        sha256: createHash('sha256').update(buffer).digest('hex'),
+        bytes,
+      });
+      observation?.end(request);
+      return buffer;
+    } catch (error) {
+      if (request?.httpStatus === 200 && request.streamEnd === null)
+        observation?.streamEnd(request, 'read_error', signal);
+      observation?.fail(request, error);
+      throw error;
     }
-    const buffer = Buffer.concat(chunks);
-    sources.push({
-      url,
-      receivedAt: new Date(Date.now()).toISOString(),
-      sha256: createHash('sha256').update(buffer).digest('hex'),
-      bytes,
-    });
-    return buffer;
   }
   async function collect(url: string) {
     return new TextDecoder('utf-8', { fatal: true }).decode(await collectBytes(url));
+  }
+  function parse<T>(action: () => T): T {
+    const parsing = observation?.start('calendar.parse', collection?.id);
+    try {
+      const result = action();
+      observation?.end(parsing);
+      return result;
+    } catch (error) {
+      observation?.fail(parsing, error);
+      throw error;
+    }
   }
   function nasdaqHours(source: Buffer) {
     const result = spawnSync('pdftotext', ['-', '-'], {
@@ -336,23 +376,30 @@ export async function marketCalendar({
       activeNotice = String(notice.id);
       const entries: CalendarNotice['entries'] = [];
       for (const rawEntry of [notice, ...notice.childNotifications]) {
-        const entry = object(rawEntry);
-        dates.push(published(entry.publishedDate));
-        if (
-          typeof entry.subject !== 'string' ||
-          typeof entry.body !== 'string' ||
-          !entry.subject.trim() ||
-          !entry.body.trim()
-        )
-          fail('SOURCE_SHAPE');
-        const body = text(entry.body);
-        if (!body) fail('SOURCE_SHAPE');
-        entries.push({
-          id: `nyse:${channel}:${notice.id}:${entries.length}`,
-          publishedAt: published(entry.publishedDate),
-          subject: entry.subject,
-          body,
-        });
+        const entryOperation = observation?.start('calendar.parse', collection?.id);
+        try {
+          const entry = object(rawEntry);
+          dates.push(published(entry.publishedDate));
+          if (
+            typeof entry.subject !== 'string' ||
+            typeof entry.body !== 'string' ||
+            !entry.subject.trim() ||
+            !entry.body.trim()
+          )
+            fail('SOURCE_SHAPE');
+          const body = text(entry.body);
+          if (!body) fail('SOURCE_SHAPE');
+          entries.push({
+            id: `nyse:${channel}:${notice.id}:${entries.length}`,
+            publishedAt: published(entry.publishedDate),
+            subject: entry.subject,
+            body,
+          });
+          observation?.end(entryOperation);
+        } catch (error) {
+          observation?.fail(entryOperation, error);
+          throw error;
+        }
       }
       childCount += notice.childNotifications.length;
       const markets = (notice.marketLinks as string[]).map((market) => market.trim());
@@ -392,76 +439,83 @@ export async function marketCalendar({
     });
   }
   async function nasdaqNotices(source: string) {
-    if (
-      xml(source, 'count(/rss/channel)') !== '1' ||
-      !xml(source, 'normalize-space(/rss/channel/title)')
-    )
-      fail('SOURCE_SHAPE');
-    const count = Number(xml(source, 'count(/rss/channel/item)'));
-    if (!Number.isInteger(count) || count < 0 || count > 90) fail('COLLECTION_LIMIT');
-    const declared = xml(source, 'normalize-space(/rss/channel/*[local-name()="numItems"])');
-    if (declared && Number(declared) !== count) fail('SOURCE_SHAPE');
-    const dates: string[] = [];
-    const items = count ? xml(source, '/rss/channel/item') : '';
-    const parsed = [...items.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)];
-    if (parsed.length !== count) fail('SOURCE_SHAPE');
-    for (const item of parsed) {
-      const field = (name: string) => {
-        const matches = [
-          ...item[1].matchAll(
-            new RegExp(
-              `<(?:(?:[\\w-]+):)?${name}\\b[^>]*>([\\s\\S]*?)<\\/(?:(?:[\\w-]+):)?${name}>`,
-              'g',
+    const parsing = observation?.start('calendar.parse', collection?.id);
+    try {
+      if (
+        xml(source, 'count(/rss/channel)') !== '1' ||
+        !xml(source, 'normalize-space(/rss/channel/title)')
+      )
+        fail('SOURCE_SHAPE');
+      const count = Number(xml(source, 'count(/rss/channel/item)'));
+      if (!Number.isInteger(count) || count < 0 || count > 90) fail('COLLECTION_LIMIT');
+      const declared = xml(source, 'normalize-space(/rss/channel/*[local-name()="numItems"])');
+      if (declared && Number(declared) !== count) fail('SOURCE_SHAPE');
+      const dates: string[] = [];
+      const items = count ? xml(source, '/rss/channel/item') : '';
+      const parsed = [...items.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)];
+      if (parsed.length !== count) fail('SOURCE_SHAPE');
+      for (const item of parsed) {
+        const field = (name: string) => {
+          const matches = [
+            ...item[1].matchAll(
+              new RegExp(
+                `<(?:(?:[\\w-]+):)?${name}\\b[^>]*>([\\s\\S]*?)<\\/(?:(?:[\\w-]+):)?${name}>`,
+                'g',
+              ),
             ),
-          ),
-        ];
-        if (matches.length !== 1) fail('SOURCE_SHAPE');
-        return text(matches[0][1]);
-      };
-      const link = field('link').replace(/^http:/, 'https:');
-      if (!/^https:\/\/www\.nasdaqtrader\.com\/TraderNews\.aspx\?id=ET[AU]\d{4}-\d+$/.test(link))
-        fail('SOURCE_SHAPE');
-      activeNotice = link.split('=')[1];
-      dates.push(published(Date.parse(field('pubDate'))));
-      const article = await collect(link);
-      const root =
-        '//div[@id="MainContainer"]//div[contains(concat(" ",normalize-space(@class)," ")," genTableNews ")]';
-      if (xml(article, `count(${root})`, true) !== '1') fail('SOURCE_SHAPE');
-      const contents = `${root}/table//td[not(ancestor::td)]`;
-      const contentCount = Number(xml(article, `count(${contents})`, true));
-      if (!Number.isInteger(contentCount) || contentCount < 1 || contentCount > 3)
-        fail('SOURCE_SHAPE');
-      for (let index = 2; index <= contentCount; index++)
-        if (xml(article, `normalize-space((${contents})[${index}])`, true).trim())
+          ];
+          if (matches.length !== 1) fail('SOURCE_SHAPE');
+          return text(matches[0][1]);
+        };
+        const link = field('link').replace(/^http:/, 'https:');
+        if (!/^https:\/\/www\.nasdaqtrader\.com\/TraderNews\.aspx\?id=ET[AU]\d{4}-\d+$/.test(link))
           fail('SOURCE_SHAPE');
-      const body = xml(article, `normalize-space((${contents})[1])`, true);
-      if (!body) fail('SOURCE_SHAPE');
-      notices.push({
-        id: `nasdaq:${activeNotice}`,
-        url: link,
-        exchanges: ['NAS'],
-        entries: [
-          {
-            id: `nasdaq:${activeNotice}:0`,
-            publishedAt: published(Date.parse(field('pubDate'))),
-            subject: field('title'),
-            body,
-          },
-        ],
+        activeNotice = link.split('=')[1];
+        dates.push(published(Date.parse(field('pubDate'))));
+        const article = await collect(link);
+        const root =
+          '//div[@id="MainContainer"]//div[contains(concat(" ",normalize-space(@class)," ")," genTableNews ")]';
+        if (xml(article, `count(${root})`, true) !== '1') fail('SOURCE_SHAPE');
+        const contents = `${root}/table//td[not(ancestor::td)]`;
+        const contentCount = Number(xml(article, `count(${contents})`, true));
+        if (!Number.isInteger(contentCount) || contentCount < 1 || contentCount > 3)
+          fail('SOURCE_SHAPE');
+        for (let index = 2; index <= contentCount; index++)
+          if (xml(article, `normalize-space((${contents})[${index}])`, true).trim())
+            fail('SOURCE_SHAPE');
+        const body = xml(article, `normalize-space((${contents})[1])`, true);
+        if (!body) fail('SOURCE_SHAPE');
+        notices.push({
+          id: `nasdaq:${activeNotice}`,
+          url: link,
+          exchanges: ['NAS'],
+          entries: [
+            {
+              id: `nasdaq:${activeNotice}:0`,
+              publishedAt: published(Date.parse(field('pubDate'))),
+              subject: field('title'),
+              body,
+            },
+          ],
+        });
+      }
+      activeNotice = undefined;
+      noticeCollections.push({
+        channel: 'Nasdaq Equity RSS',
+        url: rssUrl,
+        query: Object.fromEntries(new URL(rssUrl).searchParams),
+        parentCount: count,
+        childCount: 0,
+        linkedBodyCount: count,
+        totalAvailable: null,
+        observedPublishedRange: observedRange(dates),
+        continuousCoverage: 'unverified',
       });
+      observation?.end(parsing);
+    } catch (error) {
+      observation?.fail(parsing, error);
+      throw error;
     }
-    activeNotice = undefined;
-    noticeCollections.push({
-      channel: 'Nasdaq Equity RSS',
-      url: rssUrl,
-      query: Object.fromEntries(new URL(rssUrl).searchParams),
-      parentCount: count,
-      childCount: 0,
-      linkedBodyCount: count,
-      totalAvailable: null,
-      observedPublishedRange: observedRange(dates),
-      continuousCoverage: 'unverified',
-    });
   }
   function applyNotices(
     calendars: Record<Exchange, Calendar>,
@@ -636,17 +690,21 @@ export async function marketCalendar({
     return schedule;
   }
   try {
-    const nyse = nyseCalendar(await collect(nyseUrl));
-    const nasdaq = nasdaqCalendar(
-      await collect(nasdaqUrl),
-      nasdaqHours(await collectBytes(nasdaqHoursUrl)),
-    );
+    context = { ...context, signal: requestSignal(context, 300_000, undefined, 'stage_limit') };
+    collection = observation?.start('calendar.collection', operation?.id);
+    const nyseSource = await collect(nyseUrl);
+    const nyse = parse(() => nyseCalendar(nyseSource));
+    const nasdaqSource = await collect(nasdaqUrl);
+    const hoursSource = await collectBytes(nasdaqHoursUrl);
+    const nasdaq = parse(() => nasdaqCalendar(nasdaqSource, nasdaqHours(hoursSource)));
     for (const channel of [2, 1]) {
       const url = `https://www.nyse.com/api/notifications/public/system/${channel}/summaries/filter?pageSize=100&pageNumber=0&sortKey=publishedDate&sortOrder=desc`;
-      nyseNotices(await collect(url), channel, url);
+      const source = await collect(url);
+      parse(() => nyseNotices(source, channel, url));
     }
     const rss = await collect(rssUrl);
     await nasdaqNotices(rss);
+    observation?.end(collection);
     const calendars = {
       NAS: nasdaq,
       NYS: nyse,
@@ -666,6 +724,7 @@ export async function marketCalendar({
       300_000 - (performance.now() - startedAt),
       context,
     );
+    validation = observation?.start('calendar.validation', operation?.id);
     if (assessment.assessments.length !== notices.length) fail('MODEL_OUTPUT');
     applyNotices(calendars, assessment.assessments);
     checkAgreement(calendars);
@@ -691,6 +750,8 @@ export async function marketCalendar({
       historicalAt = Date.parse(previous.open) - 1;
     }
     context.runtime?.check();
+    observation?.end(validation);
+    observation?.end(operation);
     return {
       result: {
         evaluatedAt: new Date(at).toISOString(),
@@ -716,12 +777,17 @@ export async function marketCalendar({
       safe: assessment.safe,
     };
   } catch (error) {
+    if (validation?.status === 'in_progress') observation?.fail(validation, error);
+    if (collection?.status === 'in_progress') observation?.fail(collection, error);
+    observation?.fail(operation, error);
     if (error instanceof Error)
       Object.assign(error, { source: activeSource, notice: activeNotice });
     throw error;
   }
 }
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const observation = new ExecutionObservation();
+  let output: ObservedOperation | undefined;
   try {
     const rawArgs = process.argv.slice(2);
     const options = new Map<string, string>();
@@ -756,9 +822,17 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     )
       fail('USAGE');
     const fixed = args.length ? Date.parse(args[1]) : undefined;
-    const calendar = await marketCalendar({ directory, model: model as string, at: fixed });
+    const calendar = await marketCalendar({
+      directory,
+      model: model as string,
+      at: fixed,
+      context: { observation },
+    });
+    output = observation.start('output');
     console.log(calendar.safe(calendar.result));
+    observation.end(output);
   } catch (error) {
+    if (output?.status === 'in_progress') observation.fail(output, error);
     const safe = [
       'USAGE',
       'SOURCE_SHAPE',
@@ -780,12 +854,15 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
       'SENSITIVE_OUTPUT',
       'EXECUTION_LIMIT',
     ];
+    const code =
+      error instanceof Error && safe.includes(error.message) ? error.message : 'REQUEST_FAILED';
+    observation.finish(code, error);
     console.error(
       JSON.stringify({
-        error:
-          error instanceof Error && safe.includes(error.message) ? error.message : 'REQUEST_FAILED',
+        error: code,
         ...(error instanceof Error && 'source' in error ? { source: error.source } : {}),
         ...(error instanceof Error && 'notice' in error ? { notice: error.notice } : {}),
+        observation: observation.snapshot(),
       }),
     );
     process.exitCode = 1;

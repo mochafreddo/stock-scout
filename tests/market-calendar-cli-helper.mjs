@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +36,8 @@ export function runCalendar(args = [], env = {}, includeRequiredArgs = true) {
   );
   const trace = join(directory, 'trace');
   writeFileSync(trace, '', { mode: 0o600 });
+  const streamTrace = join(directory, 'stream-trace');
+  writeFileSync(streamTrace, '', { mode: 0o600 });
   try {
     const result = spawnSync(
       process.execPath,
@@ -43,12 +53,23 @@ export function runCalendar(args = [], env = {}, includeRequiredArgs = true) {
       {
         encoding: 'utf8',
         timeout: 10000,
-        env: { PATH: process.env.PATH, HOME: directory, TEST_TRACE: trace, ...env },
+        env: {
+          PATH: process.env.PATH,
+          HOME: directory,
+          TEST_TRACE: trace,
+          TEST_STREAM_TRACE: streamTrace,
+          ...env,
+        },
       },
     );
     return {
       ...result,
       requests: readFileSync(trace, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse),
+      auth: {
+        locked: existsSync(join(auth, '.login.lock')),
+        expiresAt: JSON.parse(readFileSync(join(auth, 'credentials.json'), 'utf8')).expiresAt,
+      },
+      streamEvents: readFileSync(streamTrace, 'utf8').trim().split('\n').filter(Boolean),
     };
   } finally {
     rmSync(directory, { recursive: true, force: true });
