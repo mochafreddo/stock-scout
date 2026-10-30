@@ -38,6 +38,15 @@ type OperationName =
   | 'review.model.http'
   | 'kis'
   | 'kis.auth'
+  | 'kis.auth.lock'
+  | 'kis.auth.load'
+  | 'kis.auth.reuse'
+  | 'kis.auth.invalidate'
+  | 'kis.auth.issuance'
+  | 'kis.auth.issuance.http'
+  | 'kis.auth.validation'
+  | 'kis.auth.store'
+  | 'kis.auth.unlock'
   | 'kis.http'
   | 'kis.validation';
 type OperationRecord = {
@@ -102,6 +111,10 @@ const codes = new Set([
   'KIS_FAILURE',
   'RESPONSE_SHAPE',
   'CREDENTIALS_MISSING',
+  'AUTH_COOLDOWN',
+  'AUTH_LOCKED',
+  'AUTH_RECORD',
+  'AUTH_STORAGE',
   'siwc_refresh_cancelled',
   'siwc_invalid_credentials',
   'siwc_relogin_required',
