@@ -36,6 +36,7 @@ if (process.env.TEST_TIMEOUT_MATCH)
 const fixture = (name) =>
   readFileSync(new URL(`./fixtures/market-calendar/${name}.html.txt`, import.meta.url), 'utf8');
 const scenario = process.env.SCENARIO || 'ok';
+let officialRequests = 0;
 const closureDate = process.env.CLOSURE_DATE || 'Monday, October 26, 2026';
 function hoursPdf() {
   const stream = `BT /F1 12 Tf 40 750 Td (Nasdaq Trading Hours of Operation) Tj 0 -20 Td (Market Open: ${scenario === 'guide-hours-mismatch' ? '10:00' : '9:30'} a.m., ET) Tj 0 -20 Td (Market Close: 4:00 p.m., ET) Tj 0 -20 Td (System Hours: 4:00 a.m. to 8:00 p.m., ET) Tj ET`;
@@ -240,6 +241,22 @@ globalThis.fetch = async (url, options) => {
     });
   }
   if (scenario === 'transport-failure') throw new Error('PRIVATE-TRANSPORT-CONTENT');
+  officialRequests++;
+  if (scenario === 'official-preheader-stall') {
+    if (process.env.TEST_OFFICIAL_STAGE_LIMIT && officialRequests === 1) elapsedMs = 110_000;
+    else
+      return new Promise((_resolve, reject) => {
+        const keepAlive = setTimeout(() => reject(new Error('synthetic-unexpected-wait')), 2000);
+        options.signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(keepAlive);
+            reject(options.signal.reason);
+          },
+          { once: true },
+        );
+      });
+  }
   if (scenario === 'official-body-limit') {
     let sent = false;
     return new Response(

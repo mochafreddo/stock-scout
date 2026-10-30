@@ -13,6 +13,10 @@ type OperationName =
   | 'calendar.model.http'
   | 'calendar.validation'
   | 'output'
+  | 'ranking'
+  | 'ranking.validation'
+  | 'daily'
+  | 'daily.validation'
   | 'auth'
   | 'auth.lock'
   | 'auth.load'
@@ -156,7 +160,7 @@ export class ExecutionObservation {
   private operations: OperationRecord[] = [];
   private sequence = 0;
   private origin: number | null = null;
-  private errors = new WeakMap<object, string>();
+  private errors = new WeakMap<object, { operationId: string | null; code: string }>();
   private firstFailure: OperationRecord | null = null;
   private finalError: { code: string; operationId: string | null } | null = null;
   private omittedOperations = 0;
@@ -237,24 +241,28 @@ export class ExecutionObservation {
       if (!operation.failure) operation.status = 'completed';
     });
   }
-  fail(
-    token: ObservedOperation | undefined,
-    error: unknown,
-    code = observationCode(error),
-    ended = true,
-  ) {
+  fail(token: ObservedOperation | undefined, error: unknown, code?: string, ended = true) {
     this.attempt(() => {
       const operation = token as OperationRecord | undefined;
-      if (!operation) return;
+      const previous = error && typeof error === 'object' ? this.errors.get(error) : undefined;
+      const failureCode = previous?.code ?? code ?? observationCode(error);
+      if (!operation) {
+        if (error && typeof error === 'object' && !previous)
+          this.errors.set(error, {
+            operationId: null,
+            code: codes.has(failureCode) ? failureCode : 'unknown',
+          });
+        return;
+      }
       operation.status = 'failed';
       operation.failure ??= {
-        code: codes.has(code) ? code : 'unknown',
+        code: codes.has(failureCode) ? failureCode : 'unknown',
         recovered: false,
         propagated: false,
       };
       if (!this.firstFailure) this.firstFailure = operation;
-      if (error && typeof error === 'object' && !this.errors.has(error))
-        this.errors.set(error, operation.id);
+      if (error && typeof error === 'object' && !previous?.operationId)
+        this.errors.set(error, { operationId: operation.id, code: operation.failure.code });
       if (!this.operations.includes(operation)) {
         let replace = this.operations.findIndex(
           (row) => !row.failure && row.id !== this.finalError?.operationId,
@@ -277,8 +285,8 @@ export class ExecutionObservation {
   propagate(error: unknown, cause: unknown) {
     this.attempt(() => {
       if (!error || typeof error !== 'object' || !cause || typeof cause !== 'object') return;
-      const id = this.errors.get(cause);
-      if (id) this.errors.set(error, id);
+      const failure = this.errors.get(cause);
+      if (failure) this.errors.set(error, failure);
     });
   }
   headers(token: ObservedOperation | undefined, status: number) {
@@ -324,7 +332,7 @@ export class ExecutionObservation {
   finish(code: string, error?: unknown) {
     this.attempt(() => {
       const operationId =
-        error && typeof error === 'object' ? (this.errors.get(error) ?? null) : null;
+        error && typeof error === 'object' ? (this.errors.get(error)?.operationId ?? null) : null;
       this.finalError = { code: codes.has(code) ? code : 'unknown', operationId };
       let operation = this.operations.find((row) => row.id === operationId);
       while (operation) {
@@ -391,6 +399,21 @@ export class ExecutionObservation {
   }
 }
 
+export async function observeFetch(
+  input: string | URL | Request,
+  init: RequestInit,
+  observation?: ExecutionObservation,
+  operation?: ObservedOperation,
+) {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    observation?.streamEnd(operation, 'read_error', init.signal);
+    observation?.fail(operation, error, 'unknown');
+    throw error;
+  }
+}
+
 export function observeResponse(
   response: Response,
   observation?: ExecutionObservation,
@@ -399,7 +422,7 @@ export function observeResponse(
   modelEvents = false,
 ) {
   observation?.headers(operation, response.status);
-  if (!observation || !operation || !response.body) return response;
+  if (!observation || !response.body) return response;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let line = '';
@@ -473,7 +496,7 @@ export function observeResponse(
           }
         } catch (error) {
           observation.streamEnd(operation, 'read_error', signal);
-          observation.fail(operation, error);
+          observation.fail(operation, error, 'unknown');
           reader.releaseLock();
           controller.error(error);
         }

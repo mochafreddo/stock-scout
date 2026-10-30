@@ -88,6 +88,13 @@ function check(f, mode = 'ok', extraEnv = {}) {
 
 function authenticationFailure(stderr) {
   const output = JSON.parse(stderr);
+  assert.ok(output.observation);
+  assert.equal(output.observation.finalError.code, output.error);
+  assert.doesNotMatch(
+    JSON.stringify(output.observation),
+    /synthetic-|RAW_PRIVATE|credentials\.json|oaiapp_/,
+  );
+  delete output.observation;
   const { elapsedMs, typeAssessment, ...diagnostic } = output.diagnostic;
   assert.ok(Number.isFinite(elapsedMs) && elapsedMs >= 0);
   assert.deepEqual(typeAssessment, {

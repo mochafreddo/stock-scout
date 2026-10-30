@@ -1,7 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, jsonSchema, Output, streamText, wrapLanguageModel } from 'ai';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
-import { type ObservedOperation, observeResponse } from './execution-observation.ts';
+import { type ObservedOperation, observeFetch, observeResponse } from './execution-observation.ts';
 import { readSiwcCredentials } from './siwc-auth.ts';
 
 export type CalendarNotice = {
@@ -309,7 +309,7 @@ export async function assessCalendarNotices(
         modelSignal = signal;
         request = observation?.start('calendar.model.http', operation?.id, 'request');
         try {
-          const response = await fetch(url, { ...init, signal });
+          const response = await observeFetch(url, { ...init, signal }, observation, request);
           return observeResponse(
             response,
             observation,

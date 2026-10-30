@@ -11,7 +11,12 @@ import {
 } from 'ai';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { DiagnosticError } from './diagnostic-error.ts';
-import { type ObservedOperation, observeResponse, tagSignal } from './execution-observation.ts';
+import {
+  type ObservedOperation,
+  observeFetch,
+  observeResponse,
+  tagSignal,
+} from './execution-observation.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 
@@ -352,7 +357,7 @@ export async function assessSecurityTypes({
       requestOperations.set(record, request);
       try {
         const response = observeResponse(
-          await fetch(url, { ...init, signal }),
+          await observeFetch(url, { ...init, signal }, observation, request),
           observation,
           request,
           signal,

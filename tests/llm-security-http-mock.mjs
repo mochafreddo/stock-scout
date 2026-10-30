@@ -286,6 +286,14 @@ globalThis.fetch = async (url, init = {}) => {
           providerCode: 'EGW00123',
           location: 'private-field.private-value',
         });
+      if (scenario === 'ranking-reader-exception')
+        return new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new Error(process.env.TEST_RANKING_EXCEPTION));
+            },
+          }),
+        );
     }
     const body = { rt_cd: '0', msg_cd: 'MCA00000', output1: { nrec: '0' }, output2: [] };
     if (request.pathname.endsWith('search-info')) {

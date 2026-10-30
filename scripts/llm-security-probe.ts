@@ -127,69 +127,80 @@ try {
     stage = 'ranking';
     for (const exchange of exchanges)
       for (const kind of ['volume', 'amount'] as const) {
-        let record: Awaited<ReturnType<typeof queryKis>>;
+        const ranking = observation.start('ranking');
+        let validation: ObservedOperation | undefined;
         try {
-          record = await queryKis(kind, exchange, '', context);
-        } catch (error) {
-          const mapped =
-            error instanceof AuthError
-              ? new DiagnosticError('AUTH_FAILED', 'RANKING_FAILED')
-              : new Error('RANKING_FAILED');
-          observation.propagate(mapped, error);
-          throw mapped;
-        }
-        const ranks = new Set<number>();
-        for (const row of record.rows) {
-          const rank = Number(row.rank);
-          if (
-            !Number.isSafeInteger(rank) ||
-            rank < 1 ||
-            ranks.has(rank) ||
-            typeof row.symb !== 'string' ||
-            !/^[A-Z0-9./^-]{1,20}$/.test(row.symb) ||
-            (row.excd && row.excd !== exchange) ||
-            typeof row.rsym !== 'string' ||
-            !row.rsym
-          )
-            throw new Error('RANKING_FAILED');
-          ranks.add(rank);
-          if (rank > Number(top)) continue;
-          const key = keyOf(exchange, row.symb);
-          const existing = securities.get(key);
-          if (
-            (existing && existing.rsym !== row.rsym) ||
-            (identities.has(row.rsym) && identities.get(row.rsym) !== key)
-          )
-            throw new DiagnosticError('IDENTITY_AMBIGUOUS');
-          identities.set(row.rsym, key);
-          const security: Security = existing ?? {
+          let record: Awaited<ReturnType<typeof queryKis>>;
+          try {
+            record = await queryKis(kind, exchange, '', { ...context, parentId: ranking?.id });
+          } catch (error) {
+            const mapped =
+              error instanceof AuthError
+                ? new DiagnosticError('AUTH_FAILED', 'RANKING_FAILED')
+                : new Error('RANKING_FAILED');
+            observation.propagate(mapped, error);
+            throw mapped;
+          }
+          validation = observation.start('ranking.validation', ranking?.id);
+          const ranks = new Set<number>();
+          for (const row of record.rows) {
+            const rank = Number(row.rank);
+            if (
+              !Number.isSafeInteger(rank) ||
+              rank < 1 ||
+              ranks.has(rank) ||
+              typeof row.symb !== 'string' ||
+              !/^[A-Z0-9./^-]{1,20}$/.test(row.symb) ||
+              (row.excd && row.excd !== exchange) ||
+              typeof row.rsym !== 'string' ||
+              !row.rsym
+            )
+              throw new Error('RANKING_FAILED');
+            ranks.add(rank);
+            if (rank > Number(top)) continue;
+            const key = keyOf(exchange, row.symb);
+            const existing = securities.get(key);
+            if (
+              (existing && existing.rsym !== row.rsym) ||
+              (identities.has(row.rsym) && identities.get(row.rsym) !== key)
+            )
+              throw new DiagnosticError('IDENTITY_AMBIGUOUS');
+            identities.set(row.rsym, key);
+            const security: Security = existing ?? {
+              exchange,
+              symbol: row.symb,
+              rsym: row.rsym,
+              rankings: [],
+            };
+            security.rankings?.push({
+              kind,
+              rank,
+              requestedAt: record.requestedAt,
+              source: record.source,
+            });
+            securities.set(key, security);
+          }
+          const selected = [...ranks].filter((rank) => rank <= Number(top));
+          if (selected.length < Number(top) && ['F', 'M'].includes(record.continuation))
+            throw new DiagnosticError('RANKING_INCOMPLETE');
+          inputSnapshot.securities = structuredClone([...securities.values()]);
+          observations.push({
             exchange,
-            symbol: row.symb,
-            rsym: row.rsym,
-            rankings: [],
-          };
-          security.rankings?.push({
             kind,
-            rank,
             requestedAt: record.requestedAt,
+            receivedAt: record.receivedAt,
+            continuation: record.continuation,
+            rowCount: record.rowCount,
+            request: record.request,
             source: record.source,
           });
-          securities.set(key, security);
+          observation.end(validation);
+          observation.end(ranking);
+        } catch (error) {
+          if (validation?.status === 'in_progress') observation.fail(validation, error);
+          observation.fail(ranking, error);
+          throw error;
         }
-        const selected = [...ranks].filter((rank) => rank <= Number(top));
-        if (selected.length < Number(top) && ['F', 'M'].includes(record.continuation))
-          throw new DiagnosticError('RANKING_INCOMPLETE');
-        inputSnapshot.securities = structuredClone([...securities.values()]);
-        observations.push({
-          exchange,
-          kind,
-          requestedAt: record.requestedAt,
-          receivedAt: record.receivedAt,
-          continuation: record.continuation,
-          rowCount: record.rowCount,
-          request: record.request,
-          source: record.source,
-        });
       }
   }
   if (!securities.size) throw new Error('ANALYSIS_INSUFFICIENT');

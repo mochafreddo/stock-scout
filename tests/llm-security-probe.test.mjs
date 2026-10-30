@@ -1442,25 +1442,37 @@ test('CLI preserves ranking failures and confirmed authentication causes without
 });
 
 test('CLI keeps unexpected ranking HTTP exceptions unknown without trusting messages or fields', (t) => {
-  for (const message of [
-    'AUTH_FAILED',
-    'siwc_relogin_required',
-    'private-sentinel /private/path synthetic-subscription',
-  ]) {
-    const result = run(t, 'ranking-exception', { TEST_RANKING_EXCEPTION: message });
-    assert.equal(result.status, 1, result.stderr);
-    assert.equal(result.stdout, '');
-    assert.deepEqual(legacyFailure(result.stderr), {
-      error: 'RANKING_FAILED',
-      diagnostic: { stage: 'ranking', reason: 'unknown', location: null },
-    });
-    assert.equal(result.requests.length, 1);
-    assert.equal(
-      new URL(result.requests[0].url).pathname,
-      '/uapi/overseas-stock/v1/ranking/trade-vol',
-    );
-    assert.doesNotMatch(result.stderr, /private-|synthetic-|EGW00123|siwc_relogin_required/);
-  }
+  for (const scenario of ['ranking-exception', 'ranking-reader-exception'])
+    for (const message of [
+      'AUTH_FAILED',
+      'siwc_relogin_required',
+      'private-sentinel /private/path synthetic-subscription',
+    ]) {
+      const result = run(t, scenario, { TEST_RANKING_EXCEPTION: message });
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(result.stdout, '');
+      assert.deepEqual(legacyFailure(result.stderr), {
+        error: 'RANKING_FAILED',
+        diagnostic: { stage: 'ranking', reason: 'unknown', location: null },
+      });
+      assert.equal(result.requests.length, 1);
+      const observation = JSON.parse(result.stderr).observation;
+      const request = observation.operations.find((row) => row.name === 'kis.http');
+      assert.equal(request.failure.code, 'unknown');
+      assert.equal(request.streamEnd, 'read_error');
+      assert.equal(observation.firstFailure.code, 'unknown');
+      assert.equal(observation.finalError.operationId, request.id);
+      assert.ok(
+        observation.operations
+          .filter((row) => row.failure)
+          .every((row) => row.failure.code === 'unknown'),
+      );
+      assert.equal(
+        new URL(result.requests[0].url).pathname,
+        '/uapi/overseas-stock/v1/ranking/trade-vol',
+      );
+      assert.doesNotMatch(result.stderr, /private-|synthetic-|EGW00123|siwc_relogin_required/);
+    }
 });
 
 test('CLI reports integrated failed statistics at the elapsed total deadline', (t) => {
@@ -1866,6 +1878,24 @@ test('CLI snapshot excludes mutations from a ranking that later fails validation
   assert.equal(result.stdout, '');
   const failure = JSON.parse(result.stderr);
   assert.equal(failure.error, 'RANKING_INCOMPLETE');
+  const { observation } = failure;
+  const validation = observation.operations.find(
+    (row) => row.name === 'ranking.validation' && row.status === 'failed',
+  );
+  assert.equal(validation?.failure.code, 'RANKING_INCOMPLETE');
+  assert.equal(observation.firstFailure.operationId, validation.id);
+  assert.equal(observation.finalError.operationId, validation.id);
+  const parent = observation.operations.find((row) => row.id === validation.parentId);
+  assert.equal(parent.name, 'ranking');
+  const query = observation.operations.find(
+    (row) => row.name === 'kis' && row.parentId === parent.id,
+  );
+  assert.equal(query.status, 'completed');
+  const request = observation.operations.find(
+    (row) => row.name === 'kis.http' && row.parentId === query.id,
+  );
+  assert.equal(request.status, 'completed');
+  assert.equal(request.streamEnd, 'eof');
   const snapshot = failure.diagnostic.inputSnapshot;
   assert.equal(snapshot.observations.length, 1);
   assert.deepEqual(

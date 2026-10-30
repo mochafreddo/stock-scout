@@ -128,6 +128,24 @@ test('missing selected ranking company or numeric evidence is a whole-execution 
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
     assert.equal(JSON.parse(result.stderr).error, 'RANKING_FAILED');
+    const { observation } = JSON.parse(result.stderr);
+    const validation = observation.operations.find((row) => row.name === 'ranking.validation');
+    assert.equal(validation?.status, 'failed');
+    assert.equal(validation.failure.code, 'RANKING_FAILED');
+    assert.equal(observation.finalError.operationId, validation.id);
+    assert.equal(observation.firstFailure.operationId, validation.id);
+    const parent = observation.operations.find((row) => row.id === validation.parentId);
+    assert.equal(parent.name, 'ranking');
+    const query = observation.operations.find(
+      (row) => row.name === 'kis' && row.parentId === parent.id,
+    );
+    assert.equal(query.status, 'completed');
+    const request = observation.operations.find(
+      (row) => row.name === 'kis.http' && row.parentId === query.id,
+    );
+    assert.equal(request.status, 'completed');
+    assert.equal(request.streamEnd, 'eof');
+    assert.equal(result.requests.filter((row) => row.url.includes('/ranking/')).length, 1);
   }
 });
 
@@ -163,6 +181,24 @@ test('daily date gaps, duplicates and invalid dates fail without widening the re
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
     assert.equal(JSON.parse(result.stderr).error, 'DATA_NOT_READY');
+    const { observation } = JSON.parse(result.stderr);
+    const validation = observation.operations.find(
+      (row) => row.name === 'daily.validation' && row.status === 'failed',
+    );
+    assert.equal(validation?.failure.code, 'DATA_NOT_READY');
+    assert.equal(observation.firstFailure.operationId, validation.id);
+    assert.equal(observation.finalError.operationId, validation.id);
+    const parent = observation.operations.find((row) => row.id === validation.parentId);
+    assert.equal(parent.name, 'daily');
+    const query = observation.operations.find(
+      (row) => row.name === 'kis' && row.parentId === parent.id,
+    );
+    assert.equal(query.status, 'completed');
+    const request = observation.operations.find(
+      (row) => row.name === 'kis.http' && row.parentId === query.id,
+    );
+    assert.equal(request.status, 'completed');
+    assert.equal(request.streamEnd, 'eof');
     assert.equal(result.requests.filter((r) => r.url.includes('/dailyprice')).length, 1);
   }
 });

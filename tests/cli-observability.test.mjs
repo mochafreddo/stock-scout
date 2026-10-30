@@ -3,6 +3,42 @@ import test from 'node:test';
 import { run } from './candidate-cli-helper.mjs';
 import { runCalendar } from './market-calendar-cli-helper.mjs';
 
+test('official fetch cancellation before headers preserves request and collection limit owners', () => {
+  for (const [stage, timeout, count, source] of [
+    ['', '15000', 1, 'request_limit'],
+    ['1', '10000', 2, 'stage_limit'],
+  ]) {
+    const result = runCalendar([], {
+      SCENARIO: 'official-preheader-stall',
+      TEST_OFFICIAL_STAGE_LIMIT: stage,
+      TEST_TIMEOUT_MATCH: timeout,
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const failure = JSON.parse(result.stderr);
+    assert.equal(failure.error, 'REQUEST_FAILED');
+    const { observation } = failure;
+    const request = observation.operations
+      .filter((row) => row.name === 'calendar.official.http')
+      .at(-1);
+    assert.equal(request.httpStatus, null);
+    assert.equal(request.headersAt, null);
+    assert.equal(request.firstEventAt, null);
+    assert.equal(request.streamEnd, 'cancelled');
+    assert.equal(request.cancellationSource, source);
+    assert.equal(request.status, 'failed');
+    assert.equal(observation.firstFailure.operationId, request.id);
+    assert.equal(observation.firstFailure.code, 'unknown');
+    assert.equal(observation.finalError.operationId, request.id);
+    assert.equal(
+      observation.operations.find((row) => row.id === request.parentId).name,
+      'calendar.collection',
+    );
+    assert.equal(result.requests.length, count);
+    assert.deepEqual(result.streamEvents, []);
+  }
+});
+
 test('calendar failure distinguishes response headers, explicit completion and natural EOF', () => {
   const result = runCalendar([], { SCENARIO: 'model-no-completion' });
   assert.equal(result.status, 1);

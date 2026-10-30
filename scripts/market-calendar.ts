@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { assessCalendarNotices, type CalendarNotice } from './calendar-notice-assessment.ts';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
-import { ExecutionObservation, type ObservedOperation } from './execution-observation.ts';
+import {
+  ExecutionObservation,
+  type ObservedOperation,
+  observeFetch,
+} from './execution-observation.ts';
 
 type Session = { date: string; open: string; close: string };
 type Calendar = {
@@ -95,11 +99,16 @@ export async function marketCalendar({
       );
       context.runtime?.take('official');
       request = observation?.start('calendar.official.http', collection?.id, 'request');
-      const response = await fetch(url, {
-        redirect: 'error',
-        headers: { 'User-Agent': 'StockScout/0.1 (+https://github.com/mochafreddo/stock-scout)' },
-        signal,
-      });
+      const response = await observeFetch(
+        url,
+        {
+          redirect: 'error',
+          headers: { 'User-Agent': 'StockScout/0.1 (+https://github.com/mochafreddo/stock-scout)' },
+          signal,
+        },
+        observation,
+        request,
+      );
       observation?.headers(request, response.status);
       if (response.status !== 200 || !response.body) fail('SOURCE_HTTP_FAILURE');
       const reader = response.body.getReader();
@@ -109,6 +118,7 @@ export async function marketCalendar({
         while (true) {
           const part = await reader.read().catch((error) => {
             observation?.streamEnd(request, 'read_error', signal);
+            observation?.fail(request, error, 'unknown');
             throw error;
           });
           context.runtime?.check();

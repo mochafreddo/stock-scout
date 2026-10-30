@@ -36,66 +36,77 @@ export async function candidateUniverse(
   const observations: unknown[] = [];
   for (const exchange of ['NAS', 'NYS', 'AMS'] as const)
     for (const kind of ['volume', 'amount'] as const) {
-      const record = await queryKis(kind, exchange, '', context);
-      if (!record.rows.length) throw new Error('RANKING_INCOMPLETE');
-      const ranks = new Set<number>();
-      for (const row of record.rows) {
-        const rank = Number(row.rank);
+      const ranking = runtime.observation.start('ranking');
+      let validation: ObservedOperation | undefined;
+      try {
+        const record = await queryKis(kind, exchange, '', { ...context, parentId: ranking?.id });
+        validation = runtime.observation.start('ranking.validation', ranking?.id);
+        if (!record.rows.length) throw new Error('RANKING_INCOMPLETE');
+        const ranks = new Set<number>();
+        for (const row of record.rows) {
+          const rank = Number(row.rank);
+          if (
+            !Number.isSafeInteger(rank) ||
+            rank < 1 ||
+            ranks.has(rank) ||
+            !/^[A-Z0-9./^-]{1,20}$/.test(row.symb ?? '') ||
+            (row.excd && row.excd !== exchange) ||
+            !row.rsym
+          )
+            throw new Error('RANKING_FAILED');
+          ranks.add(rank);
+        }
+        const row = record.rows.find((row) => Number(row.rank) === 1);
+        if (!row) throw new Error('RANKING_INCOMPLETE');
         if (
-          !Number.isSafeInteger(rank) ||
-          rank < 1 ||
-          ranks.has(rank) ||
-          !/^[A-Z0-9./^-]{1,20}$/.test(row.symb ?? '') ||
-          (row.excd && row.excd !== exchange) ||
-          !row.rsym
+          !(row.name?.trim() || row.ename?.trim()) ||
+          ['tvol', 'tamt'].some(
+            (field) =>
+              !/^\d+(?:\.\d+)?$/.test(row[field] ?? '') || !Number.isFinite(Number(row[field])),
+          )
         )
           throw new Error('RANKING_FAILED');
-        ranks.add(rank);
-      }
-      const row = record.rows.find((row) => Number(row.rank) === 1);
-      if (!row) throw new Error('RANKING_INCOMPLETE');
-      if (
-        !(row.name?.trim() || row.ename?.trim()) ||
-        ['tvol', 'tamt'].some(
-          (field) =>
-            !/^\d+(?:\.\d+)?$/.test(row[field] ?? '') || !Number.isFinite(Number(row[field])),
+        const key = `${exchange}:${row.symb}`;
+        const existing = securities.get(key);
+        if (
+          (existing && existing.rsym !== row.rsym) ||
+          (identities.has(row.rsym) && identities.get(row.rsym) !== key)
         )
-      )
-        throw new Error('RANKING_FAILED');
-      const key = `${exchange}:${row.symb}`;
-      const existing = securities.get(key);
-      if (
-        (existing && existing.rsym !== row.rsym) ||
-        (identities.has(row.rsym) && identities.get(row.rsym) !== key)
-      )
-        throw new Error('IDENTITY_AMBIGUOUS');
-      identities.set(row.rsym, key);
-      const security: Security = existing ?? {
-        exchange,
-        symbol: row.symb,
-        rsym: row.rsym,
-        rankings: [],
-      };
-      security.rankings?.push({
-        kind,
-        rank: Number(row.rank),
-        requestedAt: record.requestedAt,
-        source: record.source,
-        row,
-      });
-      securities.set(key, security);
-      observations.push({
-        exchange,
-        kind,
-        requestedAt: record.requestedAt,
-        receivedAt: record.receivedAt,
-        source: record.source,
-        request: record.request,
-        rowCount: record.rowCount,
-        selectedCount: 1,
-        continuation: record.continuation,
-        scope: 'discovery ranking at query time; not the data-session ranking',
-      });
+          throw new Error('IDENTITY_AMBIGUOUS');
+        identities.set(row.rsym, key);
+        const security: Security = existing ?? {
+          exchange,
+          symbol: row.symb,
+          rsym: row.rsym,
+          rankings: [],
+        };
+        security.rankings?.push({
+          kind,
+          rank: Number(row.rank),
+          requestedAt: record.requestedAt,
+          source: record.source,
+          row,
+        });
+        securities.set(key, security);
+        observations.push({
+          exchange,
+          kind,
+          requestedAt: record.requestedAt,
+          receivedAt: record.receivedAt,
+          source: record.source,
+          request: record.request,
+          rowCount: record.rowCount,
+          selectedCount: 1,
+          continuation: record.continuation,
+          scope: 'discovery ranking at query time; not the data-session ranking',
+        });
+        runtime.observation.end(validation);
+        runtime.observation.end(ranking);
+      } catch (error) {
+        if (validation?.status === 'in_progress') runtime.observation.fail(validation, error);
+        runtime.observation.fail(ranking, error);
+        throw error;
+      }
     }
   onStage('authentication');
   const credentials = await readSiwcCredentials(directory, undefined, context);
@@ -117,57 +128,66 @@ export async function candidateUniverse(
   onStage('daily');
   const included = [];
   for (const security of assessment.securities.filter((security) => security.included)) {
-    const daily = await queryKis(
-      'daily',
-      security.exchange as KisExchange,
-      security.symbol,
-      context,
-    );
-    if (daily.summary.rsym !== undefined && daily.summary.rsym !== security.rsym)
-      throw new Error('IDENTITY_AMBIGUOUS');
-    const rows = new Map<string, Record<string, string>>();
-    for (const row of daily.rows) {
-      if (!/^\d{8}$/.test(row.xymd ?? '')) throw new Error('DATA_NOT_READY');
-      const date = `${row.xymd.slice(0, 4)}-${row.xymd.slice(4, 6)}-${row.xymd.slice(6, 8)}`;
-      if (
-        !Number.isFinite(Date.parse(date)) ||
-        new Date(date).toISOString().slice(0, 10) !== date ||
-        rows.has(date)
-      )
-        throw new Error('DATA_NOT_READY');
-      rows.set(date, row);
-    }
-    const requiredRows = calendar.historyDates.map((date) => {
-      const row = rows.get(date);
-      if (!row) throw new Error('DATA_NOT_READY');
-      const number = (field: string) => {
-        if (!/^\d+(?:\.\d+)?$/.test(row[field] ?? '') || !Number.isFinite(Number(row[field])))
+    const operation = runtime.observation.start('daily');
+    let validation: ObservedOperation | undefined;
+    try {
+      const daily = await queryKis('daily', security.exchange as KisExchange, security.symbol, {
+        ...context,
+        parentId: operation?.id,
+      });
+      validation = runtime.observation.start('daily.validation', operation?.id);
+      if (daily.summary.rsym !== undefined && daily.summary.rsym !== security.rsym)
+        throw new Error('IDENTITY_AMBIGUOUS');
+      const rows = new Map<string, Record<string, string>>();
+      for (const row of daily.rows) {
+        if (!/^\d{8}$/.test(row.xymd ?? '')) throw new Error('DATA_NOT_READY');
+        const date = `${row.xymd.slice(0, 4)}-${row.xymd.slice(4, 6)}-${row.xymd.slice(6, 8)}`;
+        if (
+          !Number.isFinite(Date.parse(date)) ||
+          new Date(date).toISOString().slice(0, 10) !== date ||
+          rows.has(date)
+        )
           throw new Error('DATA_NOT_READY');
-        return Number(row[field]);
-      };
-      const [open, high, low, close] = ['open', 'high', 'low', 'clos'].map(number);
-      if (
-        Math.min(open, high, low, close) <= 0 ||
-        low > Math.min(open, close) ||
-        high < Math.max(open, close) ||
-        low > high ||
-        number('tvol') < 0
-      )
-        throw new Error('DATA_NOT_READY');
-      return row;
-    });
-    included.push({
-      ...security,
-      daily: {
-        ...daily,
-        rows: requiredRows,
-        rowCount: requiredRows.length,
-        dataSession: calendar.result.dataSession.date,
-        validation: 'runtime-required-dates-and-fields',
-        adjustment: 'unadjusted (MODP=0); KIS field definitions used as an operating assumption',
-        units: 'provider values preserved; unverified unit or scale conversion not applied',
-      },
-    });
+        rows.set(date, row);
+      }
+      const requiredRows = calendar.historyDates.map((date) => {
+        const row = rows.get(date);
+        if (!row) throw new Error('DATA_NOT_READY');
+        const number = (field: string) => {
+          if (!/^\d+(?:\.\d+)?$/.test(row[field] ?? '') || !Number.isFinite(Number(row[field])))
+            throw new Error('DATA_NOT_READY');
+          return Number(row[field]);
+        };
+        const [open, high, low, close] = ['open', 'high', 'low', 'clos'].map(number);
+        if (
+          Math.min(open, high, low, close) <= 0 ||
+          low > Math.min(open, close) ||
+          high < Math.max(open, close) ||
+          low > high ||
+          number('tvol') < 0
+        )
+          throw new Error('DATA_NOT_READY');
+        return row;
+      });
+      included.push({
+        ...security,
+        daily: {
+          ...daily,
+          rows: requiredRows,
+          rowCount: requiredRows.length,
+          dataSession: calendar.result.dataSession.date,
+          validation: 'runtime-required-dates-and-fields',
+          adjustment: 'unadjusted (MODP=0); KIS field definitions used as an operating assumption',
+          units: 'provider values preserved; unverified unit or scale conversion not applied',
+        },
+      });
+      runtime.observation.end(validation);
+      runtime.observation.end(operation);
+    } catch (error) {
+      if (validation?.status === 'in_progress') runtime.observation.fail(validation, error);
+      runtime.observation.fail(operation, error);
+      throw error;
+    }
   }
   onStage('output');
   return {

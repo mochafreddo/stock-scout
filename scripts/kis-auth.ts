@@ -18,7 +18,7 @@ import {
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
-import { type ObservedOperation, observeResponse } from './execution-observation.ts';
+import { type ObservedOperation, observeFetch, observeResponse } from './execution-observation.ts';
 
 export class AuthError extends Error {
   readonly retryAfterSeconds?: number;
@@ -309,17 +309,22 @@ export async function accessToken(
           signal = requestSignal(context, 15_000);
           context.runtime?.take('issuance');
           request = observer?.start('kis.auth.issuance.http', issuance?.id, 'request');
-          let response = await fetch('https://openapi.koreainvestment.com:9443/oauth2/tokenP', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              grant_type: 'client_credentials',
-              appkey: appKey,
-              appsecret: appSecret,
-            }),
-            signal,
-            redirect: 'error',
-          });
+          let response = await observeFetch(
+            'https://openapi.koreainvestment.com:9443/oauth2/tokenP',
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                grant_type: 'client_credentials',
+                appkey: appKey,
+                appsecret: appSecret,
+              }),
+              signal,
+              redirect: 'error',
+            },
+            observer,
+            request,
+          );
           if (!response.ok) {
             observer?.headers(request, response.status);
             throw new AuthError('AUTH_FAILED');

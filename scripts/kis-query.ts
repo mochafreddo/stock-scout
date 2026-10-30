@@ -1,5 +1,5 @@
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
-import { type ObservedOperation, observeResponse } from './execution-observation.ts';
+import { type ObservedOperation, observeFetch, observeResponse } from './execution-observation.ts';
 import { accessToken, invalidateToken } from './kis-auth.ts';
 
 const sourceCommit = '2077773a69a428daf63e148182511f068cc45de3';
@@ -111,17 +111,22 @@ export async function queryKis(
       const request = observer?.start('kis.http', operation?.id, 'request');
       try {
         const response = observeResponse(
-          await fetch(url, {
-            headers: {
-              authorization: `Bearer ${token}`,
-              appkey: KIS_APP_KEY,
-              appsecret: KIS_APP_SECRET,
-              tr_id: trId,
-              custtype: 'P',
+          await observeFetch(
+            url,
+            {
+              headers: {
+                authorization: `Bearer ${token}`,
+                appkey: KIS_APP_KEY,
+                appsecret: KIS_APP_SECRET,
+                tr_id: trId,
+                custtype: 'P',
+              },
+              signal,
+              redirect: 'error',
             },
-            signal,
-            redirect: 'error',
-          }),
+            observer,
+            request,
+          ),
           observer,
           request,
           signal,

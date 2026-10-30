@@ -26,7 +26,7 @@ import { setTimeout as delay, setImmediate as yieldTurn } from 'node:timers/prom
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { DiagnosticError } from './diagnostic-error.ts';
-import { type ObservedOperation, observeResponse } from './execution-observation.ts';
+import { type ObservedOperation, observeFetch, observeResponse } from './execution-observation.ts';
 
 const issuer = 'https://auth.openai.com';
 const resource = 'https://api.openai.com/v1';
@@ -476,11 +476,16 @@ async function request(
     options.signal?.throwIfAborted();
     signal = requestSignal(context, 15_000, options.signal);
     const response = observeResponse(
-      await fetch(url, {
-        ...options,
-        redirect: 'error',
-        signal,
-      }),
+      await observeFetch(
+        url,
+        {
+          ...options,
+          redirect: 'error',
+          signal,
+        },
+        observer,
+        operation,
+      ),
       observer,
       operation,
       signal,

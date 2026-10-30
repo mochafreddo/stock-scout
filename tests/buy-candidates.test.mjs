@@ -48,7 +48,7 @@ test('failed review exposes linked recommendation round trips, daily reads and v
   assert.equal(reviewRequest.status, 'failed');
   assert.equal(observation.firstFailure.operationId, reviewRequest.id);
   assert.equal(observation.finalError.operationId, reviewRequest.id);
-  assert.doesNotMatch(JSON.stringify(observation), /synthetic|NAS:AAPL|observations|123|Bearer/);
+  assert.doesNotMatch(JSON.stringify(observation), /synthetic|NAS:AAPL|observations|"123"|Bearer/);
 });
 
 test('recommendation and review header stalls preserve actual stage and target cancellation sources', (t) => {
