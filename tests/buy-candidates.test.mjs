@@ -5,6 +5,178 @@ import { run as runCandidate } from './candidate-cli-helper.mjs';
 const run = (t, scenario = 'ok', env = {}, args) =>
   runCandidate(t, scenario, env, args, 'buy-candidates');
 
+test('failed review exposes linked recommendation round trips, daily reads and validation without raw data', (t) => {
+  const result = run(t, 'review-late-error');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { observation, usage, error } = JSON.parse(result.stderr);
+  assert.equal(error, 'MODEL_INCOMPLETE');
+  assert.equal(usage.recommendationModel, 3);
+  const operations = observation.operations;
+  const recommendation = operations.find((row) => row.name === 'recommendation');
+  assert.ok(recommendation);
+  const model = operations.find((row) => row.name === 'recommendation.model');
+  assert.equal(model.parentId, recommendation.id);
+  assert.equal(model.status, 'completed');
+  const requests = operations.filter((row) => row.name === 'recommendation.model.http');
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.equal(request.parentId, model.id);
+    assert.equal(request.kind, 'request');
+    assert.equal(request.httpStatus, 200);
+    assert.equal(request.completionEvents, 1);
+    assert.equal(request.errorEvents, 0);
+    assert.equal(request.streamEnd, 'eof');
+    assert.equal(request.status, 'completed');
+    assert.notEqual(request.headersAt, null);
+    assert.notEqual(request.firstEventAt, null);
+    assert.notEqual(request.lastEventAt, null);
+  }
+  const tool = operations.find((row) => row.name === 'recommendation.tool');
+  assert.equal(tool.parentId, requests[0].id);
+  assert.equal(tool.kind, 'tool');
+  assert.equal(tool.status, 'completed');
+  const validation = operations.find((row) => row.name === 'recommendation.validation');
+  assert.equal(validation.parentId, model.id);
+  assert.equal(validation.status, 'completed');
+  const review = operations.find((row) => row.name === 'review');
+  assert.equal(review.parentId, recommendation.id);
+  const reviewRequest = operations.find((row) => row.name === 'review.model.http');
+  assert.equal(reviewRequest.parentId, review.id);
+  assert.equal(reviewRequest.completionEvents, 1);
+  assert.equal(reviewRequest.errorEvents, 1);
+  assert.equal(reviewRequest.status, 'failed');
+  assert.equal(observation.firstFailure.operationId, reviewRequest.id);
+  assert.equal(observation.finalError.operationId, reviewRequest.id);
+  assert.doesNotMatch(JSON.stringify(observation), /synthetic|NAS:AAPL|observations|123|Bearer/);
+});
+
+test('recommendation and review header stalls preserve actual stage and target cancellation sources', (t) => {
+  for (const [scenario, abort, expected, source, requests] of [
+    ['report-header-stall', 'stage', 'MODEL_INCOMPLETE', 'stage_limit', 1],
+    ['review-header-stall', 'stage', 'MODEL_INCOMPLETE', 'stage_limit', 3],
+    ['report-header-stall', 'target', 'TARGET_OPEN', 'target_open', 1],
+    ['report-header-stall', 'execution', 'EXECUTION_LIMIT', 'execution_limit', 1],
+  ]) {
+    const result = run(t, scenario, {
+      REPORT_ABORT: abort,
+      ...(abort === 'target' ? { TEST_NOW: '2026-10-19T13:29:59Z' } : {}),
+      ...(abort === 'execution' ? { TYPE_BEFORE_MS: '450000' } : {}),
+    });
+    assert.equal(result.status, 1, `${scenario}: ${result.stderr}`);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, expected);
+    assert.equal(output.usage.recommendationModel, requests);
+    const request = output.observation.operations.findLast((row) =>
+      ['recommendation.model.http', 'review.model.http'].includes(row.name),
+    );
+    assert.ok(request, result.stderr);
+    assert.equal(request.httpStatus, 200);
+    assert.equal(request.firstEventAt, null);
+    assert.equal(request.completionEvents, 0);
+    assert.equal(request.streamEnd, 'cancelled');
+    assert.equal(request.cancellationSource, source);
+    assert.equal(request.status, 'failed');
+    if (abort === 'stage') {
+      assert.equal(request.elapsedMs, 180000);
+      assert.equal(request.endedAt - request.headersAt, 180000);
+    }
+    assert.equal(output.observation.finalError.operationId, request.id);
+    assert.ok(result.requests.some((row) => row.streamAborted || row.streamCancelled));
+    assert.doesNotMatch(result.stdout + result.stderr, /synthetic-subscription|test-secret/);
+  }
+});
+
+test('daily tool and candidate validation failures retain their own operation and completed HTTP state', (t) => {
+  const tool = run(t, 'report-outside-tool');
+  const toolOutput = JSON.parse(tool.stderr);
+  assert.equal(tool.status, 1, tool.stderr);
+  assert.equal(tool.stdout, '');
+  const failedTool = toolOutput.observation.operations.find(
+    (row) => row.name === 'recommendation.tool',
+  );
+  assert.equal(failedTool.status, 'failed');
+  assert.equal(failedTool.failure.code, 'MODEL_OUTPUT');
+  assert.equal(toolOutput.observation.firstFailure.operationId, failedTool.id);
+  assert.equal(toolOutput.observation.finalError.operationId, failedTool.id);
+  const invalid = run(t, 'ok', {
+    REPORT_VALUE: JSON.stringify({ candidates: [], noCandidatesReason: null }),
+  });
+  assert.equal(invalid.status, 1, invalid.stderr);
+  const output = JSON.parse(invalid.stderr);
+  const validation = output.observation.operations.find(
+    (row) => row.name === 'recommendation.validation',
+  );
+  assert.equal(validation.status, 'failed');
+  assert.equal(output.observation.finalError.operationId, validation.id);
+  for (const request of output.observation.operations.filter(
+    (row) => row.name === 'recommendation.model.http',
+  )) {
+    assert.equal(request.streamEnd, 'eof');
+    assert.equal(request.status, 'completed');
+    assert.equal(request.failure, null);
+  }
+  assert.equal(output.usage.recommendationModel, 2);
+  assert.ok(!output.observation.operations.some((row) => row.name === 'review'));
+});
+
+test('request records distinguish missing and duplicate completion, provider failure, EOF and read errors after completion', (t) => {
+  for (const [scenario, completions, errors, end, code] of [
+    ['report-eof', 0, 0, 'eof', 'MODEL_INCOMPLETE'],
+    ['report-duplicate-completion', 2, 0, null, 'MODEL_INCOMPLETE'],
+    ['report-incomplete', 0, 1, null, 'MODEL_INCOMPLETE'],
+    ['report-late-error', 1, 1, null, 'MODEL_INCOMPLETE'],
+    ['report-body-error', 1, 0, 'read_error', 'MODEL_FAILED'],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, `${scenario}: ${result.stderr}`);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, code, scenario);
+    const request = output.observation.operations.findLast(
+      (row) => row.name === 'recommendation.model.http',
+    );
+    assert.equal(request.completionEvents, completions, scenario);
+    assert.equal(request.errorEvents, errors, scenario);
+    if (end) assert.equal(request.streamEnd, end, scenario);
+    assert.equal(request.status, 'failed', scenario);
+    assert.equal(output.observation.firstFailure.operationId, request.id, scenario);
+    assert.equal(output.observation.finalError.operationId, request.id, scenario);
+    assert.equal(
+      output.observation.firstFailure.code,
+      scenario === 'report-body-error' ? 'unknown' : 'MODEL_INCOMPLETE',
+    );
+    assert.equal(output.usage.recommendationModel, 2);
+    assert.doesNotMatch(
+      JSON.stringify(output.observation),
+      /synthetic|private-transport|test-secret/,
+    );
+  }
+});
+
+test('observation failures preserve recommendation success, failed review and request counts', (t) => {
+  const normal = run(t);
+  assert.equal(normal.status, 0, normal.stderr);
+  for (const env of [
+    { TEST_OBSERVATION_ID_FAILURE: '1' },
+    { TEST_OBSERVATION_SERIALIZATION_FAILURE: '1' },
+  ]) {
+    const success = run(t, 'ok', env);
+    assert.equal(success.status, 0, success.stderr);
+    assert.equal(success.stdout, normal.stdout);
+    assert.equal(success.stderr, '');
+    const failed = run(t, 'review-late-error', env);
+    assert.equal(failed.status, 1, failed.stderr);
+    assert.equal(failed.stdout, '');
+    const output = JSON.parse(failed.stderr);
+    assert.equal(output.error, 'MODEL_INCOMPLETE');
+    assert.equal(output.usage.recommendationModel, 3);
+    assert.equal(output.observation.degraded, true);
+    assert.doesNotMatch(failed.stderr, /synthetic-subscription|test-secret/);
+  }
+});
+
 test('buy CLI preserves shared type deadline diagnostics before recommending', (t) => {
   const result = run(t, 'type-limit', { TYPE_BEFORE_MS: '31' });
   assert.equal(result.status, 1, result.stderr);

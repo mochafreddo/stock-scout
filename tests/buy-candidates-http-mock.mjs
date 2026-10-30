@@ -1,14 +1,67 @@
 import assert from 'node:assert/strict';
 import { appendFileSync } from 'node:fs';
+import { mock } from 'node:test';
 import { advanceElapsed } from './candidate-universe-http-mock.mjs';
+
+mock.timers.enable({ apis: ['Date'], now: Date.parse(process.env.TEST_NOW) });
 
 const candidateFetch = globalThis.fetch;
 let recommendationRequests = 0;
 const scenario = process.env.SCENARIO;
-const sse = (events) =>
-  new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
-    headers: { 'content-type': 'text/event-stream' },
+const originalSetTimeout = globalThis.setTimeout;
+const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+let recommending = false;
+let abortStage;
+let executionAdvanced = false;
+if (process.env.REPORT_ABORT) {
+  mock.method(globalThis, 'setTimeout', (callback, ms, ...args) => {
+    if (ms === 180_000) {
+      recommending = true;
+      if (process.env.REPORT_ABORT === 'stage')
+        abortStage = () => {
+          advanceElapsed(180_000);
+          callback(...args);
+        };
+    }
+    return originalSetTimeout(callback, ms, ...args);
   });
+  mock.method(AbortSignal, 'timeout', (ms) => {
+    if (!recommending || !['target', 'execution'].includes(process.env.REPORT_ABORT))
+      return originalTimeout(ms);
+    const signal = originalTimeout(20);
+    signal.addEventListener('abort', () => {
+      if (process.env.REPORT_ABORT === 'execution') {
+        if (!executionAdvanced) advanceElapsed(150_000);
+        executionAdvanced = true;
+      } else Date.now = () => Date.parse('2026-10-19T13:30:00Z');
+    });
+    return signal;
+  });
+}
+const sse = (events) => {
+  const encoded = new TextEncoder().encode(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+  );
+  let sent = false;
+  return new Response(
+    scenario === 'report-body-error' && recommendationRequests === 2
+      ? new ReadableStream(
+          {
+            pull(controller) {
+              if (!sent) {
+                sent = true;
+                controller.enqueue(encoded);
+              } else controller.error(new Error('synthetic-private-transport'));
+            },
+          },
+          { highWaterMark: 0 },
+        )
+      : encoded,
+    {
+      headers: { 'content-type': 'text/event-stream' },
+    },
+  );
+};
 const completed = {
   type: 'response.completed',
   response: { usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 } },
@@ -50,6 +103,32 @@ globalThis.fetch = async (url, init = {}) => {
   assert.equal(body.stream, true);
   assert.ok(body.input.every((item) => item.role !== 'system'));
   assert.equal(body.model, 'gpt-6-luna');
+  if (
+    (scenario === 'report-header-stall' && prompt.stage === 'recommendation') ||
+    (scenario === 'review-header-stall' && prompt.stage === 'report_review')
+  ) {
+    let keepAlive;
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          if (abortStage) originalSetTimeout(abortStage, 20);
+          keepAlive = originalSetTimeout(() => {
+            controller.error(new Error('synthetic-stall-not-aborted'));
+          }, 2000);
+          init.signal.addEventListener('abort', () => {
+            clearTimeout(keepAlive);
+            appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ streamAborted: true })}\n`);
+            controller.error(new DOMException('synthetic-subscription', 'AbortError'));
+          });
+        },
+        cancel() {
+          clearTimeout(keepAlive);
+          appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ streamCancelled: true })}\n`);
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  }
   if (scenario === 'report-time') advanceElapsed(180_000);
   if (scenario === 'report-execution-time') advanceElapsed(600_000);
   if (scenario === 'report-open') Date.now = () => Date.parse('2026-10-19T13:30:00Z');
