@@ -46,11 +46,13 @@ Metrics·Events·Logs·Traces의 정보는 하나의 제한된 진단 기록에�
 
 실패 JSON의 최상위 `observation`은 기존 `diagnostic`, `reason`, `location`, `usage`와 별개다. `runId`와 실행 시작 시각, 실행 경과 시간, `operations`, `firstFailure`, `finalError`, `coverage`, `degraded`, `truncated`, `omittedOperations`를 제공한다. 작업의 `startedAt`, `endedAt`, `headersAt`, `firstEventAt`, `lastEventAt`은 실행 시작부터의 단조 시계 밀리초 오프셋이고 `elapsedMs`는 그 작업의 경과 시간이다. 시간 값 `null`은 미관측이다. 부모와 자식의 시간은 중첩된다.
 
-`start(name, parentId, kind)`는 고정 이름의 논리 작업·실제 요청·논리 도구 호출을 구분한다. 실제 전송 기록은 기존 정책 검사와 전송 집계 뒤, `fetch` 직전에 생성한다. `headers`는 상태 코드와 헤더 수신 시점만 기록하며 작업을 완료하지 않는다. `streamEnd`는 처음 관측한 `eof`, `read_error`, `cancelled`를 보존한다. `end`는 업무의 기존 검증을 마친 뒤 호출하며 `fail`은 허용한 오류 코드만 기록한다. 결과 검증 실패는 검증 작업과 모델 작업의 실패이며, 이미 정상 EOF로 끝난 HTTP 전송을 뒤늦게 통신 실패로 바꾸지 않는다.
+`start(name, parentId, kind)`는 고정 이름의 논리 작업·실제 요청·논리 도구 호출을 구분한다. 실제 전송 기록은 기존 정책 검사와 전송 집계 뒤, `fetch` 직전에 생성한다. `headers`는 상태 코드와 헤더 수신 시점을 기록하며 작업을 완료하지 않는다. Content-Type을 전달받으면 원문 없이 `responseFormat`을 `event_stream`, `json`, `other`, `missing`으로 분류하고 전달받지 못했으면 `null`로 둔다. `streamEnd`는 처음 관측한 `eof`, `read_error`, `cancelled`를 보존한다. `end`는 업무의 기존 검증을 마친 뒤 호출하며 `fail`은 허용한 오류 코드만 기록한다. 결과 검증 실패는 검증 작업과 모델 작업의 실패이며, 이미 정상 EOF로 끝난 HTTP 전송을 뒤늦게 통신 실패로 바꾸지 않는다.
 
 모델 HTTP 응답은 `observeResponse(response, observation, request, signal, true)`를 한 번 통과한다. 반환된 응답은 기존 소비자에게 전달한다. 래퍼는 소비자의 읽기 요구마다 원래 리더를 한 번 읽고, 추가 선읽기 없이 원래 취소를 전달한다. 받은 SSE의 완성된 이벤트에서 첫·마지막 시점, `completionEvents`와 `errorEvents`를 세며 본문·외부 오류 문자열·헤더·URL은 기록하지 않는다. 이 관측을 사용하는 경로에서는 기존 SDK 미들웨어에 같은 관측 계수를 다시 추가하지 않는다. 단계가 기존에 사용하던 완료 이벤트 계수와 완료 판정은 그대로 유지한다. 공급자 실패 이벤트를 본 뒤 읽기 오류나 취소가 발생해도 최초 관측 실패를 유지한다.
 
 SSE 메타데이터의 임시 버퍼에도 상한을 적용한다. 큰 이벤트나 해석 실패 때문에 정확한 계수를 보장할 수 없으면 관측만 `degraded`로 표시하고 계수는 `null`로 둔다. SDK에 전달하는 원래 바이트, 모델 결과와 완료 판정은 바꾸지 않는다. 요청별 관측 토큰은 해당 `fetch` 호출의 클로저에 고정하며 다음 도구 왕복 요청의 가변 전역 포인터로 바꾸지 않는다.
+
+`eventCounts`는 파싱한 JSON 이벤트를 고정된 `reasoning`, `output_text`, `lifecycle`, `other` 범주로만 센다. 이벤트 종류·본문 원문과 토큰 수는 기록하지 않는다. `other`는 SDK의 지원 여부 판정이 아니며, 미관측이나 계수 무효화는 `null`로 구분한다. 이 집계는 모델 완료나 출력 검증에 사용하지 않는다.
 
 `requestSignal`의 선택 인수는 제한 소유자를 전달한다. `tagSignal`은 실제 abort 이벤트가 발생한 순간의 출처를 저장한다. 이후 다른 제한이 취소되더라도 처음 출처를 바꾸지 않는다. `execution_limit`, `target_open`, `stage_limit`, `request_limit`은 직접 연결한 제한에만 쓰며 외부 취소나 출처를 잃은 신호는 `unknown`이다. 시간 경과만으로 공급자 오류나 취소 출처를 추정하지 않는다.
 

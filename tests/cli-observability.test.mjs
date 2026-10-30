@@ -73,6 +73,7 @@ test('calendar HTTP error messages cannot impersonate local observation codes', 
   assert.equal(error, 'MODEL_FAILED');
   const request = observation.operations.find((row) => row.name === 'calendar.model.http');
   assert.equal(request.httpStatus, 503);
+  assert.equal(request.responseFormat, 'json');
   assert.equal(request.streamEnd, 'eof');
   assert.equal(request.failure.code, 'unknown');
   assert.equal(observation.firstFailure.code, 'unknown');
@@ -150,6 +151,7 @@ test('calendar observations distinguish duplicate completion, transport read err
     ['model-header-stall', '180000', 'cancelled', 0, 'request_limit'],
     ['model-header-stall', '300000', 'cancelled', 0, 'stage_limit'],
     ['model-incomplete-then-cancel', '180000', 'cancelled', 0, 'request_limit'],
+    ['model-completed-then-cancel', '180000', 'cancelled', 1, 'request_limit'],
   ]) {
     const result = runCalendar([], {
       SCENARIO: scenario,
@@ -195,7 +197,76 @@ test('SSE observation handles chunk boundaries and degrades oversized metadata w
       .completionEvents,
     null,
   );
+  assert.equal(
+    failure.observation.operations.find((row) => row.name === 'calendar.model.http').eventCounts,
+    null,
+  );
   assert.doesNotMatch(oversized.stderr, /synthetic-private-event/);
+});
+
+test('calendar SSE observation follows SDK parsing across line endings and response content types', async (t) => {
+  for (const newline of ['\n', '\r\n', '\r']) {
+    for (const [contentType, format] of [
+      ['text/event-stream', 'event_stream'],
+      ['Text/Event-Stream', 'event_stream'],
+      ['application/octet-stream', 'other'],
+      ['', 'missing'],
+    ]) {
+      await t.test(JSON.stringify({ newline, contentType }), () => {
+        const result = runCalendar([], {
+          SCENARIO: 'model-no-completion',
+          TEST_SSE_NEWLINE: newline,
+          TEST_SSE_CHUNK_BYTES: '1',
+          TEST_MODEL_CONTENT_TYPE: contentType,
+        });
+        assert.equal(result.status, 1);
+        assert.equal(result.stdout, '');
+        const failure = JSON.parse(result.stderr);
+        assert.equal(failure.error, 'MODEL_INCOMPLETE');
+        const request = failure.observation.operations.find(
+          (row) => row.name === 'calendar.model.http',
+        );
+        assert.equal(request.httpStatus, 200);
+        assert.equal(request.responseFormat, format);
+        assert.ok(request.bytes > 0);
+        assert.ok(request.firstEventAt !== null);
+        assert.ok(request.lastEventAt > request.firstEventAt);
+        assert.equal(request.completionEvents, 0);
+        assert.equal(request.streamEnd, 'eof');
+        assert.equal(failure.observation.degraded, false);
+        assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 1);
+      });
+    }
+  }
+});
+
+test('model event categories distinguish output progress from unrecognized events without retaining data', () => {
+  for (const [unknown, counts] of [
+    ['', { reasoning: 0, output_text: 1, lifecycle: 2, other: 0 }],
+    ['1', { reasoning: 0, output_text: 0, lifecycle: 0, other: 1 }],
+    ['reasoning', { reasoning: 2, output_text: 0, lifecycle: 0, other: 0 }],
+  ]) {
+    const result = runCalendar([], {
+      SCENARIO: 'model-no-completion',
+      TEST_UNKNOWN_MODEL_EVENTS: unknown,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    const failure = JSON.parse(result.stderr);
+    assert.equal(failure.error, 'MODEL_INCOMPLETE');
+    const request = failure.observation.operations.find(
+      (row) => row.name === 'calendar.model.http',
+    );
+    assert.deepEqual(request.eventCounts, counts);
+    const official = failure.observation.operations.filter(
+      (row) => row.name === 'calendar.official.http',
+    );
+    assert.ok(official.length > 0);
+    assert.ok(official.every((row) => row.eventCounts === null));
+    assert.equal(request.completionEvents, 0);
+    assert.equal(request.streamEnd, 'eof');
+    assert.doesNotMatch(result.stderr, /synthetic-private/);
+  }
 });
 
 test('calendar diagnostics bound a large official snapshot while retaining the later model failure', () => {
@@ -227,6 +298,10 @@ test('calendar diagnostics bound a large official snapshot while retaining the l
   assert.ok(Buffer.byteLength(JSON.stringify(observation)) <= 256 * 1024);
   assert.ok(observation.operations.some((row) => row.id === observation.firstFailure.operationId));
   assert.ok(observation.operations.some((row) => row.id === observation.finalError.operationId));
+  assert.ok(
+    observation.operations.find((row) => row.id === observation.finalError.operationId)
+      .firstEventAt !== null,
+  );
   assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 1);
 });
 

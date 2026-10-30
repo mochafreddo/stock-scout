@@ -58,7 +58,10 @@ const sse = (events) => {
         )
       : encoded,
     {
-      headers: { 'content-type': 'text/event-stream' },
+      headers:
+        process.env.TEST_REPORT_CONTENT_TYPE === ''
+          ? {}
+          : { 'content-type': process.env.TEST_REPORT_CONTENT_TYPE ?? 'text/event-stream' },
     },
   );
 };

@@ -157,9 +157,36 @@ globalThis.fetch = async (url, options) => {
         ? [{ type: 'error', code: 'private_error', message: 'synthetic-subscription' }]
         : []),
     ];
+    if (process.env.TEST_UNKNOWN_MODEL_EVENTS === 'reasoning')
+      events.splice(
+        0,
+        events.length,
+        {
+          type: 'response.output_item.added',
+          output_index: 0,
+          item: { type: 'reasoning', id: 'rs_synthetic', summary: [] },
+        },
+        {
+          type: 'response.reasoning_summary_text.delta',
+          output_index: 0,
+          item_id: 'rs_synthetic',
+          summary_index: 0,
+          delta: 'synthetic-private-reasoning',
+        },
+      );
+    else if (process.env.TEST_UNKNOWN_MODEL_EVENTS)
+      events.splice(0, events.length, {
+        type: 'synthetic-private-future-event',
+        private: 'synthetic-private-body',
+      });
     if (scenario === 'model-duplicate-completion') events.push(events.at(-1));
     if (
-      ['model-header-stall', 'model-body-error', 'model-incomplete-then-cancel'].includes(scenario)
+      [
+        'model-header-stall',
+        'model-body-error',
+        'model-incomplete-then-cancel',
+        'model-completed-then-cancel',
+      ].includes(scenario)
     ) {
       if (scenario === 'model-incomplete-then-cancel') events.at(-1).type = 'response.incomplete';
       let sent = false;
@@ -209,8 +236,12 @@ globalThis.fetch = async (url, options) => {
         Math.ceil(Number(process.env.TEST_EVENT_PADDING_BYTES) / 23),
       );
     const encoded = new TextEncoder().encode(
-      events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') +
-        (process.env.TEST_MODEL_CANCEL_ERROR ? 'data: {\n\n' : ''),
+      events
+        .map(
+          (event) =>
+            `data: ${JSON.stringify(event)}${process.env.TEST_SSE_NEWLINE || '\n'}${process.env.TEST_SSE_NEWLINE || '\n'}`,
+        )
+        .join('') + (process.env.TEST_MODEL_CANCEL_ERROR ? 'data: {\n\n' : ''),
     );
     let offset = 0;
     let cancelFallback;
@@ -248,7 +279,10 @@ globalThis.fetch = async (url, options) => {
           )
         : encoded;
     const response = new Response(body, {
-      headers: { 'content-type': 'text/event-stream' },
+      headers:
+        process.env.TEST_MODEL_CONTENT_TYPE === ''
+          ? {}
+          : { 'content-type': process.env.TEST_MODEL_CONTENT_TYPE ?? 'text/event-stream' },
     });
     if (process.env.TEST_MODEL_RELEASE_ERROR) {
       const getReader = response.body.getReader.bind(response.body);

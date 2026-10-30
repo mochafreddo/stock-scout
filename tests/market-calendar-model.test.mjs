@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runCalendar } from './market-calendar-cli-helper.mjs';
 
-function response(change, extra = {}) {
+function response(change, extra = {}, nasdaqSpanId = '1') {
   return JSON.stringify({
     assessments: [
       {
         id: 'nyse:1:103',
         status: 'schedule_change',
         reason: 'Explicit session change.',
-        spanIds: ['nyse:1:103:0:s0'],
+        spanIds: ['0'],
         changes: [{ exchanges: ['NYS', 'AMS'], ...change }],
         effectiveDate: null,
         supersedes: [],
@@ -19,7 +19,7 @@ function response(change, extra = {}) {
         id: 'nasdaq:ETA2026-1',
         status: 'schedule_change',
         reason: 'Explicit session change.',
-        spanIds: ['nasdaq:ETA2026-1:0:s0'],
+        spanIds: [nasdaqSpanId],
         changes: [{ exchanges: ['NAS'], ...change }],
         effectiveDate: null,
         supersedes: [],
@@ -55,6 +55,42 @@ test('trusted span references preserve original non-ASCII whitespace without mod
   );
 });
 
+test('request-local compact span IDs preserve original sources across notices and children', () => {
+  const result = runCalendar([], {
+    NYSE_BODY: 'Routine notice.',
+    NYSE_CHILD: 'Operations normal.',
+    NYSE_EXTRA: JSON.stringify([
+      {
+        id: 104,
+        publishedDate: 1792706400000,
+        subject: 'Another notice',
+        body: 'Regular hours unchanged.',
+        marketLinks: ['NYSE'],
+        childNotifications: [],
+      },
+    ]),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const request = result.requests.find(({ url }) => url.endsWith('/responses'));
+  const input = JSON.parse(request.body.input.find((item) => item.role === 'user').content[0].text);
+  assert.deepEqual(
+    input.notices.flatMap((notice) =>
+      notice.entries.flatMap((entry) => entry.spans.map((span) => span.id)),
+    ),
+    ['0', '1', '2'],
+  );
+  assert.deepEqual(
+    JSON.parse(result.stdout).noticeAssessments.map((notice) => notice.evidence),
+    [
+      [
+        { entryId: 'nyse:1:103:0', quote: 'Routine notice.' },
+        { entryId: 'nyse:1:103:1', quote: 'Operations normal.' },
+      ],
+      [{ entryId: 'nyse:1:104:0', quote: 'Regular hours unchanged.' }],
+    ],
+  );
+});
+
 test('long punctuation-free Unicode notices remain complete and each returned quote is bounded', () => {
   const body = `${'🧭'.repeat(481)} Done.`;
   const result = runCalendar([], { NYSE_BODY: body });
@@ -70,7 +106,7 @@ test('long punctuation-free Unicode notices remain complete and each returned qu
   );
   assert.deepEqual(
     entry.spans.map((span) => span.id),
-    ['nyse:1:103:0:s0', 'nyse:1:103:0:s1', 'nyse:1:103:0:s2'],
+    ['0', '1', '2'],
   );
   assert.deepEqual(JSON.parse(result.stdout).noticeAssessments[0].evidence, [
     { entryId: 'nyse:1:103:0', quote: '🧭'.repeat(240) },
@@ -87,7 +123,7 @@ test('a whitespace-only trusted span cannot replace nonempty evidence', () => {
           id: 'nyse:1:103',
           status: 'no_schedule_impact',
           reason: 'Routine notice.',
-          spanIds: ['nyse:1:103:0:s1'],
+          spanIds: ['1'],
           changes: [],
           effectiveDate: null,
           supersedes: [],
@@ -107,7 +143,7 @@ test('span membership allows evidence from another group only with an explicit c
       id: 'nyse:1:103',
       status: 'no_schedule_impact',
       reason: 'Withdrawn update.',
-      spanIds: ['nyse:1:103:0:s0', 'nyse:1:104:0:s0'],
+      spanIds: ['0', '1'],
       changes: [],
       effectiveDate: null,
       supersedes: [],
@@ -116,7 +152,7 @@ test('span membership allows evidence from another group only with an explicit c
       id: 'nyse:1:104',
       status: 'no_schedule_impact',
       reason: 'Operational update.',
-      spanIds: ['nyse:1:104:0:s0'],
+      spanIds: ['1'],
       changes: [],
       effectiveDate: null,
       supersedes: [],
@@ -187,13 +223,13 @@ test('full routine paragraphs and child text enter the one model request and exa
   const baseline = {
     assessments: record.noticeAssessments.map(({ url, evidence, ...assessment }) => ({
       ...assessment,
-      spanIds: ['nyse:1:103:0:s0', 'nyse:1:103:1:s0'],
+      spanIds: ['0', '2'],
     })),
   };
   const confirmed = runCalendar([], { ...env, MODEL_RESPONSE: JSON.stringify(baseline) });
   assert.equal(confirmed.status, 0, confirmed.stderr);
   const invalid = structuredClone(baseline);
-  invalid.assessments[0].spanIds[1] = 'nyse:1:103:1:s999';
+  invalid.assessments[0].spanIds[1] = '999';
   const rejected = runCalendar([], { ...env, MODEL_RESPONSE: JSON.stringify(invalid) });
   assert.equal(rejected.status, 1);
   assert.equal(rejected.stdout, '');
@@ -201,31 +237,34 @@ test('full routine paragraphs and child text enter the one model request and exa
 });
 
 test('evidenced closures, delayed opens and early closes change the common session deterministically', () => {
-  for (const [body, change, at, expected] of [
+  for (const [body, change, at, expected, nasdaqSpanId] of [
     [
       'Markets will close on Monday, October 26, 2026.',
       { date: '2026-10-26', kind: 'closed', open: null, close: null },
       '2026-10-26T22:00:00Z',
       ['2026-10-23', '2026-10-27', '2026-10-27T13:30:00.000Z', '2026-10-27T20:00:00.000Z'],
+      '1',
     ],
     [
       'On Monday, October 26, 2026, markets open at 10:00 a.m. ET.',
       { date: '2026-10-26', kind: 'session_hours', open: '10:00', close: null },
       '2026-10-26T13:45:00Z',
       ['2026-10-23', '2026-10-26', '2026-10-26T14:00:00.000Z', '2026-10-26T20:00:00.000Z'],
+      '2',
     ],
     [
       'On Monday, October 26, 2026, markets close at 1:00 p.m. ET.',
       { date: '2026-10-26', kind: 'session_hours', open: null, close: '13:00' },
       '2026-10-26T17:00:00Z',
       ['2026-10-26', '2026-10-27', '2026-10-27T13:30:00.000Z', '2026-10-27T20:00:00.000Z'],
+      '2',
     ],
   ]) {
     const result = runCalendar(['--at', at], {
       SCENARIO: 'article',
       NYSE_BODY: body,
       NASDAQ_BODY: body,
-      MODEL_RESPONSE: response(change),
+      MODEL_RESPONSE: response(change, {}, nasdaqSpanId),
     });
     assert.equal(result.status, 0, result.stderr);
     const record = JSON.parse(result.stdout);
@@ -250,7 +289,8 @@ test('a parent-child corrected closure and cross-notice withdrawal suppress the 
   const records = JSON.parse(
     response({ date: '2026-10-27', kind: 'closed', open: null, close: null }),
   ).assessments;
-  records[0].spanIds = ['nyse:1:103:0:s0', 'nyse:1:103:1:s0'];
+  records[0].spanIds = ['0', '1'];
+  records[1].spanIds = ['2'];
   let result = runCalendar(['--at', '2026-10-26T22:00:00Z'], {
     SCENARIO: 'article',
     NYSE_BODY: original,
@@ -280,7 +320,7 @@ test('a parent-child corrected closure and cross-notice withdrawal suppress the 
       id: 'nyse:1:104',
       status: 'schedule_change',
       reason: 'Original closure.',
-      spanIds: ['nyse:1:104:0:s0'],
+      spanIds: ['2'],
       changes: [
         { exchanges: ['NYS', 'AMS'], date: '2026-10-26', kind: 'closed', open: null, close: null },
       ],
@@ -291,7 +331,7 @@ test('a parent-child corrected closure and cross-notice withdrawal suppress the 
       id: 'nyse:1:103',
       status: 'no_schedule_impact',
       reason: 'Closure withdrawn.',
-      spanIds: ['nyse:1:103:0:s0'],
+      spanIds: ['0'],
       changes: [],
       effectiveDate: null,
       supersedes: ['nyse:1:104'],
@@ -320,7 +360,7 @@ test('a parent-child corrected closure and cross-notice withdrawal suppress the 
 test('unsupported future session scope fails when the required next session reaches its effective date', () => {
   const body =
     'Nearly continuous trading begins on December 6, 2026. Testing opportunities precede the launch.';
-  const records = JSON.parse(response({})).assessments.map((record) => ({
+  const records = JSON.parse(response({}, {}, '2')).assessments.map((record) => ({
     ...record,
     status: 'future_effective',
     changes: [],
@@ -398,7 +438,7 @@ test('missing, duplicate, fabricated and unresolved notice records and evidence 
         id: 'nyse:1:103',
         status: 'no_schedule_impact',
         reason: 'No regular-session changes.',
-        spanIds: ['nyse:1:103:0:s0', 'nyse:1:103:1:s0'],
+        spanIds: ['0', '1'],
         changes: [],
         effectiveDate: null,
         supersedes: [],
@@ -430,7 +470,7 @@ test('missing, duplicate, fabricated and unresolved notice records and evidence 
       value.assessments[0].spanIds[0] = { entryId: 'nyse:1:103:0', quote: 'Invented quote' };
     },
     (value) => {
-      value.assessments[0].spanIds.push('nyse:1:103:0:s0');
+      value.assessments[0].spanIds.push('0');
     },
     (value) => {
       value.assessments[0].evidence = [{ entryId: 'nyse:1:103:1', quote: 'Invented quote' }];
@@ -477,7 +517,7 @@ test('a notice confirming an existing annual early close preserves common effect
       id: 'nyse:1:103',
       status: 'schedule_change',
       reason: 'Confirmed early close.',
-      spanIds: ['nyse:1:103:0:s0'],
+      spanIds: ['0'],
       changes: [
         { exchanges: ['NYS', 'AMS'], date: '2026-11-27', kind: 'session_hours', open: null, close },
       ],
@@ -501,6 +541,18 @@ test('a notice confirming an existing annual early close preserves common effect
 
 test('invalid normalized dates, times and venues cannot alter the annual schedule', () => {
   const body = 'On Monday, October 26, 2026, markets open at 10:00 a.m. ET.';
+  const valid = runCalendar([], {
+    SCENARIO: 'article',
+    NYSE_BODY: body,
+    NASDAQ_BODY: body,
+    MODEL_RESPONSE: response(
+      { date: '2026-10-26', kind: 'session_hours', open: '10:00', close: null },
+      {},
+      '2',
+    ),
+  });
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.equal(JSON.parse(valid.stdout).targetSession.open, '2026-10-26T14:00:00.000Z');
   for (const change of [
     { date: '2026-13-27', kind: 'closed', open: null, close: null },
     { date: '2026-10-26', kind: 'session_hours', open: '24:00', close: null },
@@ -513,7 +565,7 @@ test('invalid normalized dates, times and venues cannot alter the annual schedul
       SCENARIO: 'article',
       NYSE_BODY: body,
       NASDAQ_BODY: body,
-      MODEL_RESPONSE: response(change),
+      MODEL_RESPONSE: response(change, {}, '2'),
     });
     assert.equal(result.status, 1);
     assert.equal(result.stdout, '');
@@ -527,12 +579,11 @@ test('model-normalized dates and times accept source abbreviations and hour-only
     SCENARIO: 'article',
     NYSE_BODY: body,
     NASDAQ_BODY: body,
-    MODEL_RESPONSE: response({
-      date: '2026-10-26',
-      kind: 'session_hours',
-      open: null,
-      close: '13:00',
-    }),
+    MODEL_RESPONSE: response(
+      { date: '2026-10-26', kind: 'session_hours', open: null, close: '13:00' },
+      {},
+      '2',
+    ),
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).targetSession.close, '2026-10-26T17:00:00.000Z');
@@ -544,7 +595,7 @@ test('unsupported future scope fails on the effective target date itself', () =>
     id: 'nyse:1:103',
     status: 'future_effective',
     reason: 'Unresolved regular-session scope.',
-    spanIds: ['nyse:1:103:0:s0'],
+    spanIds: ['0'],
     changes: [],
     effectiveDate: '2026-10-26',
     supersedes: [],
@@ -574,7 +625,7 @@ test('competing cross-notice withdrawals and cyclic references are rejected inst
       id: 'nyse:1:103',
       status: 'no_schedule_impact',
       reason: 'Withdrawal.',
-      spanIds: ['nyse:1:103:0:s0'],
+      spanIds: ['0'],
       changes: [],
       effectiveDate: null,
       supersedes: ['nyse:1:104'],
@@ -583,7 +634,7 @@ test('competing cross-notice withdrawals and cyclic references are rejected inst
       id: 'nyse:1:104',
       status: 'schedule_change',
       reason: 'Original closure.',
-      spanIds: ['nyse:1:104:0:s0'],
+      spanIds: ['1'],
       changes: [
         { exchanges: ['NYS', 'AMS'], date: '2026-10-26', kind: 'closed', open: null, close: null },
       ],
@@ -594,7 +645,7 @@ test('competing cross-notice withdrawals and cyclic references are rejected inst
       id: 'nyse:1:105',
       status: 'no_schedule_impact',
       reason: 'Competing withdrawal.',
-      spanIds: ['nyse:1:105:0:s0'],
+      spanIds: ['2'],
       changes: [],
       effectiveDate: null,
       supersedes: ['nyse:1:104'],
@@ -639,7 +690,7 @@ test('indirect competing correction tips cannot silently contribute two distinct
     id: `nyse:1:${id}`,
     status: 'schedule_change',
     reason: 'Corrected date.',
-    spanIds: [`nyse:1:${id}:0:s0`],
+    spanIds: [String(id - 103)],
     changes: [{ exchanges: ['NYS', 'AMS'], date, kind: 'closed', open: null, close: null }],
     effectiveDate: null,
     supersedes: supersedes.map((value) => `nyse:1:${value}`),
@@ -656,7 +707,7 @@ test('indirect competing correction tips cannot silently contribute two distinct
     id: 'nasdaq:ETA2026-1',
     status: 'schedule_change',
     reason: 'Explicit closures.',
-    spanIds: ['nasdaq:ETA2026-1:0:s0'],
+    spanIds: ['4'],
     changes: ['2026-10-28', '2026-10-29'].map((date) => ({
       exchanges: ['NAS'],
       date,
@@ -681,6 +732,7 @@ test('indirect competing correction tips cannot silently contribute two distinct
   assert.equal(conflict.stdout, '');
   assert.equal(JSON.parse(conflict.stderr).error, 'MODEL_OUTPUT');
   const final = changed(107, '2026-10-30', [105, 106]);
+  nasdaq.spanIds = ['6'];
   nasdaq.changes = [
     { exchanges: ['NAS'], date: '2026-10-30', kind: 'closed', open: null, close: null },
   ];
@@ -777,7 +829,7 @@ test('the clock advancing during the model request recomputes eligibility and th
     id: 'nyse:1:103',
     status: 'future_effective',
     reason: 'Unresolved future core session scope.',
-    spanIds: ['nyse:1:103:0:s0'],
+    spanIds: ['0'],
     changes: [],
     effectiveDate: '2026-12-06',
     supersedes: [],

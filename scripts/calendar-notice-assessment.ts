@@ -249,7 +249,7 @@ export async function assessCalendarNotices(
         for (const sentence of segmenter.segment(body)) {
           const points = Array.from(sentence.segment);
           for (let offset = 0; offset < points.length; offset += 240) {
-            const id = `${entry.id}:s${bodySpans.length}`;
+            const id = String(spans.size);
             const text = points.slice(offset, offset + 240).join('');
             bodySpans.push({ id, text });
             spans.set(id, { entryId: entry.id, groupId: notice.id, quote: text });
@@ -310,13 +310,7 @@ export async function assessCalendarNotices(
         request = observation?.start('calendar.model.http', operation?.id, 'request');
         try {
           const response = await observeFetch(url, { ...init, signal }, observation, request);
-          return observeResponse(
-            response,
-            observation,
-            request,
-            signal,
-            response.headers.get('content-type')?.includes('text/event-stream'),
-          );
+          return observeResponse(response, observation, request, signal, true);
         } catch (error) {
           observation?.streamEnd(request, 'read_error', signal);
           observation?.fail(request, error);

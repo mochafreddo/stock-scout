@@ -252,13 +252,7 @@ export async function recommendCandidates(
             observation,
             request,
           );
-          return observeResponse(
-            response,
-            observation,
-            request,
-            signal,
-            response.headers.get('content-type')?.includes('text/event-stream'),
-          );
+          return observeResponse(response, observation, request, signal, true);
         } catch (error) {
           observation.streamEnd(request, 'read_error', signal);
           observation.fail(request, error);

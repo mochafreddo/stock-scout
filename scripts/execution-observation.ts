@@ -69,18 +69,21 @@ type OperationRecord = {
   elapsedMs: number | null;
   status: 'in_progress' | 'completed' | 'failed';
   httpStatus: number | null;
+  responseFormat: 'event_stream' | 'json' | 'other' | 'missing' | null;
   headersAt: number | null;
   firstEventAt: number | null;
   lastEventAt: number | null;
   completionEvents: number | null;
   errorEvents: number | null;
+  eventCounts: Record<'reasoning' | 'output_text' | 'lifecycle' | 'other', number> | null;
   bytes: number;
   streamEnd: 'eof' | 'read_error' | 'cancelled' | null;
   cancellationSource: CancellationSource;
   failure: { code: string; recovered: boolean; propagated: boolean } | null;
 };
-export type ObservedOperation = Readonly<Omit<OperationRecord, 'failure'>> & {
+export type ObservedOperation = Readonly<Omit<OperationRecord, 'failure' | 'eventCounts'>> & {
   readonly failure: Readonly<NonNullable<OperationRecord['failure']>> | null;
+  readonly eventCounts: Readonly<NonNullable<OperationRecord['eventCounts']>> | null;
 };
 
 const codes = new Set([
@@ -194,6 +197,7 @@ export class ExecutionObservation {
     this.degraded = true;
     if (operation) operation.completionEvents = null;
     if (operation) operation.errorEvents = null;
+    if (operation) operation.eventCounts = null;
   }
   private now() {
     return (
@@ -221,11 +225,13 @@ export class ExecutionObservation {
         elapsedMs: null,
         status: 'in_progress',
         httpStatus: null,
+        responseFormat: null,
         headersAt: null,
         firstEventAt: null,
         lastEventAt: null,
         completionEvents: 0,
         errorEvents: 0,
+        eventCounts: null,
         bytes: 0,
         streamEnd: null,
         cancellationSource: 'unknown',
@@ -296,16 +302,32 @@ export class ExecutionObservation {
       if (failure) this.errors.set(error, failure);
     });
   }
-  headers(token: ObservedOperation | undefined, status: number) {
+  headers(token: ObservedOperation | undefined, status: number, contentType?: string | null) {
     this.attempt(() => {
       const operation = token as OperationRecord | undefined;
       if (operation) {
         operation.headersAt = this.now();
         operation.httpStatus = status;
+        if (contentType !== undefined) {
+          const mediaType = contentType?.split(';')[0].trim().toLowerCase();
+          operation.responseFormat =
+            mediaType === 'text/event-stream'
+              ? 'event_stream'
+              : mediaType === 'application/json' || mediaType?.endsWith('+json')
+                ? 'json'
+                : mediaType
+                  ? 'other'
+                  : 'missing';
+        }
       }
     });
   }
-  event(token?: ObservedOperation, completed = false, failed = false) {
+  event(
+    token?: ObservedOperation,
+    completed = false,
+    failed = false,
+    kind?: keyof NonNullable<OperationRecord['eventCounts']>,
+  ) {
     this.attempt(() => {
       const operation = token as OperationRecord | undefined;
       if (!operation) return;
@@ -314,6 +336,10 @@ export class ExecutionObservation {
       operation.lastEventAt = at;
       if (completed && operation.completionEvents !== null) operation.completionEvents++;
       if (failed && operation.errorEvents !== null) operation.errorEvents++;
+      if (kind && operation.completionEvents !== null) {
+        operation.eventCounts ??= { reasoning: 0, output_text: 0, lifecycle: 0, other: 0 };
+        operation.eventCounts[kind]++;
+      }
     });
   }
   bytes(token: ObservedOperation | undefined, bytes: number) {
@@ -428,7 +454,7 @@ export function observeResponse(
   signal?: AbortSignal | null,
   modelEvents = false,
 ) {
-  observation?.headers(operation, response.status);
+  observation?.headers(operation, response.status, response.headers.get('content-type'));
   if (!observation || !response.body) return response;
   const reader = response.body.getReader();
   const releaseReader = () => {
@@ -450,13 +476,23 @@ export function observeResponse(
   let line = '';
   let data = '';
   let discarded = false;
+  let skipLineFeed = false;
   const feed = (bytes: Uint8Array) => {
-    if (!modelEvents) return;
+    if (!modelEvents || !response.ok) return;
     try {
       const text = decoder.decode(bytes, { stream: true });
+      const lineEnd = /[\r\n]/g;
       let offset = 0;
       while (offset < text.length) {
-        const newline = text.indexOf('\n', offset);
+        if (skipLineFeed) {
+          skipLineFeed = false;
+          if (text[offset] === '\n') {
+            offset++;
+            continue;
+          }
+        }
+        lineEnd.lastIndex = offset;
+        const newline = lineEnd.exec(text)?.index ?? -1;
         const fragment = text.slice(offset, newline < 0 ? text.length : newline);
         if (line.length + fragment.length > 256 * 1024) {
           observation.degrade(operation);
@@ -465,14 +501,34 @@ export function observeResponse(
         } else if (!discarded) line += fragment;
         if (newline < 0) break;
         if (!discarded) {
-          const complete = line.replace(/\r$/, '');
+          const complete = line;
           if (complete === '') {
             if (data && data.trim() !== '[DONE]') {
               const event = JSON.parse(data);
               const failed = ['response.failed', 'response.incomplete', 'error'].includes(
                 event?.type,
               );
-              observation.event(operation, event?.type === 'response.completed', failed);
+              const type = typeof event?.type === 'string' ? event.type : '';
+              const kind =
+                type.startsWith('response.reasoning') || event?.item?.type === 'reasoning'
+                  ? 'reasoning'
+                  : type.startsWith('response.output_text.')
+                    ? 'output_text'
+                    : [
+                          'response.created',
+                          'response.in_progress',
+                          'response.output_item.added',
+                          'response.output_item.done',
+                          'response.content_part.added',
+                          'response.content_part.done',
+                          'response.completed',
+                          'response.incomplete',
+                          'response.failed',
+                          'error',
+                        ].includes(type)
+                      ? 'lifecycle'
+                      : 'other';
+              observation.event(operation, type === 'response.completed', failed, kind);
               if (failed)
                 observation.fail(
                   operation,
@@ -493,6 +549,7 @@ export function observeResponse(
           discarded = false;
           data = '';
         }
+        skipLineFeed = text[newline] === '\r';
         line = '';
         offset = newline + 1;
       }

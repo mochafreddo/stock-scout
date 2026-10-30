@@ -72,6 +72,27 @@ test('failed review exposes linked recommendation round trips, daily reads and v
   assert.doesNotMatch(JSON.stringify(observation), /synthetic|NAS:AAPL|observations|"123"|Bearer/);
 });
 
+test('recommendation and review observe SDK events without depending on content type', (t) => {
+  for (const contentType of ['Text/Event-Stream', '']) {
+    const result = run(t, 'review-late-error', { TEST_REPORT_CONTENT_TYPE: contentType });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    const failure = JSON.parse(result.stderr);
+    assert.equal(failure.error, 'MODEL_INCOMPLETE');
+    const requests = failure.observation.operations.filter((row) =>
+      ['recommendation.model.http', 'review.model.http'].includes(row.name),
+    );
+    assert.equal(requests.length, 3);
+    for (const request of requests) {
+      assert.equal(request.completionEvents, 1);
+      assert.ok(request.firstEventAt !== null);
+      assert.equal(request.responseFormat, contentType ? 'event_stream' : 'missing');
+    }
+    assert.equal(requests.at(-1).errorEvents, 1);
+    assert.equal(failure.usage.recommendationModel, 3);
+  }
+});
+
 test('recommendation and review header stalls preserve actual stage and target cancellation sources', (t) => {
   for (const [scenario, abort, expected, source, requests] of [
     ['report-header-stall', 'stage', 'MODEL_INCOMPLETE', 'stage_limit', 1],
