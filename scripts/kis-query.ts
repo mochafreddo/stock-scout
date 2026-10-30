@@ -1,4 +1,5 @@
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
+import { type ObservedOperation, observeResponse } from './execution-observation.ts';
 import { accessToken, invalidateToken } from './kis-auth.ts';
 
 const sourceCommit = '2077773a69a428daf63e148182511f068cc45de3';
@@ -68,95 +69,131 @@ export async function queryKis(
   symbol = '',
   context: ExecutionContext = {},
 ) {
-  context.runtime?.check();
-  context.signal?.throwIfAborted();
-  if (
-    !kind ||
-    !Object.hasOwn(kinds, kind) ||
-    !exchange ||
-    !['NAS', 'NYS', 'AMS'].includes(exchange)
-  )
-    throw new Error('USAGE');
-  const needsSymbol = kind === 'daily' || kind === 'info';
-  if (needsSymbol ? !symbol || !/^[A-Z0-9./^-]{1,20}$/.test(symbol) : symbol !== '')
-    throw new Error('USAGE');
-  const [path, trId, example] = kinds[kind];
-  let params: Record<string, string>;
-  if (kind === 'info') {
-    params = {
-      PRDT_TYPE_CD: exchange === 'NAS' ? '512' : exchange === 'NYS' ? '513' : '529',
-      PDNO: symbol,
-    };
-  } else if (kind === 'daily') {
-    params = { AUTH: '', EXCD: exchange, SYMB: symbol, GUBN: '0', BYMD: '', MODP: '0' };
-  } else {
-    params = { EXCD: exchange, NDAY: '0', VOL_RANG: '0', KEYB: '', AUTH: '', PRC1: '', PRC2: '' };
-  }
-  const { KIS_APP_KEY, KIS_APP_SECRET } = process.env;
-  if (!KIS_APP_KEY || !KIS_APP_SECRET) throw new Error('CREDENTIALS_MISSING');
-  let token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, undefined, context);
-  context.runtime?.secrets.add(token);
-  const url = new URL(`https://openapi.koreainvestment.com:9443/uapi/${path}`);
-  url.search = new URLSearchParams(params).toString();
-  const requestedAt = new Date().toISOString();
-  const query = async () => {
-    const signal = requestSignal(context, 15_000);
-    context.runtime?.take('kis');
-    const response = await fetch(url, {
-      headers: {
-        authorization: `Bearer ${token}`,
-        appkey: KIS_APP_KEY,
-        appsecret: KIS_APP_SECRET,
-        tr_id: trId,
-        custtype: 'P',
-      },
-      signal,
-      redirect: 'error',
-    });
-    let body: Record<string, unknown>;
-    try {
-      body = object(await response.json());
-      context.runtime?.check();
-      context.signal?.throwIfAborted();
-    } catch (error) {
-      if (!response.ok) throw Object.assign(new Error('HTTP_FAILURE'), { status: response.status });
-      throw error;
+  const observer = context.observation ?? context.runtime?.observation;
+  const operation = observer?.start('kis', context.parentId);
+  context = { ...context, observation: observer, parentId: operation?.id };
+  let validation: ObservedOperation | undefined;
+  try {
+    context.runtime?.check();
+    context.signal?.throwIfAborted();
+    if (
+      !kind ||
+      !Object.hasOwn(kinds, kind) ||
+      !exchange ||
+      !['NAS', 'NYS', 'AMS'].includes(exchange)
+    )
+      throw new Error('USAGE');
+    const needsSymbol = kind === 'daily' || kind === 'info';
+    if (needsSymbol ? !symbol || !/^[A-Z0-9./^-]{1,20}$/.test(symbol) : symbol !== '')
+      throw new Error('USAGE');
+    const [path, trId, example] = kinds[kind];
+    let params: Record<string, string>;
+    if (kind === 'info') {
+      params = {
+        PRDT_TYPE_CD: exchange === 'NAS' ? '512' : exchange === 'NYS' ? '513' : '529',
+        PDNO: symbol,
+      };
+    } else if (kind === 'daily') {
+      params = { AUTH: '', EXCD: exchange, SYMB: symbol, GUBN: '0', BYMD: '', MODP: '0' };
+    } else {
+      params = { EXCD: exchange, NDAY: '0', VOL_RANG: '0', KEYB: '', AUTH: '', PRC1: '', PRC2: '' };
     }
-    if (body.msg_cd === 'EGW00123') {
-      if (body.rt_cd === '0') throw kisFailure(body);
-      return { response, body, expired: true };
-    }
-    if (!response.ok) throw Object.assign(new Error('HTTP_FAILURE'), { status: response.status });
-    if (body.rt_cd !== '0') throw kisFailure(body);
-    return { response, body, expired: false };
-  };
-  let result = await query();
-  if (result.expired) {
-    token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, token, context);
+    const { KIS_APP_KEY, KIS_APP_SECRET } = process.env;
+    if (!KIS_APP_KEY || !KIS_APP_SECRET) throw new Error('CREDENTIALS_MISSING');
+    let token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, undefined, context);
     context.runtime?.secrets.add(token);
-    result = await query();
+    const url = new URL(`https://openapi.koreainvestment.com:9443/uapi/${path}`);
+    url.search = new URLSearchParams(params).toString();
+    const requestedAt = new Date().toISOString();
+    const query = async () => {
+      const signal = requestSignal(context, 15_000);
+      context.runtime?.take('kis');
+      const request = observer?.start('kis.http', operation?.id, 'request');
+      try {
+        const response = observeResponse(
+          await fetch(url, {
+            headers: {
+              authorization: `Bearer ${token}`,
+              appkey: KIS_APP_KEY,
+              appsecret: KIS_APP_SECRET,
+              tr_id: trId,
+              custtype: 'P',
+            },
+            signal,
+            redirect: 'error',
+          }),
+          observer,
+          request,
+          signal,
+        );
+        let body: Record<string, unknown>;
+        try {
+          body = object(await response.json());
+          context.runtime?.check();
+          context.signal?.throwIfAborted();
+        } catch (error) {
+          if (!response.ok)
+            throw Object.assign(new Error('HTTP_FAILURE'), { status: response.status });
+          throw error;
+        }
+        if (body.msg_cd === 'EGW00123') {
+          if (body.rt_cd === '0') throw kisFailure(body);
+          const error = kisFailure(body);
+          observer?.fail(request, error);
+          return { response, body, expired: true, request, error };
+        }
+        if (!response.ok)
+          throw Object.assign(new Error('HTTP_FAILURE'), { status: response.status });
+        if (body.rt_cd !== '0') throw kisFailure(body);
+        observer?.end(request);
+        return { response, body, expired: false, request, error: undefined };
+      } catch (error) {
+        if (request?.streamEnd === null) observer?.streamEnd(request, 'read_error', signal);
+        observer?.fail(request, error);
+        throw error;
+      }
+    };
+    let result = await query();
+    const rejected = result.expired ? result.request : undefined;
     if (result.expired) {
-      await invalidateToken(KIS_APP_KEY, KIS_APP_SECRET, token);
-      throw kisFailure(result.body);
+      token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, token, context);
+      context.runtime?.secrets.add(token);
+      result = await query();
+      if (result.expired) {
+        await invalidateToken(KIS_APP_KEY, KIS_APP_SECRET, token, {
+          observation: observer,
+          parentId: operation?.id,
+        });
+        throw result.error;
+      }
     }
+    const { response, body } = result;
+    validation = observer?.start('kis.validation', operation?.id);
+    const rawRows = kind === 'info' ? [body.output] : body.output2;
+    if (!Array.isArray(rawRows) || rawRows.length > 1000) throw new Error('RESPONSE_SHAPE');
+    const keys = kind === 'info' ? fields.info : kind === 'daily' ? fields.daily : fields.ranking;
+    const continuation = response.headers.get('tr_cont') ?? '';
+    if (!['', 'D', 'E', 'F', 'M'].includes(continuation)) throw new Error('RESPONSE_SHAPE');
+    const output = {
+      requestedAt,
+      receivedAt: new Date().toISOString(),
+      request: { path: `/uapi/${path}`, trId, params },
+      source: `https://github.com/koreainvestment/open-trading-api/blob/${sourceCommit}/examples_llm/overseas_stock/${example}/${example}.py`,
+      validation: 'unverified',
+      dataSession: null,
+      scope: 'one-page observation; not a candidate universe or verified premarket session',
+      continuation,
+      rowCount: rawRows.length,
+      summary: kind === 'info' ? {} : select(body.output1, fields.summary),
+      rows: rawRows.map((row) => select(row, keys)),
+    };
+    observer?.end(validation);
+    observer?.recover(rejected);
+    observer?.end(operation);
+    return output;
+  } catch (error) {
+    if (validation?.status === 'in_progress') observer?.fail(validation, error);
+    observer?.fail(operation, error);
+    throw error;
   }
-  const { response, body } = result;
-  const rawRows = kind === 'info' ? [body.output] : body.output2;
-  if (!Array.isArray(rawRows) || rawRows.length > 1000) throw new Error('RESPONSE_SHAPE');
-  const keys = kind === 'info' ? fields.info : kind === 'daily' ? fields.daily : fields.ranking;
-  const continuation = response.headers.get('tr_cont') ?? '';
-  if (!['', 'D', 'E', 'F', 'M'].includes(continuation)) throw new Error('RESPONSE_SHAPE');
-  return {
-    requestedAt,
-    receivedAt: new Date().toISOString(),
-    request: { path: `/uapi/${path}`, trId, params },
-    source: `https://github.com/koreainvestment/open-trading-api/blob/${sourceCommit}/examples_llm/overseas_stock/${example}/${example}.py`,
-    validation: 'unverified',
-    dataSession: null,
-    scope: 'one-page observation; not a candidate universe or verified premarket session',
-    continuation,
-    rowCount: rawRows.length,
-    summary: kind === 'info' ? {} : select(body.output1, fields.summary),
-    rows: rawRows.map((row) => select(row, keys)),
-  };
 }

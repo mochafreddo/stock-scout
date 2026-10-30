@@ -41,6 +41,16 @@ stderr의 JSON에는 고정 오류 코드가 있으며 일부 오류에 `retryAf
 
 인증 성공과 관측 JSON은 장전 데이터 기준 세션·정규장 범위·종목 유형 검증을 뜻하지 않습니다. 부모 [#243](https://github.com/mochafreddo/stock-scout/issues/243)과 [#239](https://github.com/mochafreddo/stock-scout/issues/239)의 미충족 조건은 유지합니다. 조건부 무효화의 설계 근거는 [ADR](adr/0002-kis-expired-token-invalidation.md)에 있습니다.
 
+## 공통 실행 진단에서 KIS 확인
+
+후보군·매수 후보·유형 검증 CLI의 실패 JSON에서 최상위 `observation`을 확인하세요. KIS를 사용하는 경로는 같은 실행 소유자 아래에 논리 조회 `kis`, 실제 전송 `kis.http`, 결과 검증 `kis.validation`을 기록합니다. 인증은 `kis.auth` 아래에서 잠금·캐시 읽기·재사용·조건부 무효화·발급·응답 검증·저장·잠금 해제를 구분하며 실제 발급 요청은 `kis.auth.issuance.http`입니다. 실제 전송 기록은 기존 정책 검사와 전송 집계 뒤에 생성합니다. 일정만 확인하는 경로에 KIS 요청을 추가하지 않습니다.
+
+`httpStatus`와 `headersAt`은 헤더를 받았다는 관측입니다. 본문 종료는 `streamEnd`의 `eof`, `read_error`, `cancelled`로 구분하며 논리 조회 성공은 기존 응답 검증을 통과해야 합니다. `cancellationSource`는 직접 연결한 제한 출처이며 확인하지 못한 출처는 `unknown`입니다. 부모·자식의 경과 시간은 중첩되므로 합산하지 마세요.
+
+명시적 만료가 정상 복구되면 거절된 실제 요청의 `failure.recovered`가 `true`로 남습니다. 이후 유형·추천 모델이 실패해도 `firstFailure`를 최종 중단 원인으로 단정하지 마세요. `finalError`와 `failure.propagated`를 함께 확인하면 복구된 실패와 최종 공개 오류로 전달된 실패를 구분할 수 있습니다. 기존 오류 코드·단계·요청 집계와 독립 KIS 관측 CLI의 출력 계약은 유지합니다.
+
+기록은 공통 [관측 계약](rca-observability-design.md#273의-공통-구현-계약)의 용량 제한·생략·관측 실패 처리를 사용합니다. 인증값·응답 본문·헤더 원문·외부 오류 문자열·개인 경로는 추가 진단에 기록하지 않습니다. 관측이 `degraded`여도 원래 인증 저장·발급 기록·잠금 해제와 실행 결과를 우선하며 진단을 위해 재시도하지 않습니다.
+
 ## 검증 범위
 
 CLI 프로세스 테스트는 임시 홈·캐시와 통제된 시각을 사용하며 외부 HTTP를 대체합니다. 첫 실행, 300초·60초 경계, 시간대 독립성, 자격 증명 변경, 손상·권한·저장 실패, 동시 실행과 잠금 재확인을 검사합니다. 실제 KIS와 별개이며 운영 가정의 공식 입증을 대신하지 않습니다.
