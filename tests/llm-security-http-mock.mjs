@@ -413,6 +413,11 @@ globalThis.fetch = async (url, init = {}) => {
     return Response.json({ models: [{ slug: 'gpt-6-luna', visibility: 'list' }] });
   assert.equal(request.pathname, '/v1/responses');
   streamSignal = init.signal;
+  if (scenario === 'model-http-spoof')
+    return Response.json(
+      { error: { code: 'private_error', message: 'siwc_relogin_required' } },
+      { status: 503 },
+    );
   if (process.env.SCENARIO === 'auth-failure')
     return Response.json(
       { error: { code: 'invalid_api_key', message: 'synthetic-subscription' } },

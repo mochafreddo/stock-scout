@@ -141,7 +141,10 @@ export async function marketCalendar({
         }
       } finally {
         if (request?.streamEnd === null) observation?.streamEnd(request, 'cancelled', signal);
-        await reader.cancel();
+        await reader.cancel().catch((error) => {
+          observation?.fail(request, error, 'unknown');
+          throw error;
+        });
       }
       const buffer = Buffer.concat(chunks);
       sources.push({

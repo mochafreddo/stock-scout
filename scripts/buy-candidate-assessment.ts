@@ -281,7 +281,11 @@ export async function recommendCandidates(
               try {
                 stream = await doStream();
               } catch (error) {
-                observation.fail(phaseRequests.at(-1), error);
+                observation.fail(
+                  phaseRequests.at(-1),
+                  error,
+                  APICallError.isInstance(error) ? 'unknown' : undefined,
+                );
                 throw error;
               }
               const request = phaseRequests.at(-1);

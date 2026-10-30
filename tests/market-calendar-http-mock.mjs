@@ -81,7 +81,12 @@ globalThis.fetch = async (url, options) => {
     if (scenario === 'model-final-future') Date.now = () => Date.parse('2026-12-04T22:00:00Z');
     if (scenario === 'model-http-failure')
       return Response.json(
-        { error: { code: 'private_error', message: 'synthetic-subscription' } },
+        {
+          error: {
+            code: 'private_error',
+            message: process.env.TEST_PROVIDER_MESSAGE || 'synthetic-subscription',
+          },
+        },
         { status: 503 },
       );
     if (scenario === 'model-quota')
@@ -270,6 +275,8 @@ globalThis.fetch = async (url, options) => {
           },
           cancel() {
             appendFileSync(process.env.TEST_STREAM_TRACE, 'cancel\n');
+            if (process.env.TEST_OFFICIAL_CANCEL_ERROR)
+              throw new Error(process.env.TEST_OFFICIAL_CANCEL_ERROR);
           },
         },
         { highWaterMark: 0 },

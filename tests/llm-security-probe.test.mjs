@@ -304,6 +304,22 @@ test('CLI distinguishes HTTP rejection and transport failures without exposing e
   }
 });
 
+test('type HTTP error messages cannot impersonate local observation codes', (t) => {
+  const result = run(t, 'model-http-spoof');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { error, observation } = JSON.parse(result.stderr);
+  assert.equal(error, 'MODEL_FAILED');
+  const request = observation.operations.find((row) => row.name === 'types.model.http');
+  assert.equal(request.httpStatus, 503);
+  assert.equal(request.streamEnd, 'eof');
+  assert.notEqual(request.failure.code, 'siwc_relogin_required');
+  assert.notEqual(observation.firstFailure.code, 'siwc_relogin_required');
+  assert.equal(observation.finalError.operationId, request.id);
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 1);
+  assert.doesNotMatch(result.stderr, /siwc_relogin_required|synthetic-subscription/);
+});
+
 test('CLI distinguishes blocked model, body and information deadlines from missing completion', (t) => {
   for (const [
     scenario,

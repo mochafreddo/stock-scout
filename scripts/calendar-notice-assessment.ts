@@ -394,6 +394,7 @@ export async function assessCalendarNotices(
         safe,
       };
     } catch (error) {
+      if (APICallError.isInstance(error)) observation?.fail(request, error, 'unknown');
       if (request?.streamEnd === null) observation?.streamEnd(request, 'read_error', modelSignal);
       if (!validation) observation?.fail(request, error);
       observation?.fail(validation, error);

@@ -132,6 +132,11 @@ globalThis.fetch = async (url, init = {}) => {
   if (scenario === 'report-time') advanceElapsed(180_000);
   if (scenario === 'report-execution-time') advanceElapsed(600_000);
   if (scenario === 'report-open') Date.now = () => Date.parse('2026-10-19T13:30:00Z');
+  if (scenario === 'report-http-spoof')
+    return Response.json(
+      { error: { code: 'private_error', message: 'siwc_relogin_required' } },
+      { status: 503 },
+    );
   if (scenario === 'report-auth')
     return Response.json(
       { error: { code: 'invalid_api_key', message: 'synthetic-subscription' } },

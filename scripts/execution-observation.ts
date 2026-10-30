@@ -424,6 +424,14 @@ export function observeResponse(
   observation?.headers(operation, response.status);
   if (!observation || !response.body) return response;
   const reader = response.body.getReader();
+  const releaseReader = () => {
+    try {
+      reader.releaseLock();
+    } catch (error) {
+      observation.fail(operation, error, 'unknown');
+      throw error;
+    }
+  };
   const decoder = new TextDecoder();
   let line = '';
   let data = '';
@@ -487,7 +495,7 @@ export function observeResponse(
           const part = await reader.read();
           if (part.done) {
             observation.streamEnd(operation, 'eof', signal);
-            reader.releaseLock();
+            releaseReader();
             controller.close();
           } else {
             feed(part.value);
@@ -497,7 +505,7 @@ export function observeResponse(
         } catch (error) {
           observation.streamEnd(operation, 'read_error', signal);
           observation.fail(operation, error, 'unknown');
-          reader.releaseLock();
+          releaseReader();
           controller.error(error);
         }
       },
@@ -505,8 +513,11 @@ export function observeResponse(
         observation.streamEnd(operation, 'cancelled', signal);
         try {
           await reader.cancel(reason);
+        } catch (error) {
+          observation.fail(operation, error, 'unknown');
+          throw error;
         } finally {
-          reader.releaseLock();
+          releaseReader();
         }
       },
     },

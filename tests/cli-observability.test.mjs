@@ -62,6 +62,30 @@ test('calendar failure distinguishes response headers, explicit completion and n
   );
 });
 
+test('calendar HTTP error messages cannot impersonate local observation codes', () => {
+  const result = runCalendar([], {
+    SCENARIO: 'model-http-failure',
+    TEST_PROVIDER_MESSAGE: 'siwc_relogin_required',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { error, observation } = JSON.parse(result.stderr);
+  assert.equal(error, 'MODEL_FAILED');
+  const request = observation.operations.find((row) => row.name === 'calendar.model.http');
+  assert.equal(request.httpStatus, 503);
+  assert.equal(request.streamEnd, 'eof');
+  assert.equal(request.failure.code, 'unknown');
+  assert.equal(observation.firstFailure.code, 'unknown');
+  assert.equal(observation.finalError.operationId, request.id);
+  assert.ok(
+    observation.operations
+      .filter((row) => row.failure)
+      .every((row) => row.failure.code === 'unknown'),
+  );
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 1);
+  assert.doesNotMatch(result.stderr, /siwc_relogin_required|synthetic-subscription/);
+});
+
 test('integrated calendar collection failures keep the same request relation and existing usage', (t) => {
   const result = run(t, 'calendar-http-failure');
   assert.equal(result.status, 1);
@@ -262,4 +286,35 @@ test('observation failure cannot prevent cancellation of an oversized official r
   );
   assert.deepEqual(result.streamEvents, ['cancel']);
   assert.equal(result.requests.length, 1);
+});
+
+test('official cancellation rejection stays unknown when its message mimics a local auth error', () => {
+  for (const degraded of ['', '1']) {
+    const result = runCalendar([], {
+      SCENARIO: 'official-body-limit',
+      TEST_OBSERVATION_ID_FAILURE: degraded,
+      TEST_OFFICIAL_CANCEL_ERROR: 'siwc_relogin_required',
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const { error, observation } = JSON.parse(result.stderr);
+    assert.equal(error, 'REQUEST_FAILED');
+    assert.equal(observation.degraded, Boolean(degraded));
+    const request = observation.operations.find((row) => row.name === 'calendar.official.http');
+    assert.equal(request.httpStatus, 200);
+    assert.equal(request.streamEnd, 'cancelled');
+    assert.equal(request.failure.code, 'unknown');
+    assert.equal(observation.firstFailure.code, 'unknown');
+    assert.equal(observation.firstFailure.operationId, request.id);
+    assert.equal(observation.finalError.operationId, request.id);
+    assert.ok(
+      observation.operations
+        .filter((row) => row.failure)
+        .every((row) => row.failure.code === 'unknown'),
+    );
+    assert.deepEqual(result.streamEvents, ['cancel']);
+    assert.equal(result.requests.length, 1);
+    assert.equal(result.auth.locked, false);
+    assert.doesNotMatch(result.stderr, /siwc_relogin_required|synthetic-|credentials\.json/);
+  }
 });

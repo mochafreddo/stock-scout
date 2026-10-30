@@ -5,6 +5,27 @@ import { run as runCandidate } from './candidate-cli-helper.mjs';
 const run = (t, scenario = 'ok', env = {}, args) =>
   runCandidate(t, scenario, env, args, 'buy-candidates');
 
+test('recommendation HTTP message spoof stays unknown with characterized existing MODEL_FAILED output', (t) => {
+  const result = run(t, 'report-http-spoof');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { error, usage, observation } = JSON.parse(result.stderr);
+  assert.equal(error, 'MODEL_FAILED');
+  const request = observation.operations.find((row) => row.name === 'recommendation.model.http');
+  assert.equal(request.httpStatus, 503);
+  assert.equal(request.streamEnd, 'eof');
+  assert.equal(request.failure.code, 'unknown');
+  assert.equal(observation.firstFailure.code, 'unknown');
+  assert.equal(observation.finalError.operationId, request.id);
+  assert.ok(
+    observation.operations
+      .filter((row) => row.failure)
+      .every((row) => row.failure.code === 'unknown'),
+  );
+  assert.equal(usage.recommendationModel, 1);
+  assert.doesNotMatch(JSON.stringify(observation), /siwc_relogin_required|synthetic-subscription/);
+});
+
 test('failed review exposes linked recommendation round trips, daily reads and validation without raw data', (t) => {
   const result = run(t, 'review-late-error');
   assert.equal(result.status, 1, result.stderr);
