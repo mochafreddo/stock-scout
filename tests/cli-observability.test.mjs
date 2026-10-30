@@ -121,6 +121,7 @@ test('SSE observation handles chunk boundaries and degrades oversized metadata w
   );
   assert.equal(request.completionEvents, 0);
   assert.ok(request.lastEventAt > request.firstEventAt);
+  assert.ok(request.endedAt > request.headersAt);
   const oversized = runCalendar([], {
     SCENARIO: 'model-no-completion',
     TEST_EVENT_PADDING_BYTES: '300000',
