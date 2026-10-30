@@ -14,6 +14,18 @@ test('candidate CLI includes shared type diagnostics and whole execution time on
   assert.equal(output.diagnostic.typeAssessment.cause, 'deadline_exceeded');
   assert.equal(output.diagnostic.typeAssessment.requests.length, 1);
   assert.equal(output.usage.typeModel, 1);
+  const observation = output.observation;
+  assert.ok(observation.coverage.includes('calendar'));
+  assert.ok(observation.coverage.includes('types'));
+  const model = observation.operations.find((row) => row.name === 'types.model');
+  const request = observation.operations.find((row) => row.name === 'types.model.http');
+  assert.equal(request.parentId, model.id);
+  assert.equal(request.httpStatus, 200);
+  assert.equal(request.streamEnd, 'eof');
+  assert.equal(request.completionEvents, 1);
+  assert.equal(model.status, 'failed');
+  assert.equal(request.status, 'completed');
+  assert.equal(observation.finalError.code, 'MODEL_INCOMPLETE');
 });
 
 test('candidate CLI leaves unstarted type measurements null on input failure', (t) => {

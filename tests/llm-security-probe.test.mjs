@@ -21,6 +21,7 @@ test('type assessment CLI rejects missing arguments without credentials or netwo
 
 function legacyFailure(stderr) {
   const output = JSON.parse(stderr);
+  delete output.observation;
   delete output.diagnostic.inputSnapshot;
   delete output.diagnostic.elapsedMs;
   delete output.diagnostic.typeAssessment;
@@ -30,6 +31,136 @@ function legacyFailure(stderr) {
   }
   return output;
 }
+
+test('CLI connects each type request and information tool to one execution observation', (t) => {
+  const result = run(t, 'missing-final-completion', {
+    TEST_STATISTICS_CLOCK: '1',
+    TEST_STREAM_DELAYS: '[13,29]',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  const output = JSON.parse(result.stderr);
+  const observation = output.observation;
+  assert.ok(observation, result.stderr);
+  const requests = observation.operations.filter((row) => row.name === 'types.model.http');
+  assert.equal(requests.length, 2);
+  assert.deepEqual(
+    requests.map((row) => [row.httpStatus, row.completionEvents, row.streamEnd]),
+    [
+      [200, 1, 'eof'],
+      [200, 0, 'eof'],
+    ],
+  );
+  assert.ok(requests.every((row) => row.headersAt <= row.endedAt));
+  assert.ok(requests.every((row) => row.headersAt < row.endedAt));
+  const model = observation.operations.find((row) => row.name === 'types.model');
+  assert.ok(requests.every((row) => row.parentId === model.id));
+  assert.equal(requests[0].status, 'completed');
+  assert.equal(requests[1].status, 'failed');
+  const tool = observation.operations.find((row) => row.name === 'types.info_tool');
+  assert.equal(tool.parentId, requests[0].id);
+  assert.equal(tool.status, 'completed');
+  assert.equal(observation.operations.filter((row) => row.name === 'types.info_tool').length, 2);
+  const web = observation.operations.find((row) => row.name === 'types.web_tool');
+  assert.equal(web.parentId, requests[0].id);
+  assert.equal(web.status, 'completed');
+  assert.equal(observation.finalError.code, 'MODEL_INCOMPLETE');
+  assert.equal(observation.finalError.operationId, requests[1].id);
+  assert.doesNotMatch(
+    JSON.stringify(observation),
+    /synthetic-subscription|test-secret|controlled-security-type/,
+  );
+});
+
+test('CLI records stage cancellation before headers, during streaming and information waiting', (t) => {
+  for (const scenario of ['model-blocked', 'body-blocked', 'info-blocked']) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    const output = JSON.parse(result.stderr);
+    const request = output.observation.operations.find((row) => row.name === 'types.model.http');
+    if (scenario === 'info-blocked') {
+      assert.equal(request.streamEnd, 'eof');
+      const tool = output.observation.operations.find((row) => row.name === 'types.info_tool');
+      assert.equal(tool.status, 'failed');
+      assert.equal(tool.cancellationSource, 'stage_limit');
+    } else {
+      assert.equal(request.streamEnd, 'cancelled', scenario);
+      assert.equal(request.cancellationSource, 'stage_limit', scenario);
+      assert.equal(request.status, 'failed', scenario);
+      assert.equal(request.httpStatus, scenario === 'body-blocked' ? 200 : null);
+      assert.equal(request.firstEventAt, null);
+    }
+  }
+});
+
+test('CLI preserves the first provider event failure after cancellation in common observations', (t) => {
+  const result = run(t, 'provider-then-blocked', { TEST_STREAM_END: 'response.failed' });
+  assert.equal(result.status, 1, result.stderr);
+  const output = JSON.parse(result.stderr);
+  const observation = output.observation;
+  const request = observation.operations.filter((row) => row.name === 'types.model.http').at(-1);
+  assert.equal(output.diagnostic.typeAssessment.cause, 'provider_failed');
+  assert.equal(request.errorEvents, 1);
+  assert.equal(request.completionEvents, 1);
+  assert.equal(request.streamEnd, 'cancelled');
+  assert.equal(request.cancellationSource, 'stage_limit');
+  assert.equal(observation.firstFailure.operationId, request.id);
+  assert.equal(observation.firstFailure.code, 'MODEL_INCOMPLETE');
+  assert.equal(observation.firstFailure.propagated, true);
+  assert.equal(observation.finalError.operationId, request.id);
+});
+
+test('CLI connects final validation failures without relabeling completed HTTP requests', (t) => {
+  const result = run(t, 'ok', { TEST_RESPONSE_STAGE: 'assessment', TEST_RESPONSE_VALUE: '{}' });
+  assert.equal(result.status, 1, result.stderr);
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'MODEL_OUTPUT');
+  const observation = output.observation;
+  const validation = observation.operations.find((row) => row.name === 'types.validation');
+  assert.equal(validation?.status, 'failed');
+  assert.equal(observation.finalError.operationId, validation.id);
+  assert.ok(
+    observation.operations
+      .filter((row) => row.name === 'types.model.http')
+      .every((row) => row.streamEnd === 'eof' && row.status === 'completed'),
+  );
+});
+
+test('CLI keeps authentication and final serialization in the same observation owner', (t) => {
+  const result = run(t, 'ok', {
+    TEST_SERIALIZATION_STAGE: 'output',
+    TEST_OUTPUT_SERIALIZATION: '1',
+    TEST_SERIALIZATION_EXCEPTION: 'private-output synthetic-subscription',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.diagnostic.stage, 'output');
+  const observation = output.observation;
+  assert.equal(observation.operations.find((row) => row.name === 'auth').status, 'completed');
+  const serialization = observation.operations.find((row) => row.name === 'output');
+  assert.equal(serialization?.status, 'failed');
+  assert.equal(observation.finalError.operationId, serialization.id);
+  assert.doesNotMatch(result.stderr, /private-output|synthetic-subscription/);
+});
+
+test('CLI links mapped ranking failures to the original KIS request in its execution', (t) => {
+  const result = run(t, 'ranking-exception', {
+    TEST_RANKING_EXCEPTION: 'private-ranking synthetic-subscription',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'RANKING_FAILED');
+  assert.equal(output.diagnostic.stage, 'ranking');
+  assert.equal(output.diagnostic.reason, 'unknown');
+  const observation = output.observation;
+  const request = observation.operations.find((row) => row.name === 'kis.http');
+  assert.equal(request.status, 'failed');
+  assert.equal(request.httpStatus, null);
+  assert.equal(observation.finalError.operationId, request.id);
+  assert.equal(observation.firstFailure.operationId, request.id);
+  assert.equal(observation.firstFailure.propagated, true);
+  assert.doesNotMatch(result.stderr, /private-ranking|synthetic-subscription/);
+  assert.equal(result.requests.length, 1);
+});
 
 test('CLI diagnoses missing completion with request-specific stream observations', (t) => {
   const result = run(t, 'missing-final-completion');
@@ -112,6 +243,13 @@ test('CLI preserves the first observed provider failure after valid JSON and com
     const output = JSON.parse(result.stderr);
     assert.equal(output.error, 'MODEL_INCOMPLETE');
     assert.equal(output.diagnostic.typeAssessment.cause, cause);
+    const commonRequest = output.observation.operations
+      .filter((row) => row.name === 'types.model.http')
+      .at(-1);
+    assert.equal(commonRequest.completionEvents, 1);
+    assert.equal(commonRequest.errorEvents, 1);
+    assert.equal(commonRequest.streamEnd, 'eof');
+    assert.equal(commonRequest.status, 'failed');
     assert.deepEqual(output.diagnostic.typeAssessment.requests.at(-1), {
       index: 2,
       elapsedMs: 5,
@@ -232,6 +370,12 @@ test('CLI retains duplicate-completion observations and unknown causes without g
   assert.equal(repeated.cause, 'duplicate_completion');
   assert.equal(repeated.requests[0].completionEvents, 2);
   assert.equal(repeated.requests[0].status, 'failed');
+  const commonRequest = JSON.parse(duplicate.stderr).observation.operations.find(
+    (row) => row.name === 'types.model.http',
+  );
+  assert.equal(commonRequest.completionEvents, 2);
+  assert.equal(commonRequest.streamEnd, 'eof');
+  assert.equal(commonRequest.status, 'failed');
   const validation = run(t, 'missing-explanation');
   assert.equal(validation.status, 1, validation.stderr);
   const diagnostic = JSON.parse(validation.stderr).diagnostic;
@@ -818,6 +962,22 @@ test('CLI reports individual web-page failure as incomplete assessment rather th
   assert.equal(output.webFailures.length, 1);
 });
 
+test('CLI distinguishes a tolerated page failure from a later output failure', (t) => {
+  const result = run(t, 'search-failed', {
+    TEST_SERIALIZATION_STAGE: 'output',
+    TEST_OUTPUT_SERIALIZATION: '1',
+    TEST_SERIALIZATION_EXCEPTION: 'private-output',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  const observation = JSON.parse(result.stderr).observation;
+  const web = observation.operations.find((row) => row.name === 'types.web_tool' && row.failure);
+  assert.equal(web.status, 'failed');
+  assert.equal(web.failure.recovered, true);
+  assert.equal(observation.firstFailure.recovered, true);
+  const output = observation.operations.find((row) => row.name === 'output');
+  assert.equal(observation.finalError.operationId, output.id);
+});
+
 test('CLI fails globally on failed search operations and unlocalized web failures', (t) => {
   for (const scenario of ['search-service-failed', 'search-scope-unknown']) {
     const result = run(t, scenario);
@@ -1299,7 +1459,7 @@ test('CLI keeps unexpected ranking HTTP exceptions unknown without trusting mess
       new URL(result.requests[0].url).pathname,
       '/uapi/overseas-stock/v1/ranking/trade-vol',
     );
-    assert.doesNotMatch(result.stderr, /private-|synthetic-|EGW00123|siwc_/);
+    assert.doesNotMatch(result.stderr, /private-|synthetic-|EGW00123|siwc_relogin_required/);
   }
 });
 
@@ -1652,6 +1812,7 @@ test('CLI retains original six-ranking input and settings when assessment times 
 
 function withoutSnapshot(stderr) {
   const output = JSON.parse(stderr);
+  delete output.observation;
   delete output.diagnostic.inputSnapshot;
   delete output.diagnostic.elapsedMs;
   delete output.diagnostic.typeAssessment;

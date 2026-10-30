@@ -28,6 +28,7 @@ type OperationName =
   | 'types.model'
   | 'types.model.http'
   | 'types.info_tool'
+  | 'types.web_tool'
   | 'types.validation'
   | 'recommendation'
   | 'recommendation.model'

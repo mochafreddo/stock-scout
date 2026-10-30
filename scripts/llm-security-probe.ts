@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { DiagnosticError } from './diagnostic-error.ts';
+import { ExecutionObservation, type ObservedOperation } from './execution-observation.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
 import {
@@ -33,6 +34,9 @@ const safeCodes = [
 ];
 const keyOf = (exchange: string, symbol: string) => `${exchange}:${symbol}`;
 const startedAt = performance.now();
+const observation = new ExecutionObservation();
+const context = { observation };
+let outputOperation: ObservedOperation | undefined;
 let typeAssessment: AssessmentDiagnostics = {
   statistics: {
     status: 'not_started',
@@ -101,7 +105,7 @@ try {
   }
   stage = 'authentication';
   const { readSiwcCredentials } = await import('./siwc-auth.ts');
-  const credentials = await readSiwcCredentials(directory);
+  const credentials = await readSiwcCredentials(directory, undefined, context);
   stage = 'unknown';
   const secrets = [
     credentials.accessToken,
@@ -125,11 +129,14 @@ try {
       for (const kind of ['volume', 'amount'] as const) {
         let record: Awaited<ReturnType<typeof queryKis>>;
         try {
-          record = await queryKis(kind, exchange);
+          record = await queryKis(kind, exchange, '', context);
         } catch (error) {
-          if (error instanceof AuthError)
-            throw new DiagnosticError('AUTH_FAILED', 'RANKING_FAILED');
-          throw new Error('RANKING_FAILED');
+          const mapped =
+            error instanceof AuthError
+              ? new DiagnosticError('AUTH_FAILED', 'RANKING_FAILED')
+              : new Error('RANKING_FAILED');
+          observation.propagate(mapped, error);
+          throw mapped;
         }
         const ranks = new Set<number>();
         for (const row of record.rows) {
@@ -189,6 +196,7 @@ try {
   if (secrets.some((secret) => secret && JSON.stringify(inputSnapshot).includes(secret)))
     throw new DiagnosticError('SENSITIVE_OUTPUT');
   const result = await assessSecurityTypes({
+    context,
     securities: [...securities.values()],
     model,
     accessToken: credentials.accessToken,
@@ -202,17 +210,22 @@ try {
     observations,
     ...(evaluation ? {} : { topPerRanking: Number(top) }),
   });
+  outputOperation = observation.start('output');
   console.log(JSON.stringify(result));
+  observation.end(outputOperation);
   if (result.status === 'analysis_insufficient') process.exitCode = 2;
 } catch (error) {
+  if (outputOperation?.status === 'in_progress') observation.fail(outputOperation, error);
   const code =
     error instanceof Error &&
     (safeCodes.includes(error.message) || error.message.startsWith('siwc_'))
       ? error.message
       : 'MODEL_FAILED';
+  observation.finish(code, error);
   console.error(
     JSON.stringify({
       error: code,
+      observation: observation.snapshot(),
       diagnostic: {
         elapsedMs: Math.round(performance.now() - startedAt),
         typeAssessment,
