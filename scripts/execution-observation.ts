@@ -8,6 +8,10 @@ type OperationName =
   | 'calendar'
   | 'calendar.collection'
   | 'calendar.official.http'
+  | 'calendar.official.body'
+  | 'calendar.official.cancel'
+  | 'http.cancel'
+  | 'http.release'
   | 'calendar.parse'
   | 'calendar.model'
   | 'calendar.model.http'
@@ -57,6 +61,7 @@ type OperationName =
 type OperationRecord = {
   id: string;
   parentId: string | null;
+  relatedRequestId?: string;
   name: OperationName;
   kind: 'operation' | 'request' | 'tool';
   startedAt: number | null;
@@ -201,12 +206,14 @@ export class ExecutionObservation {
     name: OperationName,
     parentId?: string | null,
     kind: ObservedOperation['kind'] = 'operation',
+    relatedRequestId?: string,
   ): ObservedOperation | undefined {
     return this.attempt(() => {
       this.coverage.add(name.startsWith('auth') ? 'siwc_auth' : name.split('.')[0]);
       const operation: OperationRecord = {
         id: `op-${++this.sequence}`,
         parentId: parentId ?? null,
+        ...(relatedRequestId ? { relatedRequestId } : {}),
         name,
         kind,
         startedAt: this.now(),
@@ -425,10 +432,17 @@ export function observeResponse(
   if (!observation || !response.body) return response;
   const reader = response.body.getReader();
   const releaseReader = () => {
+    const cleanup = observation.start(
+      'http.release',
+      operation?.parentId,
+      'operation',
+      operation?.id,
+    );
     try {
       reader.releaseLock();
+      observation.end(cleanup);
     } catch (error) {
-      observation.fail(operation, error, 'unknown');
+      observation.fail(cleanup, error, 'unknown');
       throw error;
     }
   };
@@ -511,10 +525,17 @@ export function observeResponse(
       },
       async cancel(reason) {
         observation.streamEnd(operation, 'cancelled', signal);
+        const cleanup = observation.start(
+          'http.cancel',
+          operation?.parentId,
+          'operation',
+          operation?.id,
+        );
         try {
           await reader.cancel(reason);
+          observation.end(cleanup);
         } catch (error) {
-          observation.fail(operation, error, 'unknown');
+          observation.fail(cleanup, error, 'unknown');
           throw error;
         } finally {
           releaseReader();

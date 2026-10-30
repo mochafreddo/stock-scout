@@ -112,6 +112,7 @@ export async function marketCalendar({
       observation?.headers(request, response.status);
       if (response.status !== 200 || !response.body) fail('SOURCE_HTTP_FAILURE');
       const reader = response.body.getReader();
+      const body = observation?.start('calendar.official.body', request?.id);
       const chunks: Uint8Array[] = [];
       let bytes = 0;
       try {
@@ -139,12 +140,18 @@ export async function marketCalendar({
             fail('COLLECTION_LIMIT');
           chunks.push(part.value);
         }
+        observation?.end(body);
+      } catch (error) {
+        observation?.fail(body, error);
+        throw error;
       } finally {
         if (request?.streamEnd === null) observation?.streamEnd(request, 'cancelled', signal);
+        const cleanup = observation?.start('calendar.official.cancel', request?.id);
         await reader.cancel().catch((error) => {
-          observation?.fail(request, error, 'unknown');
+          observation?.fail(cleanup, error, 'unknown');
           throw error;
         });
+        observation?.end(cleanup);
       }
       const buffer = Buffer.concat(chunks);
       sources.push({

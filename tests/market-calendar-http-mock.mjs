@@ -209,32 +209,65 @@ globalThis.fetch = async (url, options) => {
         Math.ceil(Number(process.env.TEST_EVENT_PADDING_BYTES) / 23),
       );
     const encoded = new TextEncoder().encode(
-      events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+      events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') +
+        (process.env.TEST_MODEL_CANCEL_ERROR ? 'data: {\n\n' : ''),
     );
     let offset = 0;
-    const body = process.env.TEST_SSE_CHUNK_BYTES
-      ? new ReadableStream(
-          {
-            pull(controller) {
-              if (offset >= encoded.length) {
-                controller.close();
-                return;
-              }
-              const next = Math.min(
-                encoded.length,
-                offset + Number(process.env.TEST_SSE_CHUNK_BYTES),
-              );
-              elapsedMs += 10;
-              controller.enqueue(encoded.slice(offset, next));
-              offset = next;
+    let cancelFallback;
+    const body =
+      process.env.TEST_SSE_CHUNK_BYTES || process.env.TEST_MODEL_CANCEL_ERROR
+        ? new ReadableStream(
+            {
+              start(controller) {
+                if (process.env.TEST_MODEL_CANCEL_ERROR)
+                  cancelFallback = setTimeout(() => controller.close(), 1000);
+              },
+              pull(controller) {
+                if (offset >= encoded.length) {
+                  if (process.env.TEST_MODEL_CANCEL_ERROR) return;
+                  controller.close();
+                  return;
+                }
+                const next = Math.min(
+                  encoded.length,
+                  offset + Number(process.env.TEST_SSE_CHUNK_BYTES || encoded.length),
+                );
+                elapsedMs += 10;
+                controller.enqueue(encoded.slice(offset, next));
+                offset = next;
+              },
+              cancel() {
+                clearTimeout(cancelFallback);
+                if (process.env.TEST_MODEL_CANCEL_ERROR) {
+                  appendFileSync(process.env.TEST_STREAM_TRACE, 'model-cancel\n');
+                  throw new Error(process.env.TEST_MODEL_CANCEL_ERROR);
+                }
+              },
             },
-          },
-          { highWaterMark: 0 },
-        )
-      : encoded;
-    return new Response(body, {
+            { highWaterMark: 0 },
+          )
+        : encoded;
+    const response = new Response(body, {
       headers: { 'content-type': 'text/event-stream' },
     });
+    if (process.env.TEST_MODEL_RELEASE_ERROR) {
+      const getReader = response.body.getReader.bind(response.body);
+      response.body.getReader = (...args) => {
+        const reader = getReader(...args);
+        const releaseLock = reader.releaseLock.bind(reader);
+        let rejected = false;
+        reader.releaseLock = () => {
+          releaseLock();
+          if (!rejected) {
+            rejected = true;
+            appendFileSync(process.env.TEST_STREAM_TRACE, 'model-release\n');
+            throw new Error(process.env.TEST_MODEL_RELEASE_ERROR);
+          }
+        };
+        return reader;
+      };
+    }
+    return response;
   }
   if (address.href === 'https://auth.openai.com/api/accounts/oauth/token') {
     elapsedMs += Number(process.env.AUTH_ELAPSED || 0);

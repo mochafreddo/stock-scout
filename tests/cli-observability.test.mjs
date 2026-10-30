@@ -304,12 +304,21 @@ test('official cancellation rejection stays unknown when its message mimics a lo
     assert.equal(request.httpStatus, 200);
     assert.equal(request.streamEnd, 'cancelled');
     assert.equal(request.failure.code, 'unknown');
-    assert.equal(observation.firstFailure.code, 'unknown');
-    assert.equal(observation.firstFailure.operationId, request.id);
-    assert.equal(observation.finalError.operationId, request.id);
+    assert.equal(observation.firstFailure.code, 'COLLECTION_LIMIT');
+    const body = observation.operations.find((row) => row.name === 'calendar.official.body');
+    const cleanup = observation.operations.find((row) => row.name === 'calendar.official.cancel');
+    assert.equal(body.parentId, request.id);
+    assert.equal(body.failure.code, 'COLLECTION_LIMIT');
+    assert.equal(body.failure.propagated, false);
+    assert.equal(observation.firstFailure.operationId, body.id);
+    assert.equal(observation.firstFailure.propagated, false);
+    assert.equal(cleanup.parentId, request.id);
+    assert.equal(cleanup.failure.code, 'unknown');
+    assert.equal(cleanup.failure.propagated, true);
+    assert.equal(observation.finalError.operationId, cleanup.id);
     assert.ok(
       observation.operations
-        .filter((row) => row.failure)
+        .filter((row) => row.failure && row.id !== body.id)
         .every((row) => row.failure.code === 'unknown'),
     );
     assert.deepEqual(result.streamEvents, ['cancel']);
@@ -317,4 +326,56 @@ test('official cancellation rejection stays unknown when its message mimics a lo
     assert.equal(result.auth.locked, false);
     assert.doesNotMatch(result.stderr, /siwc_relogin_required|synthetic-|credentials\.json/);
   }
+});
+
+test('model release rejection remains separate from the earlier provider failure', () => {
+  const result = runCalendar([], {
+    SCENARIO: 'model-incomplete',
+    TEST_MODEL_RELEASE_ERROR: 'siwc_relogin_required',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { error, observation } = JSON.parse(result.stderr);
+  const request = observation.operations.find((row) => row.name === 'calendar.model.http');
+  assert.equal(request.failure.code, 'MODEL_INCOMPLETE');
+  assert.equal(observation.firstFailure.operationId, request.id);
+  const cleanup = observation.operations.find((row) => row.name === 'http.release');
+  assert.equal(cleanup?.failure.code, 'unknown', `public=${error}`);
+  assert.equal(error, 'MODEL_FAILED');
+  assert.equal(cleanup.parentId, request.parentId);
+  assert.equal(cleanup.relatedRequestId, request.id);
+  assert.equal(cleanup.failure.propagated, observation.finalError.operationId === cleanup.id);
+  if (cleanup.failure.propagated) assert.equal(observation.firstFailure.propagated, false);
+  assert.deepEqual(result.streamEvents, ['model-release']);
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 1);
+  assert.doesNotMatch(
+    JSON.stringify(observation),
+    /siwc_relogin_required|synthetic-|credentials\.json/,
+  );
+});
+
+test('model malformed SSE cancellation records an independent unknown cleanup rejection', () => {
+  const result = runCalendar([], {
+    SCENARIO: 'model-incomplete',
+    TEST_MODEL_CANCEL_ERROR: 'siwc_relogin_required',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  const { error, observation } = JSON.parse(result.stderr);
+  assert.equal(error, 'MODEL_FAILED');
+  assert.equal(result.stdout, '');
+  const request = observation.operations.find((row) => row.name === 'calendar.model.http');
+  const cleanup = observation.operations.find((row) => row.name === 'http.cancel');
+  assert.equal(cleanup?.failure.code, 'unknown', `public=${error}; cancels=${result.streamEvents}`);
+  assert.equal(cleanup.parentId, request.parentId);
+  assert.equal(cleanup.relatedRequestId, request.id);
+  assert.equal(cleanup.failure.propagated, observation.finalError.operationId === cleanup.id);
+  if (cleanup.failure.propagated) assert.equal(observation.firstFailure.propagated, false);
+  assert.equal(observation.firstFailure.operationId, request.id);
+  assert.equal(observation.firstFailure.code, 'MODEL_INCOMPLETE');
+  assert.deepEqual(result.streamEvents, ['model-cancel']);
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 1);
+  assert.doesNotMatch(
+    JSON.stringify(observation),
+    /siwc_relogin_required|synthetic-|credentials\.json/,
+  );
 });
