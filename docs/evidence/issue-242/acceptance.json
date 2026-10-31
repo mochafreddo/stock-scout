@@ -1,0 +1,279 @@
+{
+  "issue": 242,
+  "reviewBase": "ac46d7b4be0036abc46ac89e21d5e49344f3927d",
+  "acceptance": "incomplete_daytime_live_report_not_observed",
+  "runtimeInputsSha256": "1bc9ac6eddd09377227ecdce411b844524db876b6ff4ce036697ec7ed952946c",
+  "sourceUnchanged": true,
+  "live": {
+    "maximumAuthorizedRuns": 1,
+    "runsUsed": 1,
+    "startedAt": "2026-10-31T13:27:25.887096+00:00",
+    "finishedAt": "2026-10-31T13:30:58.586438+00:00",
+    "elapsedSeconds": 212.697,
+    "exitCode": 0,
+    "status": "no_candidates",
+    "path": "normal_empty_universe",
+    "evaluatedAt": "2026-10-31T13:30:58.564Z",
+    "dataSession": {
+      "date": "2026-10-30",
+      "open": "2026-10-30T13:30:00.000Z",
+      "close": "2026-10-30T20:00:00.000Z"
+    },
+    "targetSession": {
+      "date": "2026-11-02",
+      "open": "2026-11-02T14:30:00.000Z",
+      "close": "2026-11-02T21:00:00.000Z"
+    },
+    "rankings": [
+      {
+        "exchange": "NAS",
+        "kind": "volume",
+        "requestedAt": "2026-10-31T13:29:59.953Z",
+        "receivedAt": "2026-10-31T13:30:00.103Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "NAS",
+        "kind": "amount",
+        "requestedAt": "2026-10-31T13:30:00.110Z",
+        "receivedAt": "2026-10-31T13:30:00.194Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "NYS",
+        "kind": "volume",
+        "requestedAt": "2026-10-31T13:30:00.206Z",
+        "receivedAt": "2026-10-31T13:30:00.262Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "NYS",
+        "kind": "amount",
+        "requestedAt": "2026-10-31T13:30:00.271Z",
+        "receivedAt": "2026-10-31T13:30:00.301Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "AMS",
+        "kind": "volume",
+        "requestedAt": "2026-10-31T13:30:00.309Z",
+        "receivedAt": "2026-10-31T13:30:00.371Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "AMS",
+        "kind": "amount",
+        "requestedAt": "2026-10-31T13:30:00.378Z",
+        "receivedAt": "2026-10-31T13:30:00.414Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      }
+    ],
+    "eligibleSecurities": 0,
+    "dailyRequests": 0,
+    "excluded": [
+      {
+        "exchange": "NAS",
+        "symbol": "INTC",
+        "type": "unknown"
+      },
+      {
+        "exchange": "NAS",
+        "symbol": "QQQ",
+        "type": "etf"
+      },
+      {
+        "exchange": "NYS",
+        "symbol": "NOK",
+        "type": "unknown"
+      },
+      {
+        "exchange": "NYS",
+        "symbol": "TSM",
+        "type": "unknown"
+      },
+      {
+        "exchange": "AMS",
+        "symbol": "BURU",
+        "type": "unknown"
+      },
+      {
+        "exchange": "AMS",
+        "symbol": "SPY",
+        "type": "unknown"
+      }
+    ],
+    "typeCoverage": {
+      "input": 6,
+      "included": 0,
+      "excluded": 6,
+      "unconfirmed": 5,
+      "individualLookupFailures": 0,
+      "inclusionRate": 0
+    },
+    "calendarModel": {
+      "provider": "openai",
+      "authentication": "siwc",
+      "model": "gpt-6.1-sol",
+      "semanticReliability": "unverified",
+      "requests": 1
+    },
+    "typeModel": {
+      "id": "gpt-6-luna",
+      "requests": 3,
+      "completions": 3
+    },
+    "recommendationModel": {
+      "id": "gpt-6.1-sol",
+      "authentication": "siwc",
+      "requests": 2,
+      "completions": 2
+    },
+    "semanticReview": {
+      "supported": true,
+      "reliability": "unverified"
+    },
+    "fractionalTradingStatus": "unverified",
+    "usage": {
+      "kis": 12,
+      "issuance": 0,
+      "official": 52,
+      "calendarModel": 1,
+      "typeModel": 3,
+      "recommendationModel": 2,
+      "refresh": 1
+    },
+    "paidSwitchObserved": false,
+    "artifacts": {
+      "live.stdout.json": {
+        "bytes": 132232,
+        "sha256": "fe8842f07d6ee9e3b052b705465acb476ad738b101e9d567c97ba7cb8df1a1be"
+      },
+      "live.stderr.json": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  },
+  "verification": {
+    "publicSeams": [
+      "CLI arguments",
+      "stdout",
+      "stderr",
+      "exit code",
+      "external HTTP"
+    ],
+    "focused": {
+      "command": "node --test tests/buy-candidates.test.mjs tests/candidate-universe.test.mjs tests/market-calendar-boundaries.test.mjs tests/kis-auth.test.mjs tests/kis-recovery.test.mjs",
+      "exitCode": 0,
+      "passed": 91,
+      "failed": 0
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "exitCode": 0
+    },
+    "negativeControls": {
+      "runner": "dotfiles/.agents/scripts/mutation-probe.py --batch",
+      "source": "isolated git archive of reviewBase; no environment or credential files",
+      "command": "node --test '--test-name-pattern=every recommendation response|one second before the target open|four zero OHLC|daily date gaps|KST expiry is independent|300-second interval|one-dollar reservation boundary|valid no-candidates|recommendation budgets' tests/buy-candidates.test.mjs tests/candidate-universe.test.mjs tests/kis-auth.test.mjs",
+      "baselineExitCode": 0,
+      "mutationExitCode": 1,
+      "failureKind": "AssertionError",
+      "runnerExitCode": 0,
+      "mutations": [
+        {
+          "name": "explicit-completion",
+          "file": "scripts/buy-candidate-assessment.ts",
+          "old": "if (!completed) {\n                        failure = new Error('MODEL_INCOMPLETE');\n                        observation.fail(request, failure);\n                        throw failure;\n                      }",
+          "new": "if (!completed) completions++;",
+          "result": "caught"
+        },
+        {
+          "name": "target-open",
+          "file": "scripts/candidate-runtime.ts",
+          "old": "this.target - Date.now(),",
+          "new": "Infinity,",
+          "result": "caught"
+        },
+        {
+          "name": "positive-ohlc",
+          "file": "scripts/candidate-universe.ts",
+          "old": "Math.min(open, high, low, close) <= 0 ||",
+          "new": "",
+          "result": "caught"
+        },
+        {
+          "name": "required-session-date",
+          "file": "scripts/candidate-universe.ts",
+          "old": "const row = rows.get(date);",
+          "new": "const row = rows.get(date) ?? [...rows.values()][0];",
+          "result": "caught"
+        },
+        {
+          "name": "cached-expiry-margin",
+          "file": "scripts/kis-auth.ts",
+          "old": "expiry(token.access_token_token_expired) - Date.now() > 60_000",
+          "new": "expiry(token.access_token_token_expired) - Date.now() > 0",
+          "result": "caught"
+        },
+        {
+          "name": "issuance-interval",
+          "file": "scripts/kis-auth.ts",
+          "old": "const remaining = previous.at + 300_000 - Date.now();",
+          "new": "const remaining = previous.at - Date.now();",
+          "result": "caught"
+        },
+        {
+          "name": "reserve-remaining-requests",
+          "file": "scripts/paid-api.ts",
+          "old": "this.reserved + cost + future * (remainingRequests - 1) > 1_000_000",
+          "new": "this.reserved + cost > 1_000_000",
+          "result": "caught"
+        },
+        {
+          "name": "one-dollar-cap",
+          "file": "scripts/paid-api.ts",
+          "old": "this.reserved + cost + future * (remainingRequests - 1) > 1_000_000",
+          "new": "this.reserved + cost + future * (remainingRequests - 1) > 2_000_000",
+          "result": "caught"
+        },
+        {
+          "name": "semantic-review-rejection",
+          "file": "scripts/buy-candidate-assessment.ts",
+          "old": "if (!review.supported) throw new Error('REPORT_UNSUPPORTED');",
+          "new": "if (false) throw new Error('REPORT_UNSUPPORTED');",
+          "result": "caught"
+        },
+        {
+          "name": "quota-only-fallback",
+          "file": "scripts/buy-candidate-assessment.ts",
+          "old": "error.statusCode === 429 && code === 'subscription_sharing_usage_limit_exceeded'",
+          "new": "error.statusCode === 429",
+          "result": "caught"
+        }
+      ]
+    },
+    "finalChecks": "recorded separately in the task delivery report"
+  },
+  "limitsOfEvidence": [
+    "Run occurred at night in Korea, not during daytime.",
+    "Normal empty universe; no live daily data or candidate selection supported by daily reads in this run.",
+    "Model quality, source completeness and fractional trading availability remain unverified.",
+    "No actual subscription exhaustion, integrated paid report, token expiry recovery or independent billing reconciliation.",
+    "Historical eligible-daily report and authentication observations retain their original revisions and scope."
+  ],
+  "remoteIssueUpdated": false,
+  "pushed": false
+}

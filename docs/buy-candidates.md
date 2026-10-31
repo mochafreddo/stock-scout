@@ -82,7 +82,8 @@ KIS 조회의 구조화된 `EGW00316`에는 같은 요청을 1초 뒤 최대 한
 | `REPORT_UNSUPPORTED` | 의미 검토에서 근거 없는 설명이나 허용하지 않은 매매 지시 등을 발견함 |
 | `MODEL_INCOMPLETE` | 중간·최종·검토 응답의 미완료, 스트림 오류 또는 단계 시간 초과 |
 | `MODEL_LIMIT`, `MODEL_INPUT_LIMIT`, `REQUEST_LIMIT` | 모델·입력 크기·요청 상한 도달 |
-| `SUBSCRIPTION_LIMIT` | 명시적인 구독 한도 소진. 유료 요청은 보내지 않음 |
+| `SUBSCRIPTION_LIMIT` | 명시적인 구독 한도 소진. 일정·유형은 중단하며 후보 선정·의미 검토의 전환 조건은 [유료 전환 안내](#구독-한도-소진-시-유료-전환)를 따릅니다. |
+| `PAID_CREDENTIALS_MISSING`, `PAID_BUDGET_UNPROVABLE`, `PAID_BUDGET_EXCEEDED` | 별도 API 인증 부재, 최대 비용 산정 불가 또는 실행 예산 부족. 추가 유료 생성을 보내지 않습니다. |
 | `AUTH_FAILED`, `siwc_*` | 공통 인증 실패. 기존 인증 안내의 복구 절차를 따름 |
 | `MARKET_ACTIVE`, `TARGET_OPEN`, `EXECUTION_LIMIT` | 장중 시작·실행 중 개장·전체 실행 마감 도달 |
 
