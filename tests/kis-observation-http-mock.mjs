@@ -1,12 +1,37 @@
-import './candidate-universe-http-mock.mjs';
 import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { mock } from 'node:test';
+import { CandidateRuntime } from '../scripts/candidate-runtime.ts';
+import { advanceElapsed } from './candidate-universe-http-mock.mjs';
 
 const fetch = globalThis.fetch;
 let models = 0;
 let queries = 0;
 const mode = process.env.KIS_TEST;
+if (mode === 'retry-budget' || mode === 'retry-last-slot') {
+  const take = CandidateRuntime.prototype.take;
+  mock.method(CandidateRuntime.prototype, 'take', function (kind) {
+    if (kind === 'kis' && this.counts.kis === 0)
+      this.counts.kis = mode === 'retry-budget' ? 89 : 88;
+    return take.call(this, kind);
+  });
+}
+if (mode === 'retry-execution' || mode === 'retry-open') {
+  const signal = CandidateRuntime.prototype.signal;
+  mock.method(CandidateRuntime.prototype, 'signal', function (ms, ...args) {
+    if (ms > 500_000) {
+      const controller = new AbortController();
+      setTimeout(() => {
+        if (mode === 'retry-execution') advanceElapsed(600_001);
+        else Date.now = () => Date.parse('2026-10-19T13:30:00Z');
+        controller.abort();
+      }, 5);
+      return controller.signal;
+    }
+    return signal.call(this, ms, ...args);
+  });
+}
 const cache = join(process.env.HOME, 'Library/Caches/stock-scout');
 if (mode === 'locked') mkdirSync(join(cache, 'issuance.lock'), { mode: 0o700 });
 if (mode === 'initial-wait') unlinkSync(join(cache, 'issuance.json'));
@@ -51,6 +76,22 @@ globalThis.fetch = async (url, init = {}) => {
       assert.equal(init.headers.appsecret, 'test-secret');
       assert.equal(init.headers.custtype, 'P');
       queries++;
+      if (
+        mode?.startsWith('retry-') &&
+        (queries === 1 || (queries === 2 && mode === 'retry-repeat'))
+      ) {
+        if (mode === 'retry-short') advanceElapsed(599_500);
+        if (mode === 'retry-boundary') advanceElapsed(599_000);
+        appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ retryQuery: queries })}\n`);
+        return Response.json(
+          { rt_cd: '1', msg_cd: 'EGW00316', msg1: 'test-secret' },
+          { status: 500 },
+        );
+      }
+      if (mode?.startsWith('retry-'))
+        appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ retryQuery: queries })}\n`);
+      if (queries === 2 && mode === 'retry-invalid')
+        return Response.json({ rt_cd: '0', output1: {}, output2: {} });
       if (queries === 1 && mode === 'query-headers-timeout')
         return new Promise((_resolve, reject) => {
           const keepAlive = setTimeout(() => {}, 1000);

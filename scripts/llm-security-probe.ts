@@ -132,7 +132,11 @@ try {
         try {
           let record: Awaited<ReturnType<typeof queryKis>>;
           try {
-            record = await queryKis(kind, exchange, '', { ...context, parentId: ranking?.id });
+            record = await queryKis(kind, exchange, '', {
+              ...context,
+              secrets,
+              parentId: ranking?.id,
+            });
           } catch (error) {
             const mapped =
               error instanceof AuthError

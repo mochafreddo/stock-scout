@@ -92,6 +92,21 @@ test('CLI records stage cancellation before headers, during streaming and inform
   }
 });
 
+test('CLI cancels EGW00316 retry waiting at the existing type-stage deadline', (t) => {
+  const result = run(t, 'retry-stage');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'QUERY_FAILED');
+  assert.equal(output.diagnostic.typeAssessment.cause, 'deadline_exceeded');
+  assert.equal(result.requests.find((r) => 'retryWaitHasSignal' in r).retryWaitHasSignal, true);
+  assert.equal(result.requests.filter((r) => r.url?.includes('search-info')).length, 1);
+  const wait = output.observation.operations.find((r) => r.name === 'kis.retry_wait');
+  assert.equal(wait.status, 'failed');
+  const tool = output.observation.operations.find((r) => r.name === 'types.info_tool');
+  assert.equal(tool.cancellationSource, 'stage_limit');
+});
+
 test('CLI preserves the first provider event failure after cancellation in common observations', (t) => {
   const result = run(t, 'provider-then-blocked', { TEST_STREAM_END: 'response.failed' });
   assert.equal(result.status, 1, result.stderr);
@@ -416,7 +431,12 @@ test('CLI keeps the provider failure when the stream is later cancelled at the d
 function run(t, scenario = 'ok', extraEnv = {}, evaluationInput, credentialOverrides = {}) {
   const f = fixture();
   t.after(f.close);
-  putToken(f, 'test-token');
+  putToken(
+    f,
+    extraEnv.TEST_KIS_TOKEN ?? 'test-token',
+    extraEnv.KIS_APP_KEY ?? 'test-key',
+    extraEnv.KIS_APP_SECRET ?? 'test-secret',
+  );
   const directory = join(f.home, 'siwc');
   mkdirSync(directory, { mode: 0o700 });
   const hostId = 'urn:uuid:859484d1-d773-489f-a0dd-a3021048bb7f';
@@ -837,6 +857,66 @@ test('CLI never emits partial success on rank, identity or common lookup failure
     assert.equal(result.status, 1, scenario + result.stderr);
     assert.equal(result.stdout, '', scenario);
     assert.equal(legacyFailure(result.stderr).error, code, scenario);
+  }
+});
+
+test('CLI preserves safe KIS failure identity and provider codes without response secrets', (t) => {
+  for (const [body, bodyParsed, providerCode, status] of [
+    [
+      JSON.stringify({ rt_cd: '1', msg_cd: 'MCA99999', msg1: 'body-secret test-secret' }),
+      true,
+      'MCA99999',
+      500,
+    ],
+    [JSON.stringify({ rt_cd: '1', msg_cd: 'MCA99999' }), true, 'MCA99999', 200],
+    ['invalid-json body-secret', false, null, 500],
+    ['[]', true, null, 500],
+    [JSON.stringify({ msg_cd: 'body-secret' }), true, null, 500],
+    [JSON.stringify({ msg_cd: 'A'.repeat(21) }), true, null, 500],
+    [JSON.stringify({ msg_cd: 'SYNTHETICSECRET' }), true, null, 500],
+    [JSON.stringify({ msg_cd: 'SECRETTOKEN' }), true, null, 500],
+    [JSON.stringify({ msg_cd: 'ACCESSSECRET' }), true, null, 500],
+    [JSON.stringify({ msg_cd: 'IDENTITYSECRET' }), true, null, 500],
+    [JSON.stringify({ msg_cd: 'REFRESHSECRET' }), true, null, 500],
+    [JSON.stringify({ msg_cd: 'APISECRET' }), true, null, 500],
+  ]) {
+    const result = run(
+      t,
+      'lookup-diagnostic',
+      {
+        TEST_KIS_BODY: body,
+        TEST_KIS_STATUS: String(status),
+        KIS_APP_SECRET: 'SYNTHETICSECRET',
+        TEST_KIS_TOKEN: 'SECRETTOKEN',
+        TEST_MODEL_TOKEN: 'ACCESSSECRET',
+        OPENAI_API_KEY: 'APISECRET',
+      },
+      undefined,
+      { accessToken: 'ACCESSSECRET', idToken: 'IDENTITYSECRET', refreshToken: 'REFRESHSECRET' },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, 'QUERY_FAILED');
+    const request = output.observation.operations.find(
+      (row) => row.id === output.observation.firstFailure.operationId,
+    );
+    assert.equal(request.name, 'kis.http');
+    assert.equal(request.httpStatus, status);
+    assert.deepEqual(request.kis, {
+      kind: 'info',
+      exchange: 'NAS',
+      symbol: 'AAPL',
+      bodyParsed,
+      providerCode,
+    });
+    assert.equal(request.failure.code, status === 200 ? 'KIS_FAILURE' : 'HTTP_FAILURE');
+    assert.equal(output.observation.finalError.operationId, request.id);
+    assert.equal(result.requests.filter((row) => row.url?.includes('search-info')).length, 1);
+    assert.doesNotMatch(
+      result.stderr,
+      /body-secret|header-secret|test-key|test-secret|test-token|SYNTHETICSECRET|SECRETTOKEN|ACCESSSECRET|IDENTITYSECRET|REFRESHSECRET|APISECRET/,
+    );
   }
 });
 
@@ -1453,7 +1533,20 @@ test('CLI preserves ranking failures and confirmed authentication causes without
       });
       assert.equal(request.body, null);
     }
-    assert.doesNotMatch(result.stderr, /synthetic-|test-key|test-secret|private-|EGW00123/);
+    const { observation } = JSON.parse(result.stderr);
+    if (scenario === 'ranking-http-auth' || scenario === 'ranking-auth') {
+      const request = observation.operations.find(
+        (row) => row.id === observation.firstFailure.operationId,
+      );
+      assert.deepEqual(request.kis, {
+        kind: 'volume',
+        exchange: 'NAS',
+        symbol: null,
+        bodyParsed: true,
+        providerCode: 'EGW00123',
+      });
+    }
+    assert.doesNotMatch(result.stderr, /synthetic-|test-key|test-secret|private-/);
   }
 });
 

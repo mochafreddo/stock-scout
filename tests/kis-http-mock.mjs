@@ -52,6 +52,17 @@ globalThis.fetch = async (url, options) => {
     }[request.pathname],
   );
   const step = JSON.parse(process.env.TEST_QUERY_STEPS || '[]')[queryCount++];
+  if (process.env.TEST_QUERY_DETAILS)
+    appendFileSync(
+      process.env.TEST_QUERY_DETAILS,
+      `${JSON.stringify({
+        at: performance.now(),
+        url: request.href,
+        trId: options.headers.tr_id,
+        tokenMatches: options.headers.authorization === `Bearer ${step?.token || 'test-token'}`,
+      })}\n`,
+      { mode: 0o600 },
+    );
   const expectedToken = step?.token || 'test-token';
   assert.equal(options.headers.authorization, `Bearer ${expectedToken}`);
   assert.equal(

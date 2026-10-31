@@ -1,3 +1,4 @@
+import { setTimeout } from 'node:timers/promises';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { type ObservedOperation, observeFetch, observeResponse } from './execution-observation.ts';
 import { accessToken, invalidateToken } from './kis-auth.ts';
@@ -109,6 +110,16 @@ export async function queryKis(
       const signal = requestSignal(context, 15_000);
       context.runtime?.take('kis');
       const request = observer?.start('kis.http', operation?.id, 'request');
+      let bodyParsed = false;
+      let providerCode: unknown;
+      const observeFailure = () =>
+        observer?.kisFailure(request, { kind, exchange, symbol }, bodyParsed, providerCode, [
+          KIS_APP_KEY,
+          KIS_APP_SECRET,
+          token,
+          ...(context.secrets ?? []).filter((secret): secret is string => Boolean(secret)),
+          ...(context.runtime?.secrets ?? []),
+        ]);
       try {
         const response = observeResponse(
           await observeFetch(
@@ -133,7 +144,10 @@ export async function queryKis(
         );
         let body: Record<string, unknown>;
         try {
-          body = object(await response.json());
+          const parsed: unknown = await response.json();
+          bodyParsed = true;
+          body = object(parsed);
+          providerCode = body.msg_cd;
           context.runtime?.check();
           context.signal?.throwIfAborted();
         } catch (error) {
@@ -144,33 +158,78 @@ export async function queryKis(
         if (body.msg_cd === 'EGW00123') {
           if (body.rt_cd === '0') throw kisFailure(body);
           const error = kisFailure(body);
+          observeFailure();
           observer?.fail(request, error);
-          return { response, body, expired: true, request, error };
+          return { response, body, expired: true, transient: false, request, error };
+        }
+        if (body.msg_cd === 'EGW00316') {
+          const error = response.ok
+            ? kisFailure(body)
+            : Object.assign(new Error('HTTP_FAILURE'), { status: response.status });
+          if (body.rt_cd === '0') throw error;
+          observeFailure();
+          observer?.fail(request, error);
+          return { response, body, expired: false, transient: true, request, error };
         }
         if (!response.ok)
           throw Object.assign(new Error('HTTP_FAILURE'), { status: response.status });
         if (body.rt_cd !== '0') throw kisFailure(body);
         observer?.end(request);
-        return { response, body, expired: false, request, error: undefined };
+        return { response, body, expired: false, transient: false, request, error: undefined };
       } catch (error) {
+        observeFailure();
         if (request?.streamEnd === null) observer?.streamEnd(request, 'read_error', signal);
         observer?.fail(request, error);
         throw error;
       }
     };
     let result = await query();
-    const rejected = result.expired ? result.request : undefined;
-    if (result.expired) {
-      token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, token, context);
-      context.runtime?.secrets.add(token);
-      result = await query();
+    const rejected: (ObservedOperation | undefined)[] = [];
+    let expiryRetried = false;
+    let transientRetried = false;
+    while (result.expired || result.transient) {
       if (result.expired) {
-        await invalidateToken(KIS_APP_KEY, KIS_APP_SECRET, token, {
-          observation: observer,
-          parentId: operation?.id,
-        });
-        throw result.error;
+        if (expiryRetried) {
+          await invalidateToken(KIS_APP_KEY, KIS_APP_SECRET, token, {
+            observation: observer,
+            parentId: operation?.id,
+          });
+          throw result.error;
+        }
+        expiryRetried = true;
+        rejected.push(result.request);
+        token = await accessToken(KIS_APP_KEY, KIS_APP_SECRET, token, context);
+        context.runtime?.secrets.add(token);
+      } else {
+        if (transientRetried) throw result.error;
+        transientRetried = true;
+        context.runtime?.checkRequest('kis');
+        context.signal?.throwIfAborted();
+        if (context.runtime && context.runtime.remaining() <= 1000) throw result.error;
+        rejected.push(result.request);
+        const wait = observer?.start('kis.retry_wait', operation?.id);
+        try {
+          await setTimeout(1000, undefined, {
+            signal: context.runtime
+              ? context.runtime.signal(context.runtime.remaining(), context.signal)
+              : context.signal,
+          });
+          context.runtime?.check();
+          context.signal?.throwIfAborted();
+          observer?.end(wait);
+        } catch (error) {
+          let failure = error;
+          try {
+            context.runtime?.check();
+            context.signal?.throwIfAborted();
+          } catch (cause) {
+            failure = cause;
+          }
+          observer?.fail(wait, failure);
+          throw failure;
+        }
       }
+      result = await query();
     }
     const { response, body } = result;
     validation = observer?.start('kis.validation', operation?.id);
@@ -193,7 +252,7 @@ export async function queryKis(
       rows: rawRows.map((row) => select(row, keys)),
     };
     observer?.end(validation);
-    observer?.recover(rejected);
+    for (const request of rejected) observer?.recover(request);
     observer?.end(operation);
     return output;
   } catch (error) {

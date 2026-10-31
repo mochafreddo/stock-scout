@@ -236,7 +236,12 @@ export async function assessSecurityTypes({
   const observation = context.observation ?? context.runtime?.observation;
   const operation = observation?.start('types', context.parentId);
   const modelOperation = observation?.start('types.model', operation?.id);
-  context = { ...context, observation, parentId: modelOperation?.id };
+  context = {
+    ...context,
+    observation,
+    parentId: modelOperation?.id,
+    secrets: [...(context.secrets ?? []), ...secrets],
+  };
   let validation: ObservedOperation | undefined;
   let outputOperation: ObservedOperation | undefined;
   let observationFailure: unknown;

@@ -57,6 +57,7 @@ type OperationName =
   | 'kis.auth.store'
   | 'kis.auth.unlock'
   | 'kis.http'
+  | 'kis.retry_wait'
   | 'kis.validation';
 type OperationRecord = {
   id: string;
@@ -79,9 +80,19 @@ type OperationRecord = {
   bytes: number;
   streamEnd: 'eof' | 'read_error' | 'cancelled' | null;
   cancellationSource: CancellationSource;
+  kis?: {
+    kind: string;
+    exchange: string;
+    symbol: string | null;
+    bodyParsed: boolean;
+    providerCode: string | null;
+  };
   failure: { code: string; recovered: boolean; propagated: boolean } | null;
 };
-export type ObservedOperation = Readonly<Omit<OperationRecord, 'failure' | 'eventCounts'>> & {
+export type ObservedOperation = Readonly<
+  Omit<OperationRecord, 'failure' | 'eventCounts' | 'kis'>
+> & {
+  readonly kis?: Readonly<NonNullable<OperationRecord['kis']>>;
   readonly failure: Readonly<NonNullable<OperationRecord['failure']>> | null;
   readonly eventCounts: Readonly<NonNullable<OperationRecord['eventCounts']>> | null;
 };
@@ -293,6 +304,34 @@ export class ExecutionObservation {
     this.attempt(() => {
       const operation = token as OperationRecord | undefined;
       if (operation?.failure) operation.failure.recovered = true;
+    });
+  }
+  kisFailure(
+    token: ObservedOperation | undefined,
+    request: { kind: string; exchange: string; symbol: string },
+    bodyParsed: boolean,
+    providerCode: unknown,
+    secrets: Iterable<string>,
+  ) {
+    this.attempt(() => {
+      const operation = token as OperationRecord | undefined;
+      if (operation?.name !== 'kis.http') return;
+      if (!['volume', 'amount', 'daily', 'info'].includes(request.kind)) return;
+      if (!['NAS', 'NYS', 'AMS'].includes(request.exchange)) return;
+      const sensitive = [...secrets].filter(Boolean);
+      const safe = (value: unknown, pattern: RegExp) =>
+        typeof value === 'string' &&
+        pattern.test(value) &&
+        !sensitive.some((secret) => value.includes(secret))
+          ? value
+          : null;
+      operation.kis = {
+        kind: request.kind,
+        exchange: request.exchange,
+        symbol: safe(request.symbol, /^[A-Z0-9./^-]{1,20}$/),
+        bodyParsed,
+        providerCode: safe(providerCode, /^[A-Z0-9]{1,20}$/),
+      };
     });
   }
   propagate(error: unknown, cause: unknown) {

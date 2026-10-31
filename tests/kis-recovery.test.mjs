@@ -8,6 +8,7 @@ import { fixture, now, putToken, runCli } from './kis-cli-helper.mjs';
 
 const query = '/uapi/overseas-stock/v1/ranking/trade-vol';
 const expired = { rt_cd: '1', msg_cd: 'EGW00123', msg1: 'test-key test-secret rejected-token' };
+const transient = { rt_cd: '1', msg_cd: 'EGW00316', msg1: 'test-secret rejected-token' };
 const stepsEnv = (steps, env = {}) => ({ TEST_QUERY_STEPS: JSON.stringify(steps), ...env });
 function failure(result, code, requests) {
   assert.equal(result.status, 1, result.stderr);
@@ -16,6 +17,120 @@ function failure(result, code, requests) {
   assert.equal(JSON.parse(result.stderr).error, code);
   assert.deepEqual(result.requests, requests);
 }
+
+test('EGW00316 retries each GET once with the same inputs and no token issuance', () => {
+  for (const kind of ['volume', 'amount', 'daily', 'info']) {
+    const f = fixture();
+    try {
+      const before = putToken(f);
+      const detail = join(f.home, 'query-details');
+      const result = runCli(
+        f,
+        'ok',
+        [kind, 'NAS', ...(['daily', 'info'].includes(kind) ? ['AAPL'] : [])],
+        stepsEnv(
+          [{ token: 'rejected-token', body: transient, status: 500 }, { token: 'rejected-token' }],
+          { TEST_QUERY_DETAILS: detail },
+        ),
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.requests.length, 2);
+      assert.equal(result.requests[0], result.requests[1]);
+      const requests = readFileSync(detail, 'utf8').trim().split('\n').map(JSON.parse);
+      assert.equal(requests[0].url, requests[1].url);
+      assert.equal(requests[0].trId, requests[1].trId);
+      assert.ok(requests.every((r) => r.tokenMatches));
+      assert.ok(
+        requests[1].at - requests[0].at >= 950,
+        'the bounded retry waits approximately one second',
+      );
+      assert.deepEqual(JSON.parse(readFileSync(join(f.cache, 'token.json'))), before);
+      assert.doesNotMatch(result.stdout + result.stderr, /test-key|test-secret|rejected-token/);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('EGW00316 repeated failures stop at two requests and preserve the public error', () => {
+  for (const status of [200, 500]) {
+    const f = fixture();
+    try {
+      putToken(f);
+      failure(
+        runCli(
+          f,
+          'ok',
+          undefined,
+          stepsEnv([
+            { token: 'rejected-token', body: transient, status },
+            { token: 'rejected-token', body: transient, status },
+          ]),
+        ),
+        status === 500 ? 'HTTP_FAILURE' : 'KIS_FAILURE',
+        [query, query],
+      );
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('EGW00316 retry requires the exact structured failure and never retries other errors', () => {
+  for (const step of [
+    { raw: 'EGW00316', status: 500 },
+    { body: { rt_cd: '1', msg1: 'EGW00316' }, status: 500 },
+    { body: { rt_cd: '1', msg_cd: ['EGW00316'] }, status: 500 },
+    { body: { rt_cd: '1', msg_cd: 'EGW00316 ' }, status: 500 },
+    { body: { rt_cd: '1', msg_cd: 'EGW00201' }, status: 500 },
+    { body: { rt_cd: '0', msg_cd: 'EGW00316', output1: {}, output2: [] } },
+    {
+      body: { rt_cd: '0', msg_cd: 'EGW00316', output1: {}, output2: [] },
+      status: 500,
+      code: 'HTTP_FAILURE',
+    },
+  ]) {
+    const f = fixture();
+    try {
+      putToken(f);
+      const result = runCli(f, 'ok', undefined, stepsEnv([{ token: 'rejected-token', ...step }]));
+      assert.equal(result.status, 1, result.stdout);
+      assert.equal(result.stdout, '');
+      assert.deepEqual(result.requests, [query]);
+      if (step.code) assert.equal(JSON.parse(result.stderr).error, step.code);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('EGW00316 and explicit expiry each keep a single independent recovery budget', () => {
+  for (const sequence of ['TE', 'ET', 'TET', 'ETE']) {
+    const f = fixture();
+    try {
+      putToken(f);
+      let token = 'rejected-token';
+      const steps = [...sequence].map((code) => {
+        const step = { token, body: code === 'T' ? transient : expired, status: 500 };
+        if (code === 'E') token = 'test-token';
+        return step;
+      });
+      steps.push({ token: 'test-token' });
+      const result = runCli(f, 'ok', undefined, stepsEnv(steps));
+      assert.equal(result.status, sequence.length === 2 ? 0 : 1, result.stderr);
+      assert.equal(result.requests.filter((r) => r === query).length, 3);
+      assert.equal(result.requests.filter((r) => r === '/oauth2/tokenP').length, 1);
+      assert.equal(existsSync(join(f.cache, 'token.json')), sequence !== 'ETE');
+      if (sequence.length === 3) assert.equal(result.stdout, '');
+      assert.doesNotMatch(
+        result.stdout + result.stderr,
+        /test-key|test-secret|rejected-token|test-token/,
+      );
+    } finally {
+      f.close();
+    }
+  }
+});
 
 test('explicit structured expiry recovers once through the shared auth policy', () => {
   const f = fixture();

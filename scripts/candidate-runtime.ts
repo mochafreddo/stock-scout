@@ -97,6 +97,7 @@ export class CandidateRuntime {
 }
 
 export type ExecutionContext = {
+  secrets?: readonly (string | undefined)[];
   runtime?: CandidateRuntime;
   signal?: AbortSignal;
   observation?: ExecutionObservation;

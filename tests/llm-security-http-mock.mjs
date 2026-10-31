@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs, { appendFileSync } from 'node:fs';
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import { mock } from 'node:test';
+import timers from 'node:timers/promises';
 
 mock.timers.enable({ apis: ['Date'], now: Number(process.env.TEST_NOW) });
 let elapsedMs = 0;
@@ -17,6 +18,18 @@ let streamSignal;
 let infoResponses = 0;
 const sourceIds = new Map();
 const scenario = process.env.SCENARIO;
+if (scenario === 'retry-stage') {
+  const wait = timers.setTimeout;
+  mock.method(timers, 'setTimeout', (ms, value, options) => {
+    if (ms === 1000)
+      appendFileSync(
+        process.env.TEST_TRACE,
+        `${JSON.stringify({ retryWaitHasSignal: options?.signal instanceof AbortSignal })}\n`,
+      );
+    return wait(ms, value, options);
+  });
+  syncBuiltinESMExports();
+}
 const identityExclusion = scenario.startsWith('identity-') && scenario !== 'identity-conflict';
 if (process.env.TEST_SERIALIZATION_STAGE) {
   const stringify = JSON.stringify;
@@ -75,7 +88,15 @@ if (process.env.TEST_STORAGE_EXCEPTION) {
   };
   syncBuiltinESMExports();
 }
-if (['info-blocked', 'model-blocked', 'body-blocked', 'provider-then-blocked'].includes(scenario)) {
+if (
+  [
+    'info-blocked',
+    'model-blocked',
+    'body-blocked',
+    'provider-then-blocked',
+    'retry-stage',
+  ].includes(scenario)
+) {
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, delay, ...args) =>
     originalSetTimeout(
@@ -266,10 +287,13 @@ globalThis.fetch = async (url, init = {}) => {
   if (request.origin === 'https://openapi.koreainvestment.com:9443') {
     if (request.pathname === '/oauth2/tokenP')
       return Response.json({ error: 'synthetic-subscription' }, { status: 401 });
-    assert.equal(init.headers.authorization, 'Bearer test-token');
+    assert.equal(
+      init.headers.authorization,
+      `Bearer ${process.env.TEST_KIS_TOKEN ?? 'test-token'}`,
+    );
     if (request.pathname.includes('/ranking/')) {
       assert.equal(init.headers.appkey, 'test-key');
-      assert.equal(init.headers.appsecret, 'test-secret');
+      assert.equal(init.headers.appsecret, process.env.KIS_APP_SECRET);
       assert.equal(init.headers.custtype, 'P');
       assert.equal(
         init.headers.tr_id,
@@ -297,6 +321,8 @@ globalThis.fetch = async (url, init = {}) => {
     }
     const body = { rt_cd: '0', msg_cd: 'MCA00000', output1: { nrec: '0' }, output2: [] };
     if (request.pathname.endsWith('search-info')) {
+      if (scenario === 'retry-stage')
+        return Response.json({ rt_cd: '1', msg_cd: 'EGW00316' }, { status: 500 });
       if (scenario === 'info-blocked') {
         setTimeout(() => {}, 30);
         return new Promise(() => {});
@@ -308,6 +334,11 @@ globalThis.fetch = async (url, init = {}) => {
         return Response.json({ error: 'not found' }, { status: 404 });
       if (scenario === 'global-lookup')
         return Response.json({ error: 'unavailable' }, { status: 503 });
+      if (scenario === 'lookup-diagnostic')
+        return new Response(process.env.TEST_KIS_BODY, {
+          status: Number(process.env.TEST_KIS_STATUS ?? 500),
+          headers: { 'content-type': 'application/json', 'x-private': 'header-secret' },
+        });
       assert.equal(
         request.searchParams.get('PRDT_TYPE_CD'),
         { NAS: '512', NYS: '513', AMS: '529' }[sample.exchange],

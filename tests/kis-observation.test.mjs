@@ -1,8 +1,111 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { ExecutionObservation } from '../scripts/execution-observation.ts';
 import { run } from './candidate-cli-helper.mjs';
 
 const mock = new URL('./kis-observation-http-mock.mjs', import.meta.url).pathname;
+test('EGW00316 recovery observations survive later failure and retain the final failing request', (t) => {
+  for (const [mode, code, count, recovered] of [
+    ['retry-success', 'MODEL_FAILED', 7, true],
+    ['retry-repeat', 'HTTP_FAILURE', 2, false],
+    ['retry-invalid', 'RESPONSE_SHAPE', 2, false],
+    ['retry-last-slot', 'REQUEST_LIMIT', 2, true],
+  ]) {
+    const result = run(t, 'ok', { NODE_OPTIONS: `--import=${mock}`, KIS_TEST: mode });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, code);
+    assert.equal(result.requests.filter((r) => r.retryQuery).length, count);
+    assert.equal(output.usage.kis, mode === 'retry-last-slot' ? 90 : count);
+    assert.equal(output.usage.issuance, 0);
+    const observation = output.observation;
+    assert.equal(observation.firstFailure.recovered, recovered);
+    const first = observation.operations.find((r) => r.id === observation.firstFailure.operationId);
+    assert.equal(first.kis.providerCode, 'EGW00316');
+    assert.equal(first.httpStatus, 500);
+    assert.notEqual(observation.firstFailure.operationId, observation.finalError.operationId);
+    assert.equal(observation.operations.filter((r) => r.name === 'kis.retry_wait').length, 1);
+    const final = observation.operations.find((r) => r.id === observation.finalError.operationId);
+    assert.equal(observation.finalError.code, code);
+    if (mode === 'retry-success') {
+      assert.equal(final.name, 'types.model.http');
+      assert.equal(final.httpStatus, 503);
+      assert.equal(final.status, 'failed');
+    } else assert.equal(final.failure.code, code);
+    if (mode === 'retry-repeat') assert.equal(final.kis.providerCode, 'EGW00316');
+    assert.doesNotMatch(result.stderr, /test-key|test-secret|test-token/);
+  }
+});
+
+test('EGW00316 retry respects request budgets and aborts at execution or target-open deadlines', (t) => {
+  for (const [mode, code, wait] of [
+    ['retry-budget', 'REQUEST_LIMIT', false],
+    ['retry-short', 'HTTP_FAILURE', false],
+    ['retry-boundary', 'HTTP_FAILURE', false],
+    ['retry-execution', 'EXECUTION_LIMIT', true],
+    ['retry-open', 'TARGET_OPEN', true],
+  ]) {
+    const result = run(t, 'ok', { NODE_OPTIONS: `--import=${mock}`, KIS_TEST: mode });
+    const output = JSON.parse(result.stderr);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(output.error, code);
+    assert.equal(result.requests.filter((r) => r.retryQuery).length, 1);
+    assert.equal(output.usage.kis, mode === 'retry-budget' ? 90 : 1);
+    assert.equal(output.usage.issuance, 0);
+    assert.equal(
+      output.observation.operations.filter((r) => r.name === 'kis.retry_wait').length,
+      wait ? 1 : 0,
+    );
+    assert.equal(output.observation.firstFailure.recovered, false);
+    assert.doesNotMatch(result.stderr, /test-key|test-secret|test-token/);
+  }
+});
+
+test('failed KIS metadata remains bounded and retained after observation truncation', () => {
+  const observation = new ExecutionObservation();
+  for (let i = 0; i < 520; i++) observation.end(observation.start('kis'));
+  const request = observation.start('kis.http', undefined, 'request');
+  observation.kisFailure(
+    request,
+    { kind: 'daily', exchange: 'NYS', symbol: 'BAC/B' },
+    true,
+    'MCA99999',
+    [],
+  );
+  const error = new Error('HTTP_FAILURE');
+  observation.fail(request, error);
+  observation.finish('QUERY_FAILED', error);
+  const output = observation.snapshot();
+  assert.equal(output.truncated, true);
+  assert.ok(output.operations.length <= 512);
+  assert.ok(Buffer.byteLength(JSON.stringify(output)) <= 256 * 1024);
+  assert.deepEqual(output.operations.find((row) => row.id === request.id).kis, {
+    kind: 'daily',
+    exchange: 'NYS',
+    symbol: 'BAC/B',
+    bodyParsed: true,
+    providerCode: 'MCA99999',
+  });
+  const secret = observation.start('kis.http', undefined, 'request');
+  observation.kisFailure(
+    secret,
+    { kind: 'amount', exchange: 'AMS', symbol: 'SECRET' },
+    false,
+    { msg_cd: 'MCA99999' },
+    ['SECRET'],
+  );
+  observation.fail(secret, new Error('HTTP_FAILURE'));
+  assert.deepEqual(observation.snapshot().operations.find((row) => row.id === secret.id).kis, {
+    kind: 'amount',
+    exchange: 'AMS',
+    symbol: null,
+    bodyParsed: false,
+    providerCode: null,
+  });
+});
+
 test('KIS recovery stays a recovered first failure when a later model stops the CLI', (t) => {
   const result = run(t, 'rank-expired', { NODE_OPTIONS: `--import=${mock}` });
   assert.equal(result.status, 1, result.stderr);
@@ -26,6 +129,13 @@ test('KIS recovery stays a recovered first failure when a later model stops the 
   assert.equal(expired.kind, 'request');
   assert.equal(expired.httpStatus, 200);
   assert.equal(expired.streamEnd, 'eof');
+  assert.deepEqual(expired.kis, {
+    kind: 'volume',
+    exchange: 'NAS',
+    symbol: null,
+    bodyParsed: true,
+    providerCode: 'EGW00123',
+  });
   const logical = observation.operations.find((row) => row.id === expired.parentId);
   assert.ok(logical, 'the request keeps its logical KIS parent');
   assert.equal(logical.name, 'kis');
@@ -113,6 +223,14 @@ test('KIS body failure and validation stay distinct from HTTP headers and succes
     );
     const logical = output.observation.operations.find((row) => row.name === 'kis');
     assert.equal(logical.status, 'failed');
+    if (mode !== 'query-shape')
+      assert.deepEqual(request.kis, {
+        kind: 'volume',
+        exchange: 'NAS',
+        symbol: null,
+        bodyParsed: false,
+        providerCode: null,
+      });
     if (mode === 'query-shape') {
       assert.equal(request.status, 'completed');
       assert.equal(
