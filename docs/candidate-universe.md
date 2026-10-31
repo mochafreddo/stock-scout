@@ -44,6 +44,8 @@ node scripts/candidate-universe.ts --auth-dir /absolute/private/stock-scout --mo
 
 공통 마감은 작업 시작부터 600초와 판단 대상 개장 중 이른 시각입니다. 실제 전송 시도를 KIS·공식 일정 HTTP·일정 모델·유형 모델·SIWC 갱신으로 나누어 제한하고 기존 단계별 한도도 적용합니다. 합의값의 권위는 [ADR 0014](adr/0014-candidate-runtime-budget.md)입니다. 실패한 전송과 허용된 재조회도 세며 서버 내부 웹 요청 수를 사전에 보장하지 않습니다.
 
+실패의 `observation.summaries.stages`·`modelRequests`는 상세 기록이 잘려도 단계·모델 요청 요약을 보존합니다. 시작 시 `executionRemainingMs`·`stageRemainingMs`·`requestRemainingMs`를 함께 확인해 전체 마감과 공유 단계 제한을 구분하세요. 미관측 값은 `null`이며 단계·부모·자식의 중첩 시간을 합산하지 않습니다. 입력 규모와 요약의 자세한 의미는 [공통 요약 계약](rca-observability-design.md#2026-10-31-시간예산-요약-보강)을 따릅니다.
+
 ## 검증 범위와 한계
 
 공식 공지 수집 완전성과 모델의 의미적 신뢰도는 계속 `unverified`입니다. 제한된 현재 공지 밖의 변경과 모델 오판을 놓칠 수 있습니다. 후보군 출력은 한국 낮 전체의 데이터 가용성이나 토스증권 거래·예약·체결을 보장하지 않습니다. 주말·휴장일도 공식 일정과 필요한 일봉이 준비된 경우에만 다음 정규장을 판단 대상으로 삼습니다.

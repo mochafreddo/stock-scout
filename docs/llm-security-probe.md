@@ -171,6 +171,8 @@ stdout에는 완성된 결과 JSON 한 줄만 출력합니다. `securities`에�
 
 ### 공통 실행 기록으로 요청 관계 확인하기
 
+상세 기록이 잘려도 `observation.summaries.stages`와 `modelRequests`에는 완료한 단계와 모델 요청 요약이 남습니다. 각 요청의 시작 시 `stageRemainingMs`로 공유하는 유형 단계 예산이 줄어드는지 확인하세요. `inputBytes`는 실제 전송 본문 크기이며 내용은 기록하지 않습니다. 독립 유형 CLI의 `executionRemainingMs`는 `null`이고, 통합 경로에서는 전체 마감도 적용합니다. 필드와 미관측 값의 의미는 [공통 요약 계약](rca-observability-design.md#2026-10-31-시간예산-요약-보강)을 따릅니다. [2026-10-31 고정 6종목 실행](buy-candidates.md#첫-실행-고정-6종목-유형-판단)은 유형 단계 제한으로 중단된 사례이며 정확도 평가나 최종 보고서 성공이 아닙니다.
+
 세 CLI의 실패 JSON에는 기존 상세 진단과 별도로 최상위 `observation`을 제공합니다. 유형 모델의 `types.model.http`, 정보 조회·출처 목록 도구의 `types.info_tool`, 관측 웹 도구의 `types.web_tool`, 근거·결과 검증의 `types.validation`을 같은 실행 기록에서 확인하세요. 도구의 `parentId`는 호출을 낸 모델 요청에 연결되고, 모델 요청은 `types.model`에 연결됩니다. 유형 검증 CLI의 초기 SIWC 인증·KIS 순위 조회·최종 직렬화에도 같은 관측 소유자를 전달합니다. KIS 내부 작업의 상세 기록은 KIS 관측 구현 범위에 따릅니다.
 
 요청의 `headersAt`은 상태 코드를 받은 시점이며 완료 시점이 아닙니다. `firstEventAt`·`lastEventAt`, `completionEvents`·`errorEvents`, `streamEnd`로 이벤트 수신과 자연 EOF·읽기 오류·취소를 구분하세요. 결과 검증에 실패해도 이미 정상 EOF를 확인한 전송을 통신 실패로 바꾸지 않습니다. `cancellationSource`의 `stage_limit`은 연결한 유형 판단 제한이 실제로 취소된 경우입니다. 통합 실행의 공통 마감이나 개장 경계는 해당 제한의 출처로 남기며, 출처가 확인되지 않으면 `unknown`입니다. 모델 요청 전 대기, 헤더 뒤 스트림 대기, 정보 도구 대기는 각각 해당 작업과 요청 기록으로 구분하세요.
