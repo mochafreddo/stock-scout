@@ -1322,21 +1322,25 @@ test('CLI retains observed research after invalid judgments without trusting que
 });
 
 test('CLI omits credentials from rejected research URLs in failure diagnostics', (t) => {
-  for (const userinfo of [
-    'private-user',
-    ':unregistered-password',
-    'private-user:unregistered-password',
+  for (const [username, password] of [
+    ['private-user', ''],
+    ['', 'unregistered-password'],
+    ['private-user', 'unregistered-password'],
   ]) {
+    const url = new URL('https://www.sec.gov/sample');
+    url.username = username;
+    url.password = password;
     const result = run(t, 'opened-source', {
-      TEST_RESEARCH_URL: `https://${userinfo}@www.sec.gov/sample`,
+      TEST_RESEARCH_URL: url.href,
     });
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stdout, '');
     assert.doesNotMatch(result.stderr, /private-user|unregistered-password/);
   }
-  const failedPage = run(t, 'opened-source', {
-    TEST_RESEARCH_FAILURE_URL: 'https://private-user:unregistered-password@example.org/failed',
-  });
+  const failedUrl = new URL('https://example.org/failed');
+  failedUrl.username = 'private-user';
+  failedUrl.password = 'unregistered-password';
+  const failedPage = run(t, 'opened-source', { TEST_RESEARCH_FAILURE_URL: failedUrl.href });
   assert.equal(failedPage.status, 0, failedPage.stderr);
   assert.equal(JSON.parse(failedPage.stdout).webFailures[0].url, null);
   assert.doesNotMatch(failedPage.stdout + failedPage.stderr, /private-user|unregistered-password/);
