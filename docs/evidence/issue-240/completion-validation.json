@@ -2,9 +2,9 @@
   "reviewBase": "33a1b316dd743e3d826056b52471596a491b454b",
   "scope": "actual report completion improvement; no paid API or model fallback",
   "plannedMaximumVerificationExecutions": 6,
-  "usedVerificationExecutions": 5,
-  "remainingExecutionsNotRun": 1,
-  "integratedReport": "not_run_type_sample_partial",
+  "usedVerificationExecutions": 6,
+  "remainingExecutionsNotRun": 0,
+  "integratedReport": "completed_no_candidates_with_eligible_daily_data",
   "currentAccountModelList": {
     "connected": true,
     "solListed": true,
@@ -67,9 +67,7 @@
           "status": "schedule_change",
           "changes": [
             {
-              "exchanges": [
-                "NAS"
-              ],
+              "exchanges": ["NAS"],
               "date": "2025-01-09",
               "kind": "closed",
               "open": null,
@@ -213,9 +211,68 @@
           "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
         }
       ],
-      "observedInformationBatchSizes": [
-        3
-      ]
+      "observedInformationBatchSizes": [3]
+    },
+    {
+      "startedAt": "2026-10-31T12:11:14.042031+00:00",
+      "finishedAt": "2026-10-31T12:14:52.397738+00:00",
+      "elapsedSeconds": 218.355,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "stdoutBytes": 130874,
+      "stderrBytes": 0,
+      "name": "integrated-report",
+      "head": "2bc1f8ef7fa083205d953d8d65c887d7ff64657d",
+      "runtimeInputsSha256": "8bae994cc16cb6fef10d90f34e9a9f2325afb645d1c48140b5631fa581f0bc28",
+      "model": "gpt-6.1-sol",
+      "typeModel": "gpt-6-luna",
+      "result": "completed_no_candidates_with_eligible_daily_data",
+      "status": "no_candidates",
+      "dataSession": "2026-10-30",
+      "targetSession": "2026-11-02",
+      "eligibleSecurities": [
+        {
+          "exchange": "NAS",
+          "symbol": "INTC",
+          "dailyRows": 20
+        }
+      ],
+      "typeCoverage": {
+        "input": 6,
+        "included": 1,
+        "excluded": 5,
+        "unconfirmed": 4,
+        "individualLookupFailures": 0,
+        "inclusionRate": 0.16666666666666666
+      },
+      "usage": {
+        "kis": 13,
+        "issuance": 0,
+        "official": 52,
+        "calendarModel": 1,
+        "typeModel": 4,
+        "recommendationModel": 3,
+        "refresh": 1
+      },
+      "recommendationModel": {
+        "id": "gpt-6.1-sol",
+        "authentication": "siwc",
+        "requests": 3,
+        "completions": 3
+      },
+      "typeAssessmentModel": {
+        "id": "gpt-6-luna",
+        "requests": 4,
+        "completions": 4
+      },
+      "semanticReview": {
+        "supported": true,
+        "reliability": "unverified"
+      },
+      "artifactSha256": {
+        "stdout.json": "b9ba5bcb2a80edfa4915b1894500e3de9c61c5b0a42e57d83df4d3cc08c4042d",
+        "stderr.json": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
     }
   ]
 }
