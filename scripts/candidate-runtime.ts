@@ -4,8 +4,10 @@ import {
   ExecutionObservation,
   tagSignal,
 } from './execution-observation.ts';
+import type { PaidBudget } from './paid-api.ts';
 
 export class CandidateRuntime {
+  paid?: PaidBudget;
   readonly startedAt = performance.now();
   readonly startedWall = Date.now();
   readonly observation = new ExecutionObservation(() => this.remaining());

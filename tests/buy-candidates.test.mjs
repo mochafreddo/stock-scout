@@ -541,7 +541,8 @@ test('recommendation budgets, session open, authentication, quota and outside-un
     ['report-open', 'TARGET_OPEN'],
     ['report-loop', 'MODEL_LIMIT'],
     ['report-auth', 'AUTH_FAILED'],
-    ['report-quota', 'SUBSCRIPTION_LIMIT'],
+    ['report-unknown-quota', 'MODEL_FAILED'],
+    ['report-spoof-quota', 'MODEL_FAILED'],
     ['report-outside-tool', 'MODEL_OUTPUT'],
     ['report-sensitive', 'SENSITIVE_OUTPUT'],
   ]) {
@@ -696,4 +697,164 @@ test('a report started one second before the target open fails at open without e
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
   assert.equal(JSON.parse(result.stderr).error, 'TARGET_OPEN');
+});
+
+test('official subscription exhaustion completes the same report with separately authenticated paid requests', (t) => {
+  const result = run(t, 'paid-success', { OPENAI_API_KEY: 'synthetic-paid-key' });
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.model.authentication, 'openai_api');
+  assert.equal(report.paid.requests, 3);
+  assert.equal(report.paid.reservedUsd, 0.013038);
+  assert.equal(report.dataSession.date, '2026-10-16');
+  assert.equal(report.targetSession.date, '2026-10-19');
+  assert.equal(report.fractionalTrading.status, 'unverified');
+  assert.equal(report.candidates[0].referenceClose.value, '11');
+  assert.equal(report.semanticReview.supported, true);
+  const counted = result.requests.filter((r) => r.url.endsWith('/input_tokens'));
+  const generated = result.requests.filter((r) => r.paid && r.url.endsWith('/responses'));
+  assert.equal(counted.length, 3);
+  for (let i = 0; i < counted.length; i++) {
+    for (const [key, value] of Object.entries(counted[i].body))
+      assert.deepEqual(generated[i].body[key], value);
+    assert.ok(counted[i].body.text.format);
+  }
+  assert.equal(result.requests.filter((r) => r.paid && r.url.endsWith('/responses')).length, 3);
+  assert.doesNotMatch(result.stdout + result.stderr, /synthetic-paid-key|synthetic-subscription/);
+});
+
+test('quota without separate credentials gives safe setup guidance before paid traffic', (t) => {
+  const result = run(t, 'paid-success');
+  assert.equal(result.status, 1);
+  const failure = JSON.parse(result.stderr);
+  assert.equal(failure.error, 'PAID_CREDENTIALS_MISSING');
+  assert.equal(result.requests.filter((r) => r.paid).length, 0);
+  assert.equal(result.stdout, '');
+  assert.match(failure.guidance, /OPENAI_API_KEY/);
+});
+
+test('paid input cap accepts its exact boundary and rejects larger or unknown counts before generation', (t) => {
+  for (const [tokens, expected] of [
+    ['32000', 0],
+    ['32001', 1],
+    ['-1', 1],
+    ['1.5', 1],
+    ['NaN', 1],
+  ]) {
+    const result = run(t, 'paid-success', {
+      OPENAI_API_KEY: 'synthetic-paid-key',
+      PAID_INPUT_TOKENS: tokens,
+    });
+    assert.equal(result.status, expected, result.stderr.slice(0, 100));
+    if (expected) {
+      assert.equal(JSON.parse(result.stderr).error, 'PAID_BUDGET_UNPROVABLE');
+      assert.equal(JSON.parse(result.stderr).usage.recommendationModel, 1);
+      assert.equal(result.requests.filter((r) => r.paid && r.url.endsWith('/responses')).length, 0);
+      assert.equal(result.stdout, '');
+    } else {
+      assert.equal(JSON.parse(result.stdout).paid.reservedUsd, 0.036288);
+    }
+  }
+  const unavailable = run(t, 'paid-success', {
+    OPENAI_API_KEY: 'synthetic-paid-key',
+    PAID_COUNT_FAIL: '1',
+  });
+  assert.equal(unavailable.status, 1);
+  assert.equal(JSON.parse(unavailable.stderr).error, 'PAID_BUDGET_UNPROVABLE');
+  assert.equal(
+    unavailable.requests.filter((r) => r.paid && r.url.endsWith('/responses')).length,
+    0,
+  );
+});
+
+test('paid unknown-usage failures keep their reservation and never retry or print partial reports', (t) => {
+  for (const [failure, expected] of [
+    ['network', 'MODEL_FAILED'],
+    ['eof', 'MODEL_INCOMPLETE'],
+    ['open', 'TARGET_OPEN'],
+    ['execution', 'EXECUTION_LIMIT'],
+    ['stage', 'MODEL_INCOMPLETE'],
+  ]) {
+    const result = run(t, 'paid-success', {
+      OPENAI_API_KEY: 'synthetic-paid-key',
+      PAID_FAILURE: failure,
+    });
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, expected, result.stderr.slice(0, 100));
+    assert.equal(output.paid.requests, 1);
+    assert.equal(output.paid.reservedUsd, 0.004346);
+    assert.equal(result.requests.filter((r) => r.paid && r.url.endsWith('/responses')).length, 1);
+    assert.equal(result.stdout, '');
+    assert.doesNotMatch(result.stderr, /synthetic-paid-key|synthetic-subscription/);
+  }
+});
+
+test('explicit streaming quota switches but an unpriced model never sends paid traffic', (t) => {
+  const streamed = run(t, 'paid-sse', { OPENAI_API_KEY: 'synthetic-paid-key' });
+  assert.equal(streamed.status, 0, streamed.stderr.slice(0, 100));
+  assert.equal(JSON.parse(streamed.stdout).paid.requests, 3);
+  const unknown = run(
+    t,
+    'paid-success',
+    { OPENAI_API_KEY: 'synthetic-paid-key', TEST_REPORT_MODEL: 'unknown' },
+    (d) => ['--auth-dir', d, '--model', 'unknown'],
+  );
+  assert.equal(unknown.status, 1);
+  assert.equal(JSON.parse(unknown.stderr).error, 'PAID_BUDGET_UNPROVABLE');
+  assert.equal(unknown.requests.filter((r) => r.paid).length, 0);
+});
+
+test('the one-dollar reservation boundary allows exactly one dollar and refuses the next microdollars', (t) => {
+  for (const [tokens, status] of [
+    ['23616', 0],
+    ['23617', 1],
+  ]) {
+    const result = run(
+      t,
+      'paid-review',
+      {
+        OPENAI_API_KEY: 'synthetic-paid-key',
+        PAID_INPUT_TOKENS: tokens,
+        TEST_REPORT_MODEL: 'gpt-6-astra',
+      },
+      (d) => ['--auth-dir', d, '--model', 'gpt-6-astra'],
+    );
+    assert.equal(result.status, status, result.stderr.slice(0, 100));
+    if (status === 0) {
+      assert.equal(JSON.parse(result.stdout).paid.reservedUsd, 1);
+      assert.equal(JSON.parse(result.stdout).paid.requests, 1);
+    } else {
+      assert.equal(JSON.parse(result.stderr).error, 'PAID_BUDGET_EXCEEDED');
+      assert.equal(result.requests.filter((r) => r.paid && r.url.endsWith('/responses')).length, 0);
+      assert.equal(result.stdout, '');
+    }
+  }
+  const incompleteBudget = run(
+    t,
+    'paid-success',
+    { OPENAI_API_KEY: 'synthetic-paid-key', TEST_REPORT_MODEL: 'gpt-6-astra' },
+    (d) => ['--auth-dir', d, '--model', 'gpt-6-astra'],
+  );
+  assert.equal(incompleteBudget.status, 1);
+  assert.equal(JSON.parse(incompleteBudget.stderr).error, 'PAID_BUDGET_EXCEEDED');
+  assert.equal(
+    incompleteBudget.requests.filter((r) => r.paid && r.url.endsWith('/responses')).length,
+    0,
+  );
+});
+
+test('paid review interruption preserves accumulated reservations from all previous paid requests', (t) => {
+  const result = run(t, 'paid-success', {
+    OPENAI_API_KEY: 'synthetic-paid-key',
+    PAID_FAILURE: 'eof',
+    PAID_FAIL_AT: '3',
+  });
+  assert.equal(result.status, 1);
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'MODEL_INCOMPLETE');
+  assert.equal(output.paid.requests, 3);
+  assert.equal(output.paid.reservedUsd, 0.013038);
+  assert.equal(output.usage.recommendationModel, 4);
+  assert.equal(result.stdout, '');
 });

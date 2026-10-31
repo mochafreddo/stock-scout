@@ -7,6 +7,7 @@ mock.timers.enable({ apis: ['Date'], now: Date.parse(process.env.TEST_NOW) });
 
 const candidateFetch = globalThis.fetch;
 let recommendationRequests = 0;
+let paidRequests = 0;
 let reportSteps = 0;
 const scenario = process.env.SCENARIO;
 const originalSetTimeout = globalThis.setTimeout;
@@ -94,13 +95,56 @@ function message(value) {
 globalThis.fetch = async (url, init = {}) => {
   const body =
     typeof init.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : undefined;
+  const paid = new Headers(init.headers).get('authorization') === 'Bearer synthetic-paid-key';
+  if (String(url).endsWith('/responses/input_tokens')) {
+    assert.ok(paid);
+    assert.ok(
+      Object.keys(body).every((key) =>
+        [
+          'model',
+          'input',
+          'instructions',
+          'tools',
+          'tool_choice',
+          'parallel_tool_calls',
+          'reasoning',
+          'text',
+          'truncation',
+          'personality',
+        ].includes(key),
+      ),
+    );
+    appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ url: String(url), body, paid })}\n`);
+    if (process.env.PAID_COUNT_FAIL) return Response.json({}, { status: 503 });
+    return Response.json({
+      object: 'response.input_tokens',
+      input_tokens: Number(process.env.PAID_INPUT_TOKENS ?? 1000),
+    });
+  }
   const input = body?.input?.find((item) => item.role === 'user');
   const prompt = input ? JSON.parse(input.content[0].text) : undefined;
   if (!['recommendation', 'report_review'].includes(prompt?.stage))
     return candidateFetch(url, init);
-  appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ url: String(url), body })}\n`);
+  appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ url: String(url), body, paid })}\n`);
   assert.equal(String(url), 'https://api.openai.com/v1/responses');
-  assert.equal(new Headers(init.headers).get('authorization'), 'Bearer synthetic-subscription');
+  assert.equal(
+    new Headers(init.headers).get('authorization'),
+    paid ? 'Bearer synthetic-paid-key' : 'Bearer synthetic-subscription',
+  );
+  if (paid) {
+    paidRequests++;
+    assert.equal(body.max_output_tokens, 8192);
+    assert.equal(body.service_tier, 'default');
+    if (process.env.PAID_FAILURE === 'network') throw new Error('synthetic-paid-key');
+    if (process.env.PAID_FAILURE === 'open') Date.now = () => Date.parse('2026-10-19T13:30:00Z');
+    if (process.env.PAID_FAILURE === 'execution') advanceElapsed(600_000);
+    if (process.env.PAID_FAILURE === 'stage') advanceElapsed(180_000);
+    if (
+      process.env.PAID_FAILURE === 'eof' &&
+      paidRequests === Number(process.env.PAID_FAIL_AT ?? 1)
+    )
+      return sse([]);
+  }
   assert.equal(init.redirect, 'error');
   assert.ok(init.signal instanceof AbortSignal);
   assert.equal(body.store, false);
@@ -147,6 +191,25 @@ globalThis.fetch = async (url, init = {}) => {
     return Response.json(
       { error: { code: 'invalid_api_key', message: 'synthetic-subscription' } },
       { status: 401 },
+    );
+  if (
+    scenario.startsWith('paid-') &&
+    scenario !== 'paid-sse' &&
+    (scenario !== 'paid-review' || prompt.stage === 'report_review') &&
+    !paid
+  )
+    return Response.json(
+      { error: { code: 'subscription_sharing_usage_limit_exceeded' } },
+      { status: 429 },
+    );
+  if (scenario === 'paid-sse' && !paid)
+    return sse([{ type: 'error', code: 'subscription_sharing_usage_limit_exceeded' }]);
+  if (scenario === 'report-unknown-quota')
+    return Response.json({ error: { code: 'rate_limit_exceeded' } }, { status: 429 });
+  if (scenario === 'report-spoof-quota')
+    return Response.json(
+      { error: { code: 'subscription_sharing_usage_limit_exceeded' } },
+      { status: 503 },
     );
   if (scenario === 'report-quota')
     return Response.json(

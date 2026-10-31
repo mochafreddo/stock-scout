@@ -259,6 +259,8 @@ export async function runCandidateCli(report = false) {
     'SEARCH_UNSUPPORTED',
     'QUERY_FAILED',
     'PAID_BUDGET_UNPROVABLE',
+    'PAID_BUDGET_EXCEEDED',
+    'PAID_CREDENTIALS_MISSING',
     'HTTP_FAILURE',
     'KIS_FAILURE',
     'RESPONSE_SHAPE',
@@ -331,6 +333,13 @@ export async function runCandidateCli(report = false) {
         error: code,
         stage,
         usage: runtime.counts,
+        ...(runtime.paid ? { paid: runtime.paid.snapshot() } : {}),
+        ...(code === 'PAID_CREDENTIALS_MISSING'
+          ? {
+              guidance:
+                '승인된 저장소 밖 보관소의 OPENAI_API_KEY를 환경 변수로 제공한 뒤 다시 실행하세요.',
+            }
+          : {}),
         observation: runtime.observation.snapshot(),
         diagnostic: {
           stage,
