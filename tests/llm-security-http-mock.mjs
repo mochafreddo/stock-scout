@@ -16,6 +16,7 @@ const completed = { type: 'response.completed', response: { usage } };
 let modelRequests = 0;
 let streamSignal;
 let infoResponses = 0;
+let infoAttempts = 0;
 const sourceIds = new Map();
 const scenario = process.env.SCENARIO;
 if (scenario === 'retry-stage') {
@@ -95,7 +96,8 @@ if (
     'body-blocked',
     'provider-then-blocked',
     'retry-stage',
-  ].includes(scenario)
+  ].includes(scenario) ||
+  process.env.TEST_INFO_BLOCK_AT
 ) {
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, delay, ...args) =>
@@ -321,6 +323,18 @@ globalThis.fetch = async (url, init = {}) => {
     }
     const body = { rt_cd: '0', msg_cd: 'MCA00000', output1: { nrec: '0' }, output2: [] };
     if (request.pathname.endsWith('search-info')) {
+      infoAttempts++;
+      if (infoAttempts === Number(process.env.TEST_INFO_BLOCK_AT)) {
+        setTimeout(() => {}, 30);
+        return new Promise(() => {});
+      }
+      if (infoAttempts === Number(process.env.TEST_INFO_STATUS_AT))
+        return Response.json(
+          { error: 'controlled lookup failure' },
+          { status: Number(process.env.TEST_INFO_STATUS) },
+        );
+      if (infoAttempts === Number(process.env.TEST_INFO_AUTH_AT))
+        return Response.json({ rt_cd: '1', msg_cd: 'EGW00123' });
       if (scenario === 'retry-stage')
         return Response.json({ rt_cd: '1', msg_cd: 'EGW00316' }, { status: 500 });
       if (scenario === 'info-blocked') {
@@ -372,6 +386,7 @@ globalThis.fetch = async (url, init = {}) => {
         body.output = { prdt_clsf_name: sample.type, ovrs_item_name: sample.symbol };
       if (scenario.startsWith('types-partial-') && sample.symbol === 'AAPL')
         body.output.ovrs_stck_dvsn_cd = '01';
+      if (infoAttempts === Number(process.env.TEST_INFO_TICK_AT)) tickClock(180_000);
     } else if (request.searchParams.get('EXCD') === 'NAS') {
       body.output1.nrec = '1';
       body.output2 = [
@@ -660,13 +675,22 @@ globalThis.fetch = async (url, init = {}) => {
         : scenario === 'kis-specific-repeat'
           ? [samples[0], samples[0]]
           : samples;
-    const calls = callSamples.map((sample, index) => ({
+    const batches = process.env.TEST_INFO_BATCHES
+      ? JSON.parse(process.env.TEST_INFO_BATCHES)
+      : scenario === 'types-batch-subset'
+        ? [[samples[2], samples[0]]]
+        : ['info-limit', 'kis-specific-repeat'].includes(scenario)
+          ? callSamples.map((sample) => [sample])
+          : [callSamples];
+    const calls = batches.map((batch, index) => ({
       type: 'function_call',
       id: `fc_info_${index}`,
       call_id: `call_info_${index}`,
-      name: 'get_info',
+      name: 'get_infos',
       namespace: 'stock_scout',
-      arguments: JSON.stringify({ exchange: sample.exchange, symbol: sample.symbol }),
+      arguments: JSON.stringify({
+        securities: batch.map(({ exchange, symbol }) => ({ exchange, symbol })),
+      }),
     }));
     if (suppliesTypeSource)
       calls.push({
@@ -741,7 +765,8 @@ globalThis.fetch = async (url, init = {}) => {
   for (const item of body.input.filter((item) => item.type === 'function_call_output')) {
     const output = JSON.parse(item.output);
     if (output.sourceId) sourceIds.set(output.source, output.sourceId);
-    if (Array.isArray(output)) for (const source of output) sourceIds.set(source.source, source.id);
+    if (Array.isArray(output))
+      for (const source of output) sourceIds.set(source.source, source.sourceId ?? source.id);
   }
   assert.ok(toolResult, 'Full tool history must reach the next request');
   if (scenario === 'individual-lookup') assert.match(toolResult.output, /SECURITY_LOOKUP_FAILED/);
@@ -796,6 +821,12 @@ globalThis.fetch = async (url, init = {}) => {
       })),
     })),
   };
+  if (scenario.startsWith('types-batch'))
+    for (const judgment of value.judgments)
+      if (judgment.evidence.some((record) => record.sourceId === 's999')) {
+        judgment.type = 'unknown';
+        judgment.evidence = [];
+      }
   if (scenario === 'off-ranking') value.judgments[0].symbol = 'MSFT';
   if (['ambiguous', 'ambiguous-sensitive'].includes(scenario))
     value.judgments[0].identity = 'ambiguous';

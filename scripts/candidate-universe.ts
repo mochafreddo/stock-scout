@@ -16,7 +16,7 @@ import { readSiwcCredentials } from './siwc-auth.ts';
 
 export async function candidateUniverse(
   directory: string,
-  model: string,
+  models: { calendar: string; types: string },
   runtime: CandidateRuntime,
   onStage: (stage: string, diagnostics?: AssessmentDiagnostics) => void,
 ) {
@@ -24,7 +24,7 @@ export async function candidateUniverse(
   onStage('calendar');
   const calendar = await marketCalendar({
     directory,
-    model,
+    model: models.calendar,
     history: 20,
     context,
   });
@@ -114,7 +114,7 @@ export async function candidateUniverse(
   onStage('assessment');
   const assessment = await assessSecurityTypes({
     securities: [...securities.values()],
-    model,
+    model: models.types,
     accessToken: credentials.accessToken,
     secrets,
     inputMode: 'rankings',
@@ -269,16 +269,25 @@ export async function runCandidateCli(report = false) {
     const args = process.argv.slice(2);
     for (let index = 0; index < args.length; index += 2) {
       if (
-        !['--auth-dir', '--model'].includes(args[index]) ||
+        !['--auth-dir', '--model', '--calendar-model', '--type-model'].includes(args[index]) ||
         !args[index + 1] ||
+        args[index + 1].startsWith('--') ||
         options.has(args[index])
       )
         throw new Error('USAGE');
       options.set(args[index], args[index + 1]);
     }
     const directory = options.get('--auth-dir');
-    const model = options.get('--model');
-    if (!directory || !isAbsolute(directory) || !/^[a-zA-Z0-9._-]{1,100}$/.test(model ?? ''))
+    const model = options.get('--model') ?? '';
+    const models = {
+      calendar: options.get('--calendar-model') ?? model,
+      types: options.get('--type-model') ?? model,
+    };
+    if (
+      !directory ||
+      !isAbsolute(directory) ||
+      [model, models.calendar, models.types].some((value) => !/^[a-zA-Z0-9._-]{1,100}$/.test(value))
+    )
       throw new Error('USAGE');
     for (const secret of [
       process.env.KIS_APP_KEY,
@@ -286,17 +295,12 @@ export async function runCandidateCli(report = false) {
       process.env.OPENAI_API_KEY,
     ])
       if (secret) runtime.secrets.add(secret);
-    const universe = await candidateUniverse(
-      directory,
-      model as string,
-      runtime,
-      (next, diagnostics) => {
-        stage = next;
-        if (diagnostics) typeAssessment = diagnostics;
-      },
-    );
+    const universe = await candidateUniverse(directory, models, runtime, (next, diagnostics) => {
+      stage = next;
+      if (diagnostics) typeAssessment = diagnostics;
+    });
     const output = report
-      ? await recommendCandidates(universe, directory, model as string, runtime, (next) => {
+      ? await recommendCandidates(universe, directory, model, runtime, (next) => {
           stage = next;
         })
       : universe;

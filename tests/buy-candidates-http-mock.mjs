@@ -106,7 +106,7 @@ globalThis.fetch = async (url, init = {}) => {
   assert.equal(body.store, false);
   assert.equal(body.stream, true);
   assert.ok(body.input.every((item) => item.role !== 'system'));
-  assert.equal(body.model, 'gpt-6-luna');
+  assert.equal(body.model, process.env.TEST_REPORT_MODEL ?? 'gpt-6-luna');
   if (process.env.TEST_REPORT_STEP_MS)
     advanceElapsed(JSON.parse(process.env.TEST_REPORT_STEP_MS)[reportSteps++] ?? 0);
   if (

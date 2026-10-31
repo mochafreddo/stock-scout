@@ -1082,6 +1082,162 @@ test('CLI preserves distinct share classes and applies all eligibility types to 
   assert.equal(output.securities.find((item) => item.symbol === 'BBDO').type, 'common_adr');
 });
 
+test('CLI batches only requested securities in request order with individual source IDs', (t) => {
+  const result = run(t, 'types-batch-subset');
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(
+    result.requests
+      .filter((row) => row.url.includes('/search-info?'))
+      .map((row) => Object.fromEntries(new URL(row.url).searchParams)),
+    [
+      { PRDT_TYPE_CD: '512', PDNO: 'ACONW' },
+      { PRDT_TYPE_CD: '512', PDNO: 'AAPL' },
+    ],
+  );
+  assert.deepEqual(
+    output.lookups.map(({ symbol, sourceId }) => ({ symbol, sourceId })),
+    [
+      { symbol: 'ACONW', sourceId: 's1' },
+      { symbol: 'AAPL', sourceId: 's2' },
+    ],
+  );
+  assert.equal(output.statistics.infoToolCalls, 2);
+  const models = result.requests.filter((row) => row.url.endsWith('/responses'));
+  const namespace = models[0].body.tools.find((row) => row.type === 'namespace');
+  assert.ok(namespace.tools.some((row) => row.name === 'get_infos'));
+  assert.ok(namespace.tools.every((row) => row.name !== 'get_info'));
+  const results = JSON.parse(
+    models[1].body.input.find(
+      (row) => row.call_id === 'call_info_0' && row.type === 'function_call_output',
+    ).output,
+  );
+  assert.deepEqual(results, output.lookups);
+});
+
+test('CLI rejects empty, duplicate and outside-input information batches before any lookup', (t) => {
+  for (const securities of [
+    [],
+    [
+      { exchange: 'NAS', symbol: 'AAPL' },
+      { exchange: 'NAS', symbol: 'AAPL' },
+    ],
+    [
+      { exchange: 'NAS', symbol: 'AAPL' },
+      { exchange: 'NAS', symbol: 'OUTSIDE' },
+    ],
+  ]) {
+    const result = run(t, 'types-batch', { TEST_INFO_BATCHES: JSON.stringify([securities]) });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, 'MODEL_OUTPUT');
+    assert.equal(output.diagnostic.statistics.infoToolCalls, securities.length);
+    assert.equal(result.requests.filter((row) => row.url.includes('/search-info?')).length, 0);
+    assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 1);
+  }
+});
+
+test('CLI preflights every batch against the remaining logical information budget', (t) => {
+  const securities = Array.from({ length: 33 }, (_, index) => ({
+    exchange: 'NAS',
+    symbol: `S${index}`,
+  }));
+  const oversized = run(
+    t,
+    'types-batch',
+    { TEST_INFO_BATCHES: JSON.stringify([securities]) },
+    { securities },
+  );
+  assert.equal(oversized.status, 1, oversized.stderr);
+  assert.equal(oversized.stdout, '');
+  assert.equal(JSON.parse(oversized.stderr).error, 'MODEL_LIMIT');
+  assert.equal(JSON.parse(oversized.stderr).diagnostic.statistics.infoToolCalls, 33);
+  assert.equal(oversized.requests.filter((row) => row.url.includes('/search-info?')).length, 0);
+  const batch = [
+    { exchange: 'NAS', symbol: 'AAPL' },
+    { exchange: 'NAS', symbol: 'GOOG' },
+    { exchange: 'NAS', symbol: 'ACONW' },
+    { exchange: 'NAS', symbol: 'GOOGL' },
+    { exchange: 'NYS', symbol: 'BBD' },
+    { exchange: 'NYS', symbol: 'BAC/B' },
+    { exchange: 'NYS', symbol: 'BBDO' },
+    { exchange: 'NYS', symbol: 'BAC/L' },
+    { exchange: 'AMS', symbol: 'SPY' },
+    { exchange: 'AMS', symbol: 'VXX' },
+  ];
+  const remaining = run(t, 'types-batch', {
+    TEST_INFO_BATCHES: JSON.stringify([batch, batch, batch, batch.slice(0, 2), batch.slice(0, 3)]),
+  });
+  assert.equal(remaining.status, 1, remaining.stderr);
+  assert.equal(remaining.stdout, '');
+  assert.equal(JSON.parse(remaining.stderr).error, 'MODEL_LIMIT');
+  assert.equal(JSON.parse(remaining.stderr).diagnostic.statistics.infoToolCalls, 35);
+  assert.equal(remaining.requests.filter((row) => row.url.includes('/search-info?')).length, 32);
+});
+
+test('CLI continues an information batch after an individual 404 and preserves ordered results', (t) => {
+  const result = run(t, 'types-batch', {
+    TEST_INFO_BATCHES: JSON.stringify([
+      [
+        { exchange: 'NAS', symbol: 'AAPL' },
+        { exchange: 'NAS', symbol: 'GOOG' },
+        { exchange: 'NAS', symbol: 'ACONW' },
+      ],
+    ]),
+    TEST_INFO_STATUS_AT: '2',
+    TEST_INFO_STATUS: '404',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.coverage.individualLookupFailures, 1);
+  assert.equal(output.statistics.infoToolCalls, 3);
+  assert.deepEqual(
+    output.lookups.map(({ symbol, sourceId, error }) => ({ symbol, sourceId, error })),
+    [
+      { symbol: 'AAPL', sourceId: 's1', error: undefined },
+      { symbol: 'GOOG', sourceId: undefined, error: 'SECURITY_LOOKUP_FAILED' },
+      { symbol: 'ACONW', sourceId: 's2', error: undefined },
+    ],
+  );
+  assert.deepEqual(
+    result.requests
+      .filter((row) => row.url.includes('/search-info?'))
+      .map((row) => new URL(row.url).searchParams.get('PDNO')),
+    ['AAPL', 'GOOG', 'ACONW'],
+  );
+});
+
+test('CLI stops an information batch after common failure, cancellation or stage exhaustion', (t) => {
+  for (const extra of [
+    { TEST_INFO_STATUS_AT: '2', TEST_INFO_STATUS: '503' },
+    { TEST_INFO_AUTH_AT: '2' },
+    { TEST_INFO_BLOCK_AT: '2' },
+    { TEST_INFO_TICK_AT: '2' },
+  ]) {
+    const result = run(t, 'types-batch', {
+      TEST_INFO_BATCHES: JSON.stringify([
+        [
+          { exchange: 'NAS', symbol: 'AAPL' },
+          { exchange: 'NAS', symbol: 'GOOG' },
+          { exchange: 'NAS', symbol: 'ACONW' },
+        ],
+      ]),
+      ...extra,
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(JSON.parse(result.stderr).diagnostic.statistics.infoToolCalls, 3);
+    assert.deepEqual(
+      result.requests
+        .filter((row) => row.url.includes('/search-info?'))
+        .map((row) => new URL(row.url).searchParams.get('PDNO')),
+      ['AAPL', 'GOOG'],
+    );
+    assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 1);
+  }
+});
+
 test('CLI requires opened source context and rejects failed web research', (t) => {
   for (const scenario of ['search-only']) {
     const result = run(t, scenario);
@@ -1753,7 +1909,7 @@ test('CLI reports total blocked time and observed work through cancellation', (t
 test('CLI statistics preserve the existing request and tool ceilings', (t) => {
   for (const [scenario, models, infos, webs] of [
     ['model-limit', 12, 12, 1],
-    ['info-limit', 2, 33, 1],
+    ['info-limit', 1, 33, 1],
     ['web-limit', 2, 1, 33],
   ]) {
     const result = run(t, scenario);
@@ -2079,7 +2235,7 @@ test('CLI binds final source IDs to original KIS sources', (t) => {
   const requests = result.requests.filter((row) => row.url.endsWith('/responses'));
   const info = requests[1].body.input.find((row) => row.type === 'function_call_output');
   const infoOutput = JSON.parse(info.output);
-  assert.equal(infoOutput.sourceId, 's1');
+  assert.equal(infoOutput[0].sourceId, 's1');
   assert.equal(output.securities[0].evidence[0].source, 'kis:NYS:BAC/B');
   assert.equal(output.securities[0].type, 'preferred');
   assert.equal(output.securities[0].evidence[0].sourceId, 's1');

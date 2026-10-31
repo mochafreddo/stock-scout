@@ -45,7 +45,9 @@ export function run(t, scenario = 'ok', env = {}, args, script = 'candidate-univ
         import.meta.url,
       ).pathname,
       `scripts/${script}.ts`,
-      ...(args ?? ['--auth-dir', directory, '--model', 'gpt-6-luna']),
+      ...(typeof args === 'function'
+        ? args(directory)
+        : (args ?? ['--auth-dir', directory, '--model', 'gpt-6-luna'])),
     ],
     {
       encoding: 'utf8',

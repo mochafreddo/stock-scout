@@ -1,0 +1,221 @@
+{
+  "reviewBase": "33a1b316dd743e3d826056b52471596a491b454b",
+  "scope": "actual report completion improvement; no paid API or model fallback",
+  "plannedMaximumVerificationExecutions": 6,
+  "usedVerificationExecutions": 5,
+  "remainingExecutionsNotRun": 1,
+  "integratedReport": "not_run_type_sample_partial",
+  "currentAccountModelList": {
+    "connected": true,
+    "solListed": true,
+    "lunaListed": true,
+    "inferenceCompatibilityNotImplied": true
+  },
+  "runs": [
+    {
+      "startedAt": "2026-10-31T11:08:42.809268+00:00",
+      "finishedAt": "2026-10-31T11:08:47.568029+00:00",
+      "elapsedSeconds": 4.759,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "name": "calendar-technical",
+      "runtimeInputsSha256": "400071af1c24fbc54fc3432d432cce483047ca3b1dca5db416542f0e1b58ebc7",
+      "model": "gpt-6.1-sol",
+      "assessments": [
+        {
+          "id": "nyse:2:110000959612",
+          "status": "no_schedule_impact",
+          "changes": [],
+          "effectiveDate": null
+        }
+      ],
+      "result": "passed_selected_sample",
+      "modelRequests": 1
+    },
+    {
+      "startedAt": "2026-10-31T11:09:25.698177+00:00",
+      "finishedAt": "2026-10-31T11:09:31.142403+00:00",
+      "elapsedSeconds": 5.444,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "name": "calendar-future",
+      "runtimeInputsSha256": "400071af1c24fbc54fc3432d432cce483047ca3b1dca5db416542f0e1b58ebc7",
+      "model": "gpt-6.1-sol",
+      "assessments": [
+        {
+          "id": "nasdaq:ETA2026-56",
+          "status": "future_effective",
+          "changes": [],
+          "effectiveDate": "2026-12-06"
+        }
+      ],
+      "result": "passed_selected_sample",
+      "modelRequests": 1
+    },
+    {
+      "startedAt": "2026-10-31T11:10:27.018785+00:00",
+      "finishedAt": "2026-10-31T11:10:32.566153+00:00",
+      "elapsedSeconds": 5.547,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "name": "calendar-closure",
+      "runtimeInputsSha256": "400071af1c24fbc54fc3432d432cce483047ca3b1dca5db416542f0e1b58ebc7",
+      "model": "gpt-6.1-sol",
+      "assessments": [
+        {
+          "id": "nasdaq:ETA2024-87",
+          "status": "schedule_change",
+          "changes": [
+            {
+              "exchanges": [
+                "NAS"
+              ],
+              "date": "2025-01-09",
+              "kind": "closed",
+              "open": null,
+              "close": null
+            }
+          ],
+          "effectiveDate": null
+        }
+      ],
+      "result": "passed_selected_sample",
+      "modelRequests": 1
+    },
+    {
+      "startedAt": "2026-10-31T11:12:17.142655+00:00",
+      "finishedAt": "2026-10-31T11:12:49.952619+00:00",
+      "elapsedSeconds": 32.81,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "name": "types",
+      "runtimeInputsSha256": "400071af1c24fbc54fc3432d432cce483047ca3b1dca5db416542f0e1b58ebc7",
+      "model": "gpt-6-luna",
+      "result": "partial_selected_sample",
+      "statistics": {
+        "status": "completed",
+        "elapsedMs": 32680,
+        "modelRequests": 4,
+        "infoToolCalls": 3,
+        "observedWebToolCalls": 4
+      },
+      "coverage": {
+        "input": 3,
+        "included": 1,
+        "excluded": 2,
+        "unconfirmed": 2,
+        "individualLookupFailures": 0,
+        "inclusionRate": 0.3333333333333333
+      },
+      "securities": [
+        {
+          "exchange": "NAS",
+          "symbol": "AAPL",
+          "type": "common",
+          "included": true,
+          "identity": "confirmed",
+          "applicable": true,
+          "typeRejection": null
+        },
+        {
+          "exchange": "NYS",
+          "symbol": "BBD",
+          "type": "unknown",
+          "included": false,
+          "identity": "confirmed",
+          "applicable": false,
+          "typeRejection": {
+            "submittedType": "preferred_adr",
+            "reason": "kis_broad_stock_only"
+          }
+        },
+        {
+          "exchange": "NYS",
+          "symbol": "BBDO",
+          "type": "unknown",
+          "included": false,
+          "identity": "confirmed",
+          "applicable": false,
+          "typeRejection": {
+            "submittedType": "common_adr",
+            "reason": "kis_broad_stock_only"
+          }
+        }
+      ],
+      "openedWebSources": [
+        {
+          "action": "open_page",
+          "url": "https://investor.apple.com/faq/default.aspx"
+        },
+        {
+          "action": "open_page",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
+        }
+      ]
+    },
+    {
+      "startedAt": "2026-10-31T11:16:18.222918+00:00",
+      "finishedAt": "2026-10-31T11:16:37.078677+00:00",
+      "elapsedSeconds": 18.856,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "name": "types-recheck",
+      "runtimeInputsSha256": "91f638850bbfa112395dc00f66dbe5b6290fd306c4c2bd83c8b308ad46b81dfb",
+      "model": "gpt-6-luna",
+      "result": "partial_selected_sample",
+      "statistics": {
+        "status": "completed",
+        "elapsedMs": 18729,
+        "modelRequests": 3,
+        "infoToolCalls": 3,
+        "observedWebToolCalls": 2
+      },
+      "coverage": {
+        "input": 3,
+        "included": 1,
+        "excluded": 2,
+        "unconfirmed": 2,
+        "individualLookupFailures": 0,
+        "inclusionRate": 0.3333333333333333
+      },
+      "securities": [
+        {
+          "exchange": "NAS",
+          "symbol": "AAPL",
+          "type": "common",
+          "included": true,
+          "identity": "confirmed",
+          "applicable": true,
+          "typeRejection": null
+        },
+        {
+          "exchange": "NYS",
+          "symbol": "BBD",
+          "type": "unknown",
+          "included": false,
+          "identity": "confirmed",
+          "applicable": true,
+          "typeRejection": null
+        },
+        {
+          "exchange": "NYS",
+          "symbol": "BBDO",
+          "type": "unknown",
+          "included": false,
+          "identity": "confirmed",
+          "applicable": true,
+          "typeRejection": null
+        }
+      ],
+      "openedWebSources": [
+        {
+          "action": "open_page",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
+        }
+      ],
+      "observedInformationBatchSizes": [
+        3
+      ]
+    }
+  ]
+}

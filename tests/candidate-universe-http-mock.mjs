@@ -158,14 +158,19 @@ globalThis.fetch = async (url, init = {}) => {
         response: { usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 } },
       },
     ];
-    if (scenario === 'model-budget') {
+    if (scenario === 'model-budget' || scenario === 'type-batch-execution') {
       const call = {
         type: 'function_call',
         id: `fc${typeRequests}`,
         call_id: `call${typeRequests}`,
         namespace: 'stock_scout',
-        name: 'list_sources',
-        arguments: '{}',
+        name: scenario === 'type-batch-execution' ? 'get_infos' : 'list_sources',
+        arguments:
+          scenario === 'type-batch-execution'
+            ? JSON.stringify({
+                securities: prompt.securities.map(({ exchange, symbol }) => ({ exchange, symbol })),
+              })
+            : '{}',
       };
       events = [
         events[0],
@@ -200,6 +205,14 @@ globalThis.fetch = async (url, init = {}) => {
   assert.equal(init.headers.authorization, `Bearer ${token}`);
   assert.equal(init.redirect, 'error');
   assert.ok(init.signal instanceof AbortSignal);
+  if (address.pathname.endsWith('/search-info')) {
+    assert.equal(scenario, 'type-batch-execution');
+    elapsed = 600_000;
+    return Response.json({
+      rt_cd: '0',
+      output: { std_pdno: address.searchParams.get('PDNO'), ovrs_stck_dvsn_cd: '01' },
+    });
+  }
   const matchedSamples = samples.filter((s) => s.exchange === address.searchParams.get('EXCD'));
   const sample =
     matchedSamples[process.env.REPORT_COUNT && address.pathname.endsWith('trade-pbmn') ? 1 : 0];

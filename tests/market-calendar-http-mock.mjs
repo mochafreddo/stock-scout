@@ -119,8 +119,6 @@ globalThis.fetch = async (url, options) => {
             status: 'no_schedule_impact',
             reason: 'Routine notice.',
             spanIds: notice.entries.map((entry) => entry.spans[0].id),
-            changes: [],
-            effectiveDate: null,
             supersedes: [],
           })),
         };

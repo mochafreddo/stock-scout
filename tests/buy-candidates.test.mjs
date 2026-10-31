@@ -5,6 +5,92 @@ import { run as runCandidate } from './candidate-cli-helper.mjs';
 const run = (t, scenario = 'ok', env = {}, args) =>
   runCandidate(t, scenario, env, args, 'buy-candidates');
 
+test('stage-specific model overrides reach the selected HTTP stages and public provenance', (t) => {
+  const result = run(t, 'ok', { TEST_REPORT_MODEL: 'gpt-6.1-sol' }, (directory) => [
+    '--auth-dir',
+    directory,
+    '--model',
+    'gpt-6.1-sol',
+    '--calendar-model',
+    'calendar-test',
+    '--type-model',
+    'gpt-6-luna',
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const requests = result.requests.filter((row) => row.url.endsWith('/responses'));
+  assert.deepEqual(
+    requests.map((row) => row.body.model),
+    ['calendar-test', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-sol', 'gpt-6.1-sol'],
+  );
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.sourceUniverse.calendar.noticeAssessment.model, 'calendar-test');
+  assert.equal(report.sourceUniverse.typeAssessment.model.id, 'gpt-6-luna');
+  assert.equal(report.model.id, 'gpt-6.1-sol');
+});
+
+test('stage-specific model inputs reject missing values before any external request', (t) => {
+  for (const overrides of [
+    ['--calendar-model', '--type-model'],
+    ['--type-model'],
+    ['--calendar-model', 'bad model'],
+    ['--type-model', 'a'.repeat(101)],
+    ['--type-model', 'first', '--type-model', 'second'],
+  ]) {
+    const result = run(t, 'ok', {}, (directory) => [
+      '--auth-dir',
+      directory,
+      '--model',
+      'gpt-6-luna',
+      ...overrides,
+    ]);
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stderr).error, 'USAGE');
+    assert.equal(result.stdout, '');
+    assert.equal(result.requests.length, 0);
+  }
+});
+
+test('unspecified stage models retain the required default model', (t) => {
+  for (const [overrides, expected] of [
+    [
+      ['--calendar-model', 'calendar-test'],
+      ['calendar-test', 'gpt-6-luna'],
+    ],
+    [
+      ['--type-model', 'types-test'],
+      ['gpt-6-luna', 'types-test'],
+    ],
+  ]) {
+    const result = run(t, 'ok', {}, (directory) => [
+      '--auth-dir',
+      directory,
+      '--model',
+      'gpt-6-luna',
+      ...overrides,
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(
+      result.requests.filter((row) => row.url.endsWith('/responses')).map((row) => row.body.model),
+      [...expected, 'gpt-6-luna', 'gpt-6-luna', 'gpt-6-luna'],
+    );
+  }
+});
+
+test('the shared execution deadline stops a multi-security tool after its first KIS response', (t) => {
+  const result = run(t, 'type-batch-execution');
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.error, 'EXECUTION_LIMIT');
+  assert.equal(output.usage.kis, 7);
+  assert.equal(output.usage.typeModel, 1);
+  assert.equal(output.usage.recommendationModel, 0);
+  assert.equal(output.diagnostic.typeAssessment.statistics.infoToolCalls, 3);
+  const queries = result.requests.filter((row) => row.url.includes('/search-info'));
+  assert.equal(queries.length, 1);
+  assert.equal(new URL(queries[0].url).searchParams.get('PDNO'), 'AAPL');
+});
+
 test('compact summaries retain completed phases and all model requests after detailed observations are truncated', (t) => {
   const result = run(t, 'review-late-error', {
     NYSE_EXTRA: JSON.stringify([

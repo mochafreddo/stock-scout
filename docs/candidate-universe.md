@@ -12,6 +12,8 @@ node scripts/candidate-universe.ts --auth-dir /absolute/private/stock-scout --mo
 
 모델과 인증 디렉터리를 명시하세요. 과거 시각 지정, 탐색 수·기간·예산 확대, 자동 재로그인과 유료 API 전환은 제공하지 않습니다. 기존 인증 정책에서 허용한 갱신과 KIS의 명시적 만료 재조회만 사용합니다. KIS 발급 간격 때문에 실행할 수 없다면 자동 대기하지 않고 실패합니다.
 
+`--model`은 일정·유형 판단의 기본값입니다. 선택 인수 `--calendar-model`과 `--type-model`로 해당 단계만 덮어쓸 수 있습니다. 독립 일정·유형 CLI는 기존 `--model`을 사용합니다. 단계별 선택과 공용 도구 변경의 범위는 [보고서 완료 개선 설계](buy-candidate-completion-design.md)를 따릅니다.
+
 ## 자료 확인 순서
 
 1. 공식 연간 일정과 제한된 공지를 읽어 세 거래소의 공통 데이터 기준 세션과 다음 판단 대상 세션을 정합니다. 장중에는 거부합니다.
