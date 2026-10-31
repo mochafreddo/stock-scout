@@ -1,0 +1,199 @@
+{
+  "issue": 277,
+  "reviewBase": "5a88d0658c63b27023825ac278018fb301eb7316",
+  "purpose": "One pre-change independent sample check; not proof of a fix or market-wide accuracy",
+  "input": {
+    "securities": [
+      {
+        "exchange": "NAS",
+        "symbol": "AAPL"
+      },
+      {
+        "exchange": "NYS",
+        "symbol": "BBD"
+      },
+      {
+        "exchange": "NYS",
+        "symbol": "BBDO"
+      }
+    ]
+  },
+  "answerAuthority": "Existing issue-260/261 independent answers, withheld from the model; only exchange/symbol input was sent",
+  "model": "gpt-6-luna",
+  "authentication": "Existing SIWC subscription; no paid fallback",
+  "liveRunsUsed": 1,
+  "liveRunLimit": 3,
+  "stoppedAfterSuccess": true,
+  "startedAt": "2026-10-31T14:01:57.938398+00:00",
+  "finishedAt": "2026-10-31T14:02:38.565392+00:00",
+  "elapsedSeconds": 40.627,
+  "exitCode": 0,
+  "sourceUnchanged": true,
+  "sourceHashes": {
+    "buy-candidate-assessment.ts": "66dd486123aecd4efcb971ca5b5a003dcbcc3e6b7e386fbd35f2b73815f2d008",
+    "buy-candidates.ts": "3aedb9d360ea8452ff0300d074b9486214fe0dc26b19f3e07277fd4c4a3ce6ba",
+    "calendar-notice-assessment.ts": "d16ac4ab583704aa79b83b62f09ac91e96e0b621f38331a1df789c8e7226473d",
+    "candidate-runtime.ts": "d316ff9cde7f26257a7e06db285c82e1f7cbf6d177b3d40cd3b801142975c5f9",
+    "candidate-universe.ts": "476e0779f3b9bf23b3f10484c99ece1e899e7b21f85b7d08792d387ba7f162c6",
+    "diagnostic-error.ts": "f98ca4a778f2a3d64d4d3ec55f4165c888609443b05c3c3615cd33859b5dcc25",
+    "execution-observation.ts": "f5469b99342144b5323e376d665237add7a5def3b3c33d8bb3964ccf8ead1ad1",
+    "kis-auth.ts": "470d378f4f38ac9673147fc791b75ed223a0643a781442378a896f1538be5e89",
+    "kis-observe.ts": "3d39506fe908db977fb93e4d3dce57cdf4e256f1d21822a07957d6096a987ea3",
+    "kis-probe.ts": "b277e165c6f1915dd1c04f9a7e32e7a143111a384d0b42c4cb757e18cf0c04b1",
+    "kis-query.ts": "c4efabc8d01805cb08d49020282046590df8d47dba984e4066c3bf7ef409374b",
+    "llm-security-probe.ts": "cf1cdc9ab77c0ae7f196dbfa5609da51110f1a21d51ba199e7ffcddd77d8dd93",
+    "market-calendar.ts": "aa18565afc20309d72ee12850e60d56107ab9fba6558ceaa49cf5873cdce5f78",
+    "paid-api.ts": "4682a1db2a2c3be1aa82ffa9910b636d11c6f939d940f3692684b12daecc9fcd",
+    "pre-push.ts": "c0af7bda6df1d3915732b51965d080c2a7f174bfcd0aa62df0a84078a846bfa0",
+    "security-type-assessment.ts": "125ead81c4716d996d3cef67e3113e3a745d5ebf60cc9e20126f50e0754d0f51",
+    "security-type-probe.ts": "84a073c2160aeba776739c435b856a08536a865b8a5acecf02788d00d04b89a2",
+    "siwc-auth.ts": "bd5f11d46b750b22a3a65ca65daecbe756dcce093e0d21b878667d491ecc7e05",
+    "package.json": "a6a98ce207487454e5ec6dec06cbfbcae76a719bb1df9bd58fa5b9454d6c22df",
+    "package-lock.json": "97e075d474240fa1633aa5839dcd835a392e783966e09de8fe9d6e73aeb211da",
+    "input.json": "8f6086e38213757bcacbc60078f980dfaf3c48c0dd8e31660eb1a38fc14f1a3d",
+    "observe.mjs": "74bb01676f1b0ea0392350cfd7ea00cf8554fc91ef2e42635ab33c2aa24c200d"
+  },
+  "statistics": {
+    "status": "completed",
+    "elapsedMs": 40484,
+    "modelRequests": 4,
+    "infoToolCalls": 3,
+    "observedWebToolCalls": 5
+  },
+  "coverage": {
+    "input": 3,
+    "included": 2,
+    "excluded": 1,
+    "unconfirmed": 0,
+    "individualLookupFailures": 0,
+    "inclusionRate": 0.6666666666666666
+  },
+  "stdoutSha256": "376f518c7329f13354a2cbc99aa28b2356063c2922a097ebdef86756824d026e",
+  "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "webResearch": [
+    {
+      "request": 2,
+      "action": "search",
+      "status": "completed",
+      "queries": [
+        "site:sec.gov/Archives/edgar/data Apple Inc common stock AAPL 10-K",
+        "site:bradesco.com.br BBD BBDO ADR preferred ordinary shares NYSE",
+        "site:adr.com Banco Bradesco BBDO ordinary BBD preferred ADR"
+      ],
+      "url": null
+    },
+    {
+      "request": 2,
+      "action": "search",
+      "status": "completed",
+      "queries": [
+        "Banco Bradesco ADR BBDO ordinary shares SEC depositary shares prospectus",
+        "Banco Bradesco BBD preferred ADR BBDO common ADR official",
+        "site:sec.gov Bradesco BBDO ordinary ADR BBD preferred"
+      ],
+      "url": null
+    },
+    {
+      "request": 2,
+      "action": "open_page",
+      "status": "completed",
+      "queries": [],
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000020/aapl-20260627.htm"
+    },
+    {
+      "request": 3,
+      "action": "search",
+      "status": "completed",
+      "queries": [
+        "SEC Bradesco American depositary shares ordinary preferred BBD BBDO 20-F",
+        "Banco Bradesco annual report ADR preferred shares ordinary shares BBDO NYSE"
+      ],
+      "url": null
+    },
+    {
+      "request": 3,
+      "action": "open_page",
+      "status": "completed",
+      "queries": [],
+      "url": "https://www.sec.gov/Archives/edgar/data/1160330/000129281426001753/bbdform20f_2025.htm"
+    }
+  ],
+  "securities": [
+    {
+      "exchange": "NAS",
+      "symbol": "AAPL",
+      "expectedType": "common",
+      "expectedIncluded": true,
+      "actualType": "common",
+      "actualIncluded": true,
+      "resultMatches": true,
+      "evidence": [
+        {
+          "sourceId": "s4",
+          "explanation": "Apple SEC filing identifies its listed equity as common stock.",
+          "source": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000020/aapl-20260627.htm"
+        },
+        {
+          "sourceId": "s1",
+          "explanation": "KIS record confirms the NAS symbol and Apple issuer identity.",
+          "source": "kis:NAS:AAPL"
+        }
+      ],
+      "researchAttribution": "Evaluator linkage from explicit query terms and cited opened filing; provider events carry no per-security attribution.",
+      "evaluatorStopAssessment": "Type-specific evidence submitted; no unresolved exclusion due to missing research in this run."
+    },
+    {
+      "exchange": "NYS",
+      "symbol": "BBD",
+      "expectedType": "preferred_adr",
+      "expectedIncluded": false,
+      "actualType": "preferred_adr",
+      "actualIncluded": false,
+      "resultMatches": true,
+      "evidence": [
+        {
+          "sourceId": "s5",
+          "explanation": "Bradesco SEC filing distinguishes the preferred-share ADR from the ordinary-share ADR.",
+          "source": "https://www.sec.gov/Archives/edgar/data/1160330/000129281426001753/bbdform20f_2025.htm"
+        },
+        {
+          "sourceId": "s2",
+          "explanation": "KIS record confirms the NYSE symbol and issuer identity; its product name is not relied on to establish type.",
+          "source": "kis:NYS:BBD"
+        }
+      ],
+      "researchAttribution": "Evaluator linkage from explicit query terms and cited opened filing; provider events carry no per-security attribution.",
+      "evaluatorStopAssessment": "Type-specific evidence submitted; no unresolved exclusion due to missing research in this run."
+    },
+    {
+      "exchange": "NYS",
+      "symbol": "BBDO",
+      "expectedType": "common_adr",
+      "expectedIncluded": true,
+      "actualType": "common_adr",
+      "actualIncluded": true,
+      "resultMatches": true,
+      "evidence": [
+        {
+          "sourceId": "s5",
+          "explanation": "Bradesco SEC filing identifies the ordinary-share ADR and its underlying share class.",
+          "source": "https://www.sec.gov/Archives/edgar/data/1160330/000129281426001753/bbdform20f_2025.htm"
+        },
+        {
+          "sourceId": "s3",
+          "explanation": "KIS record confirms the NYSE symbol and issuer identity; its product name is not relied on to establish type.",
+          "source": "kis:NYS:BBDO"
+        }
+      ],
+      "researchAttribution": "Evaluator linkage from explicit query terms and cited opened filing; provider events carry no per-security attribution.",
+      "evaluatorStopAssessment": "Type-specific evidence submitted; no unresolved exclusion due to missing research in this run."
+    }
+  ],
+  "webFailures": [],
+  "limitations": [
+    "Prior failures not reproduced; the reason those executions stopped with Apple-only opened sources remains unknown.",
+    "Successful live run predates the observation-only code change; final changed code has mocked CLI/HTTP validation, not a second live quality run.",
+    "Search events contain terms and URLs but cannot prove exhaustive investigation, page content availability, or per-security causality.",
+    "Source content was reviewed separately; no exhaustive subsequent-corporate-action or full-market validation."
+  ]
+}

@@ -67,6 +67,13 @@ type AssessmentRequest = {
   status: 'unknown' | 'completed' | 'failed' | 'cancelled';
   cause: AssessmentCause;
 };
+type WebResearch = {
+  request: number;
+  action: string;
+  status: string;
+  queries: string[];
+  url: string | null;
+};
 export type AssessmentDiagnostics = {
   statistics: Omit<AssessmentStatistics, 'status' | 'elapsedMs'> & {
     status: AssessmentStatistics['status'] | 'not_started';
@@ -81,6 +88,7 @@ export type AssessmentDiagnostics = {
     | 'validation'
     | 'output';
   requests: AssessmentRequest[];
+  webResearch?: WebResearch[];
 };
 export type Security = {
   exchange: KisExchange;
@@ -323,6 +331,7 @@ export async function assessSecurityTypes({
   const completedRequests = new Set<number>();
   const webCalls = new Set<string>();
   const webSources: { action: string; url: string }[] = [];
+  const webResearch: WebResearch[] = [];
   const webFailures: { action: string; url: string | null; status: string }[] = [];
   let failure: Error | undefined;
   const controller = new AbortController();
@@ -604,7 +613,7 @@ export async function assessSecurityTypes({
           id?: string;
           call_id?: string;
           status?: string;
-          action?: { type?: string; url?: string };
+          action?: { type?: string; url?: string; query?: string; queries?: string[] };
         };
       };
       const request = requestOperations.get(record);
@@ -632,6 +641,29 @@ export async function assessSecurityTypes({
           controller.abort();
         }
         if (raw.type === 'response.output_item.done') {
+          const action = raw.item.action;
+          const researchUrl = text(action?.url) ? URL.parse(action.url) : null;
+          const research = {
+            request: record.index,
+            action: ['search', 'open_page', 'find_in_page'].includes(action?.type ?? '')
+              ? (action?.type as string)
+              : 'unknown',
+            status: ['completed', 'failed', 'incomplete'].includes(raw.item.status ?? '')
+              ? (raw.item.status as string)
+              : 'unknown',
+            queries: Array.isArray(action?.queries)
+              ? action.queries.filter(text)
+              : text(action?.query)
+                ? [action.query]
+                : [],
+            url:
+              researchUrl?.protocol === 'https:' && !researchUrl.username && !researchUrl.password
+                ? (action?.url ?? null)
+                : null,
+          };
+          safe(research, secrets);
+          webResearch.push(research);
+          diagnostics.webResearch = webResearch;
           if (raw.item.status !== 'completed') {
             if (
               !['open_page', 'find_in_page'].includes(raw.item.action?.type ?? '') ||
@@ -643,11 +675,10 @@ export async function assessSecurityTypes({
             } else observation?.recover(webOperation);
             webFailures.push({
               action: raw.item.action?.type ?? 'unknown',
-              url: raw.item.action?.url ?? null,
+              url: research.url,
               status: raw.item.status ?? 'unknown',
             });
           }
-          const action = raw.item.action;
           if (
             raw.item.status === 'completed' &&
             ['open_page', 'find_in_page'].includes(action?.type ?? '') &&
@@ -936,6 +967,7 @@ export async function assessSecurityTypes({
       securities: assessed,
       lookups,
       webSources,
+      webResearch,
       webFailures,
       model: { id: model, requests, completions },
       limits: {

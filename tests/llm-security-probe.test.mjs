@@ -241,6 +241,15 @@ test('CLI diagnoses missing completion with request-specific stream observations
     },
     cause: 'missing_completion',
     lastProgress: 'model_stream',
+    webResearch: [
+      {
+        request: 1,
+        action: 'open_page',
+        status: 'completed',
+        queries: [],
+        url: 'https://www.sec.gov/controlled-security-type',
+      },
+    ],
     requests: [
       {
         index: 1,
@@ -1238,6 +1247,46 @@ test('CLI stops an information batch after common failure, cancellation or stage
   }
 });
 
+test('CLI records observed searches and page failures separately from cited evidence', (t) => {
+  const result = run(t, 'opened-source');
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.webResearch, [
+    {
+      request: 1,
+      action: 'search',
+      status: 'completed',
+      queries: ['controlled source'],
+      url: null,
+    },
+    {
+      request: 1,
+      action: 'open_page',
+      status: 'completed',
+      queries: [],
+      url: 'https://www.sec.gov/sample',
+    },
+    {
+      request: 1,
+      action: 'find_in_page',
+      status: 'completed',
+      queries: [],
+      url: 'https://www.sec.gov/sample',
+    },
+    {
+      request: 1,
+      action: 'open_page',
+      status: 'failed',
+      queries: [],
+      url: 'https://example.org/failed',
+    },
+  ]);
+  assert.deepEqual(
+    output.securities.map(({ symbol, included }) => ({ symbol, included })),
+    [{ symbol: 'AAPL', included: true }],
+  );
+});
+
 test('CLI requires opened source context and rejects failed web research', (t) => {
   for (const scenario of ['search-only']) {
     const result = run(t, scenario);
@@ -1250,6 +1299,47 @@ test('CLI requires opened source context and rejects failed web research', (t) =
     JSON.parse(opened.stdout).securities[0].evidence[0].source,
     'https://www.sec.gov/sample',
   );
+});
+
+test('CLI retains observed research after invalid judgments without trusting query secrets', (t) => {
+  const failed = run(t, 'catalog-unknown-id');
+  assert.equal(failed.status, 1, failed.stderr);
+  assert.equal(failed.stdout, '');
+  const research = JSON.parse(failed.stderr).diagnostic.typeAssessment.webResearch;
+  assert.equal(research.length, 4);
+  assert.deepEqual(research[0], {
+    request: 1,
+    action: 'search',
+    status: 'completed',
+    queries: ['controlled source'],
+    url: null,
+  });
+  assert.equal(research[3].status, 'failed');
+  const sensitive = run(t, 'opened-source', { TEST_RESEARCH_QUERY: 'synthetic-subscription' });
+  assert.equal(sensitive.status, 1, sensitive.stderr);
+  assert.equal(sensitive.stdout, '');
+  assert.doesNotMatch(sensitive.stderr, /synthetic-subscription/);
+});
+
+test('CLI omits credentials from rejected research URLs in failure diagnostics', (t) => {
+  for (const userinfo of [
+    'private-user',
+    ':unregistered-password',
+    'private-user:unregistered-password',
+  ]) {
+    const result = run(t, 'opened-source', {
+      TEST_RESEARCH_URL: `https://${userinfo}@www.sec.gov/sample`,
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.doesNotMatch(result.stderr, /private-user|unregistered-password/);
+  }
+  const failedPage = run(t, 'opened-source', {
+    TEST_RESEARCH_FAILURE_URL: 'https://private-user:unregistered-password@example.org/failed',
+  });
+  assert.equal(failedPage.status, 0, failedPage.stderr);
+  assert.equal(JSON.parse(failedPage.stdout).webFailures[0].url, null);
+  assert.doesNotMatch(failedPage.stdout + failedPage.stderr, /private-user|unregistered-password/);
 });
 
 test('CLI preserves request conditions for all six ranking observations', (t) => {

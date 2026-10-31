@@ -557,7 +557,7 @@ globalThis.fetch = async (url, init = {}) => {
         },
         ...web('ws1', {
           type: 'search',
-          queries: ['controlled source'],
+          queries: [process.env.TEST_RESEARCH_QUERY ?? 'controlled source'],
           sources: [{ type: 'url', url: 'https://example.org/search-only' }],
         }),
         ...web('ws2', {
@@ -565,7 +565,7 @@ globalThis.fetch = async (url, init = {}) => {
           url:
             scenario === 'catalog-sensitive'
               ? `${catalogSource}/synthetic-subscription`
-              : catalogSource,
+              : (process.env.TEST_RESEARCH_URL ?? catalogSource),
         }),
         ...web('ws3', {
           type: 'find_in_page',
@@ -575,7 +575,14 @@ globalThis.fetch = async (url, init = {}) => {
               : catalogSource,
           pattern: 'common stock',
         }),
-        ...web('ws4', { type: 'open_page', url: 'https://example.org/failed' }, 'failed'),
+        ...web(
+          'ws4',
+          {
+            type: 'open_page',
+            url: process.env.TEST_RESEARCH_FAILURE_URL ?? 'https://example.org/failed',
+          },
+          'failed',
+        ),
         { type: 'response.output_item.added', output_index: 5, item: call },
         {
           type: 'response.output_item.done',
