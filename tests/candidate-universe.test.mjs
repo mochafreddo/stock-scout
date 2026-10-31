@@ -2,6 +2,50 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { run } from './candidate-cli-helper.mjs';
 
+test('start budgets distinguish execution and shared type time with safe input volume', (t) => {
+  const result = run(t, 'type-limit', { TYPE_BEFORE_MS: '31' });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { observation, usage } = JSON.parse(result.stderr);
+  const stage = observation.summaries.stages.find((row) => row.name === 'types');
+  const request = observation.summaries.modelRequests.find(
+    (row) => row.name === 'types.model.http',
+  );
+  assert.equal(stage.executionRemainingMs, 599969);
+  assert.equal(stage.stageRemainingMs, 180000);
+  assert.equal(stage.securityCount, 3);
+  assert.equal(request.executionRemainingMs, 599969);
+  assert.equal(request.stageRemainingMs, 180000);
+  assert.equal(request.requestRemainingMs, 180000);
+  assert.equal(request.securityCount, 3);
+  const sent = result.requests.find((row) => row.body?.tools && row.url.endsWith('/responses'));
+  assert.equal(request.inputBytes, Buffer.byteLength(JSON.stringify(sent.body)));
+  assert.equal(request.elapsedMs, 180000);
+  assert.equal(usage.typeModel, 1);
+  assert.doesNotMatch(
+    JSON.stringify(observation.summaries),
+    /synthetic|Bearer|NAS:AAPL|Controlled/,
+  );
+});
+
+test('start budgets clamp local allowances to the remaining execution or target-open deadline', (t) => {
+  for (const [env, expected] of [
+    [{ TYPE_BEFORE_MS: '550000' }, 50000],
+    [{ TEST_NOW: '2026-10-19T13:29:59Z' }, 1000],
+  ]) {
+    const result = run(t, 'type-limit', env);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const { observation } = JSON.parse(result.stderr);
+    const request = observation.summaries.modelRequests.find(
+      (row) => row.name === 'types.model.http',
+    );
+    assert.equal(request.executionRemainingMs, expected);
+    assert.equal(request.stageRemainingMs, expected);
+    assert.equal(request.requestRemainingMs, expected);
+  }
+});
+
 test('candidate CLI includes shared type diagnostics and whole execution time on type failure', (t) => {
   const result = run(t, 'type-limit', { TYPE_BEFORE_MS: '31' });
   assert.equal(result.status, 1, result.stderr);

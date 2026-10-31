@@ -233,7 +233,9 @@ export async function assessCalendarNotices(
   context: ExecutionContext = {},
 ) {
   const observation = context.observation ?? context.runtime?.observation;
-  const operation = observation?.start('calendar.model', context.parentId);
+  const operation = observation?.start('calendar.model', context.parentId, 'operation', undefined, {
+    stageRemainingMs: remainingMs,
+  });
   context = { ...context, observation, parentId: operation?.id };
   let request: ObservedOperation | undefined;
   let modelSignal: AbortSignal | undefined;
@@ -307,7 +309,11 @@ export async function assessCalendarNotices(
         );
         context.runtime?.take('calendarModel');
         modelSignal = signal;
-        request = observation?.start('calendar.model.http', operation?.id, 'request');
+        request = observation?.start('calendar.model.http', operation?.id, 'request', undefined, {
+          stageRemainingMs: modelStartedAt + modelBudget - performance.now(),
+          requestRemainingMs: modelBudget,
+          inputBytes: Buffer.byteLength(String(init?.body ?? '')),
+        });
         try {
           const response = await observeFetch(url, { ...init, signal }, observation, request);
           return observeResponse(response, observation, request, signal, true);

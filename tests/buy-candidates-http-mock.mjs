@@ -7,6 +7,7 @@ mock.timers.enable({ apis: ['Date'], now: Date.parse(process.env.TEST_NOW) });
 
 const candidateFetch = globalThis.fetch;
 let recommendationRequests = 0;
+let reportSteps = 0;
 const scenario = process.env.SCENARIO;
 const originalSetTimeout = globalThis.setTimeout;
 const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
@@ -106,6 +107,8 @@ globalThis.fetch = async (url, init = {}) => {
   assert.equal(body.stream, true);
   assert.ok(body.input.every((item) => item.role !== 'system'));
   assert.equal(body.model, 'gpt-6-luna');
+  if (process.env.TEST_REPORT_STEP_MS)
+    advanceElapsed(JSON.parse(process.env.TEST_REPORT_STEP_MS)[reportSteps++] ?? 0);
   if (
     (scenario === 'report-header-stall' && prompt.stage === 'recommendation') ||
     (scenario === 'review-header-stall' && prompt.stage === 'report_review')

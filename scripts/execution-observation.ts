@@ -68,6 +68,12 @@ type OperationRecord = {
   startedAt: number | null;
   endedAt: number | null;
   elapsedMs: number | null;
+  executionRemainingMs: number | null;
+  stageRemainingMs: number | null;
+  requestRemainingMs: number | null;
+  inputBytes: number | null;
+  securityCount: number | null;
+  rowCount: number | null;
   status: 'in_progress' | 'completed' | 'failed';
   httpStatus: number | null;
   responseFormat: 'event_stream' | 'json' | 'other' | 'missing' | null;
@@ -89,6 +95,12 @@ type OperationRecord = {
   };
   failure: { code: string; recovered: boolean; propagated: boolean } | null;
 };
+type StartMeasurements = Partial<
+  Pick<
+    OperationRecord,
+    'stageRemainingMs' | 'requestRemainingMs' | 'inputBytes' | 'securityCount' | 'rowCount'
+  >
+>;
 export type ObservedOperation = Readonly<
   Omit<OperationRecord, 'failure' | 'eventCounts' | 'kis'>
 > & {
@@ -187,8 +199,12 @@ export class ExecutionObservation {
   private runId = 'unknown';
   private coverage = new Set<string>();
   private startedAt: string | null = null;
+  private stages: OperationRecord[] = [];
+  private modelRequests: OperationRecord[] = [];
+  private executionRemaining?: () => number;
 
-  constructor() {
+  constructor(executionRemaining?: () => number) {
+    this.executionRemaining = executionRemaining;
     this.attempt(() => {
       this.runId = crypto.randomUUID();
       this.origin = performance.now();
@@ -222,8 +238,19 @@ export class ExecutionObservation {
     parentId?: string | null,
     kind: ObservedOperation['kind'] = 'operation',
     relatedRequestId?: string,
+    measurements: StartMeasurements = {},
   ): ObservedOperation | undefined {
     return this.attempt(() => {
+      const count = (value: unknown) =>
+        typeof value === 'number' && Number.isFinite(value) && value >= 0
+          ? Math.floor(value)
+          : null;
+      const remaining = (value: unknown, maximum: number | null) => {
+        if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+        return Math.max(0, Math.floor(Math.min(value, maximum ?? Infinity)));
+      };
+      const executionRemainingMs = remaining(this.executionRemaining?.(), null);
+      const stageRemainingMs = remaining(measurements.stageRemainingMs, executionRemainingMs);
       this.coverage.add(name.startsWith('auth') ? 'siwc_auth' : name.split('.')[0]);
       const operation: OperationRecord = {
         id: `op-${++this.sequence}`,
@@ -234,6 +261,15 @@ export class ExecutionObservation {
         startedAt: this.now(),
         endedAt: null,
         elapsedMs: null,
+        executionRemainingMs,
+        stageRemainingMs,
+        requestRemainingMs: remaining(
+          measurements.requestRemainingMs,
+          stageRemainingMs ?? executionRemainingMs,
+        ),
+        inputBytes: count(measurements.inputBytes),
+        securityCount: count(measurements.securityCount),
+        rowCount: count(measurements.rowCount),
         status: 'in_progress',
         httpStatus: null,
         responseFormat: null,
@@ -250,6 +286,24 @@ export class ExecutionObservation {
       };
       if (this.operations.length < 512) this.operations.push(operation);
       else this.omittedOperations++;
+      if (
+        [
+          'auth',
+          'calendar',
+          'calendar.collection',
+          'calendar.model',
+          'ranking',
+          'types',
+          'types.model',
+          'daily',
+          'recommendation',
+          'recommendation.model',
+          'review',
+          'output',
+        ].includes(name)
+      )
+        this.stages.push(operation);
+      if (kind === 'request' && name.endsWith('.model.http')) this.modelRequests.push(operation);
       return operation;
     });
   }
@@ -414,6 +468,40 @@ export class ExecutionObservation {
     });
   }
   snapshot() {
+    const summarize = (row: OperationRecord) => ({
+      id: row.id,
+      parentId: row.parentId,
+      name: row.name,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      elapsedMs: row.elapsedMs,
+      executionRemainingMs: row.executionRemainingMs,
+      stageRemainingMs: row.stageRemainingMs,
+      requestRemainingMs: row.requestRemainingMs,
+      inputBytes: row.inputBytes,
+      securityCount: row.securityCount,
+      rowCount: row.rowCount,
+      status: row.status,
+      failure: row.failure,
+      ...(row.kind === 'request'
+        ? {
+            httpStatus: row.httpStatus,
+            headersAt: row.headersAt,
+            firstEventAt: row.firstEventAt,
+            lastEventAt: row.lastEventAt,
+            completionEvents: row.completionEvents,
+            errorEvents: row.errorEvents,
+            eventCounts: row.eventCounts,
+            bytes: row.bytes,
+            streamEnd: row.streamEnd,
+            cancellationSource: row.cancellationSource,
+          }
+        : {}),
+    });
+    const summaries = () => ({
+      stages: this.stages.map(summarize),
+      modelRequests: this.modelRequests.map(summarize),
+    });
     return (
       this.attempt(() => {
         const operations = [...this.operations];
@@ -436,6 +524,7 @@ export class ExecutionObservation {
               }
             : null,
           finalError: this.finalError,
+          summaries: summaries(),
           operations,
         });
         while (Buffer.byteLength(JSON.stringify(project())) > 256 * 1024 && operations.length) {
@@ -465,6 +554,7 @@ export class ExecutionObservation {
             }
           : null,
         finalError: this.finalError,
+        summaries: summaries(),
         operations: this.firstFailure ? [this.firstFailure] : [],
       }
     );

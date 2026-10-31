@@ -105,11 +105,21 @@ export async function recommendCandidates(
 ) {
   onStage('recommendation');
   const observation = runtime.observation;
-  const operation = observation.start('recommendation');
+  const started = performance.now();
+  const volume = {
+    securityCount: universe.securities.length,
+    rowCount: universe.securities.reduce(
+      (total, security) => total + security.daily.rows.length,
+      0,
+    ),
+  };
+  const operation = observation.start('recommendation', undefined, 'operation', undefined, {
+    stageRemainingMs: 180_000,
+    ...volume,
+  });
   let phase: ObservedOperation | undefined;
   let validation: ObservedOperation | undefined;
   const phaseRequests: (ObservedOperation | undefined)[] = [];
-  const started = performance.now();
   const controller = new AbortController();
   tagSignal(controller.signal, () => 'stage_limit');
   const context = { runtime, signal: controller.signal, observation, parentId: operation?.id };
@@ -180,6 +190,18 @@ export async function recommendCandidates(
           'recommendation.tool',
           phaseRequests.at(-1)?.id ?? phase?.id,
           'tool',
+          undefined,
+          {
+            stageRemainingMs: 180_000 - (performance.now() - started),
+            securityCount: Array.isArray(securityIds) ? securityIds.length : null,
+            rowCount:
+              Array.isArray(securityIds) && securityIds.every((id) => securities.has(id))
+                ? securityIds.reduce(
+                    (total, id) => total + (securities.get(id)?.daily.rows.length ?? 0),
+                    0,
+                  )
+                : null,
+          },
         );
         try {
           check();
@@ -219,7 +241,10 @@ export async function recommendCandidates(
   try {
     const credentials = await readSiwcCredentials(directory, undefined, context);
     check();
-    phase = observation.start('recommendation.model', operation?.id);
+    phase = observation.start('recommendation.model', operation?.id, 'operation', undefined, {
+      stageRemainingMs: 180_000 - (performance.now() - started),
+      ...volume,
+    });
     let phaseLimit = 3;
     const provider = createOpenAI({
       apiKey: credentials.accessToken,
@@ -243,6 +268,20 @@ export async function recommendCandidates(
           phaseLimit === 3 ? 'recommendation.model.http' : 'review.model.http',
           phase?.id,
           'request',
+          undefined,
+          {
+            stageRemainingMs: 180_000 - (performance.now() - started),
+            requestRemainingMs: 180_000 - (performance.now() - started),
+            inputBytes: Buffer.byteLength(String(init?.body ?? '')),
+            ...volume,
+            rowCount:
+              phaseLimit === 3
+                ? [...read].reduce(
+                    (total, id) => total + (securities.get(id)?.daily.rows.length ?? 0),
+                    0,
+                  )
+                : volume.rowCount,
+          },
         );
         phaseRequests.push(request);
         try {
@@ -458,7 +497,10 @@ export async function recommendCandidates(
     validation = undefined;
     onStage('report_review');
     phaseLimit = 4;
-    phase = observation.start('review', operation?.id);
+    phase = observation.start('review', operation?.id, 'operation', undefined, {
+      stageRemainingMs: 180_000 - (performance.now() - started),
+      ...volume,
+    });
     const review = record(
       await run(
         reviewInstructions,

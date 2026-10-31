@@ -6,9 +6,9 @@ import {
 } from './execution-observation.ts';
 
 export class CandidateRuntime {
-  readonly observation = new ExecutionObservation();
   readonly startedAt = performance.now();
   readonly startedWall = Date.now();
+  readonly observation = new ExecutionObservation(() => this.remaining());
   readonly counts = {
     kis: 0,
     issuance: 0,

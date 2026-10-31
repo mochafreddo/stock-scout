@@ -128,7 +128,9 @@ export async function candidateUniverse(
   onStage('daily');
   const included = [];
   for (const security of assessment.securities.filter((security) => security.included)) {
-    const operation = runtime.observation.start('daily');
+    const operation = runtime.observation.start('daily', undefined, 'operation', undefined, {
+      securityCount: 1,
+    });
     let validation: ObservedOperation | undefined;
     try {
       const daily = await queryKis('daily', security.exchange as KisExchange, security.symbol, {

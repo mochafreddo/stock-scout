@@ -3,6 +3,26 @@ import test from 'node:test';
 import { run } from './candidate-cli-helper.mjs';
 import { runCalendar } from './market-calendar-cli-helper.mjs';
 
+test('standalone calendar records local budgets and transmitted size without an invented execution budget', () => {
+  const result = runCalendar([], { SCENARIO: 'model-no-completion' });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { observation } = JSON.parse(result.stderr);
+  const calendar = observation.summaries.stages.find((row) => row.name === 'calendar');
+  assert.equal(calendar.executionRemainingMs, null);
+  assert.equal(calendar.stageRemainingMs, 300000);
+  const official = observation.operations.find((row) => row.name === 'calendar.official.http');
+  assert.equal(official.stageRemainingMs, 120000);
+  assert.equal(official.requestRemainingMs, 15000);
+  const request = observation.summaries.modelRequests[0];
+  assert.equal(request.executionRemainingMs, null);
+  assert.equal(request.stageRemainingMs, 180000);
+  assert.equal(request.requestRemainingMs, 180000);
+  assert.equal(request.securityCount, null);
+  const sent = result.requests.find((row) => row.url.endsWith('/responses'));
+  assert.equal(request.inputBytes, Buffer.byteLength(JSON.stringify(sent.body)));
+});
+
 test('official fetch cancellation before headers preserves request and collection limit owners', () => {
   for (const [stage, timeout, count, source] of [
     ['', '15000', 1, 'request_limit'],

@@ -109,7 +109,9 @@ export async function queryKis(
     const query = async () => {
       const signal = requestSignal(context, 15_000);
       context.runtime?.take('kis');
-      const request = observer?.start('kis.http', operation?.id, 'request');
+      const request = observer?.start('kis.http', operation?.id, 'request', undefined, {
+        requestRemainingMs: context.signal ? null : 15_000,
+      });
       let bodyParsed = false;
       let providerCode: unknown;
       const observeFailure = () =>

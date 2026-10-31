@@ -44,7 +44,9 @@ export async function marketCalendar({
   const sources: { url: string; receivedAt: string; sha256: string; bytes: number }[] = [];
   const startedAt = performance.now();
   const observation = context.observation ?? context.runtime?.observation;
-  const operation = observation?.start('calendar', context.parentId);
+  const operation = observation?.start('calendar', context.parentId, 'operation', undefined, {
+    stageRemainingMs: 300_000,
+  });
   context = { ...context, observation, parentId: operation?.id };
   let collection: ObservedOperation | undefined;
   let validation: ObservedOperation | undefined;
@@ -98,7 +100,10 @@ export async function marketCalendar({
         startedAt + 120_000 - performance.now() <= 15_000 ? 'stage_limit' : 'request_limit',
       );
       context.runtime?.take('official');
-      request = observation?.start('calendar.official.http', collection?.id, 'request');
+      request = observation?.start('calendar.official.http', collection?.id, 'request', undefined, {
+        stageRemainingMs: startedAt + 120_000 - performance.now(),
+        requestRemainingMs: 15_000,
+      });
       const response = await observeFetch(
         url,
         {
@@ -711,7 +716,9 @@ export async function marketCalendar({
   }
   try {
     context = { ...context, signal: requestSignal(context, 300_000, undefined, 'stage_limit') };
-    collection = observation?.start('calendar.collection', operation?.id);
+    collection = observation?.start('calendar.collection', operation?.id, 'operation', undefined, {
+      stageRemainingMs: startedAt + 120_000 - performance.now(),
+    });
     const nyseSource = await collect(nyseUrl);
     const nyse = parse(() => nyseCalendar(nyseSource));
     const nasdaqSource = await collect(nasdaqUrl);

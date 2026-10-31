@@ -234,8 +234,14 @@ export async function assessSecurityTypes({
   context?: ExecutionContext;
 }) {
   const observation = context.observation ?? context.runtime?.observation;
-  const operation = observation?.start('types', context.parentId);
-  const modelOperation = observation?.start('types.model', operation?.id);
+  const operation = observation?.start('types', context.parentId, 'operation', undefined, {
+    stageRemainingMs: 180_000,
+    securityCount: inputs.length,
+  });
+  const modelOperation = observation?.start('types.model', operation?.id, 'operation', undefined, {
+    stageRemainingMs: 180_000,
+    securityCount: inputs.length,
+  });
   context = {
     ...context,
     observation,
@@ -358,7 +364,18 @@ export async function assessSecurityTypes({
       const scope = requestScope.getStore();
       if (scope) scope.record = record;
       diagnostics.lastProgress = 'model_request';
-      const request = observation?.start('types.model.http', modelOperation?.id, 'request');
+      const request = observation?.start(
+        'types.model.http',
+        modelOperation?.id,
+        'request',
+        undefined,
+        {
+          stageRemainingMs: 180_000 - (performance.now() - stageStartedAt),
+          requestRemainingMs: 180_000,
+          inputBytes: Buffer.byteLength(String(init?.body ?? '')),
+          securityCount: inputs.length,
+        },
+      );
       requestOperations.set(record, request);
       try {
         const response = observeResponse(
@@ -430,6 +447,8 @@ export async function assessSecurityTypes({
           'types.info_tool',
           toolRequests.get(toolCallId)?.id ?? modelOperation?.id,
           'tool',
+          undefined,
+          { stageRemainingMs: 180_000 - (performance.now() - stageStartedAt), securityCount: 1 },
         );
         let toolSignal: AbortSignal | undefined;
         if (toolOperation) openTools.set(toolOperation, undefined);
@@ -524,6 +543,8 @@ export async function assessSecurityTypes({
           'types.info_tool',
           toolRequests.get(toolCallId)?.id ?? modelOperation?.id,
           'tool',
+          undefined,
+          { stageRemainingMs: 180_000 - (performance.now() - stageStartedAt) },
         );
         try {
           if (failure) throw failure;
@@ -561,7 +582,12 @@ export async function assessSecurityTypes({
       if (raw.item?.type === 'web_search_call') {
         const key = raw.item.id ? `${record.index}:${raw.item.id}` : undefined;
         if (key && !webOperations.has(key))
-          webOperations.set(key, observation?.start('types.web_tool', request?.id, 'tool'));
+          webOperations.set(
+            key,
+            observation?.start('types.web_tool', request?.id, 'tool', undefined, {
+              stageRemainingMs: 180_000 - (performance.now() - stageStartedAt),
+            }),
+          );
         const webOperation = key ? webOperations.get(key) : undefined;
         if (raw.type === 'response.output_item.done') {
           if (raw.item.status === 'completed') observation?.end(webOperation);

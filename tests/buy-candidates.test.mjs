@@ -5,6 +5,144 @@ import { run as runCandidate } from './candidate-cli-helper.mjs';
 const run = (t, scenario = 'ok', env = {}, args) =>
   runCandidate(t, scenario, env, args, 'buy-candidates');
 
+test('compact summaries retain completed phases and all model requests after detailed observations are truncated', (t) => {
+  const result = run(t, 'review-late-error', {
+    NYSE_EXTRA: JSON.stringify([
+      {
+        id: 800,
+        publishedDate: 1792706400000,
+        subject: 'Options',
+        body: '<p>Options notice.</p>',
+        marketLinks: ['NYSE AMERICAN OPTIONS'],
+        childNotifications: Array.from({ length: 600 }, () => ({
+          publishedDate: 1792706400000,
+          subject: 'Options',
+          body: '<p>Options update.</p>',
+        })),
+      },
+    ]),
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { observation, usage, error } = JSON.parse(result.stderr);
+  assert.equal(error, 'MODEL_INCOMPLETE');
+  assert.equal(observation.truncated, true);
+  assert.ok(observation.omittedOperations > 0);
+  assert.ok(observation.operations.length <= 512);
+  assert.ok(Buffer.byteLength(JSON.stringify(observation)) <= 256 * 1024);
+  assert.deepEqual(
+    observation.summaries.modelRequests.map((row) => row.name),
+    [
+      'calendar.model.http',
+      'types.model.http',
+      'recommendation.model.http',
+      'recommendation.model.http',
+      'review.model.http',
+    ],
+  );
+  assert.equal(
+    observation.summaries.stages.find((row) => row.name === 'calendar').status,
+    'completed',
+  );
+  assert.equal(
+    observation.summaries.stages.find((row) => row.name === 'types').status,
+    'completed',
+  );
+  assert.equal(
+    observation.summaries.stages.find((row) => row.name === 'recommendation').status,
+    'failed',
+  );
+  assert.equal(observation.summaries.stages.filter((row) => row.name === 'ranking').length, 6);
+  const daily = observation.summaries.stages.filter((row) => row.name === 'daily');
+  assert.equal(daily.length, 2);
+  assert.ok(daily.every((row) => row.securityCount === 1 && row.rowCount === null));
+  assert.equal(observation.summaries.modelRequests.at(-1).failure.code, 'MODEL_INCOMPLETE');
+  assert.equal(usage.calendarModel, 1);
+  assert.equal(usage.typeModel, 1);
+  assert.equal(usage.recommendationModel, 3);
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 5);
+  assert.doesNotMatch(
+    JSON.stringify(observation.summaries),
+    /synthetic|Bearer|NAS:AAPL|Options update|credentials/,
+  );
+});
+
+test('recommendation and review share start budgets while recording actual transmitted input sizes', (t) => {
+  const result = run(t, 'review-late-error', { TEST_REPORT_STEP_MS: '[20,30,40]' });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { observation, usage } = JSON.parse(result.stderr);
+  const requests = observation.summaries.modelRequests.filter((row) =>
+    /^(recommendation|review)\./.test(row.name),
+  );
+  assert.deepEqual(
+    requests.map((row) => row.stageRemainingMs),
+    [180000, 179980, 179950],
+  );
+  assert.deepEqual(
+    requests.map((row) => row.requestRemainingMs),
+    [180000, 179980, 179950],
+  );
+  assert.deepEqual(
+    requests.map((row) => row.executionRemainingMs),
+    [600000, 599980, 599950],
+  );
+  assert.deepEqual(
+    requests.map((row) => row.elapsedMs),
+    [20, 30, 40],
+  );
+  assert.ok(requests.every((row) => row.securityCount === 2));
+  assert.deepEqual(
+    requests.map((row) => row.rowCount),
+    [0, 40, 40],
+  );
+  const sent = result.requests.filter(
+    (row) =>
+      row.body?.input?.some(
+        (item) =>
+          item.role === 'user' &&
+          /"stage":"(?:recommendation|report_review)"/.test(item.content?.[0]?.text ?? ''),
+      ) || row.body?.input?.some((item) => item.type === 'function_call_output'),
+  );
+  assert.equal(sent.length, 3);
+  assert.deepEqual(
+    requests.map((row) => row.inputBytes),
+    sent.map((row) => Buffer.byteLength(JSON.stringify(row.body))),
+  );
+  const tool = observation.operations.find((row) => row.name === 'recommendation.tool');
+  assert.equal(tool.stageRemainingMs, 179980);
+  assert.equal(tool.executionRemainingMs, 599980);
+  assert.equal(tool.securityCount, 2);
+  assert.equal(tool.rowCount, 40);
+  assert.equal(usage.recommendationModel, 3);
+});
+
+test('recommendation HTTP row counts reflect partial and repeated daily tool reads', (t) => {
+  for (const [scenario, counts] of [
+    ['report-partial-tools', [0, 20]],
+    ['report-loop', [0, 40, 40]],
+  ]) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const { observation } = JSON.parse(result.stderr);
+    const stage = observation.summaries.stages.find((row) => row.name === 'recommendation');
+    assert.equal(stage.rowCount, 40);
+    const requests = observation.summaries.modelRequests.filter(
+      (row) => row.name === 'recommendation.model.http',
+    );
+    assert.deepEqual(
+      requests.map((row) => row.rowCount),
+      counts,
+    );
+    const outputs = result.requests.flatMap(
+      (row) => row.body?.input?.filter((item) => item.type === 'function_call_output') ?? [],
+    );
+    assert.ok(outputs.length > 0);
+    assert.equal(JSON.parse(outputs[0].output).length, scenario === 'report-partial-tools' ? 1 : 2);
+  }
+});
+
 test('recommendation HTTP message spoof stays unknown with characterized existing MODEL_FAILED output', (t) => {
   const result = run(t, 'report-http-spoof');
   assert.equal(result.status, 1, result.stderr);

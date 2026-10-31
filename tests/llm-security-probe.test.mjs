@@ -32,6 +32,52 @@ function legacyFailure(stderr) {
   return output;
 }
 
+test('standalone type budgets keep the shared deadline across request and tool starts without an execution budget', (t) => {
+  const result = run(t, 'missing-final-completion', {
+    TEST_STATISTICS_CLOCK: '1',
+    TEST_STREAM_DELAYS: '[13,29]',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { observation } = JSON.parse(result.stderr);
+  const requests = observation.summaries.modelRequests;
+  assert.deepEqual(
+    requests.map((row) => row.stageRemainingMs),
+    [180000, 179969],
+  );
+  assert.deepEqual(
+    requests.map((row) => row.requestRemainingMs),
+    [180000, 179969],
+  );
+  assert.ok(requests.every((row) => row.executionRemainingMs === null));
+  const tools = observation.operations.filter((row) => row.name === 'types.info_tool');
+  assert.equal(tools[0].stageRemainingMs, 179980);
+  assert.equal(tools[0].executionRemainingMs, null);
+  assert.equal(tools[0].securityCount, 1);
+  assert.equal(observation.summaries.stages.find((row) => row.name === 'types').elapsedMs, 67);
+});
+
+test('nested KIS requests leave unknown parent signal time null near the shared type deadline', (t) => {
+  const result = run(t, 'missing-final-completion', {
+    TEST_STATISTICS_CLOCK: '1',
+    TEST_STREAM_DELAYS: '[178000,1]',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const { observation } = JSON.parse(result.stderr);
+  const tool = observation.operations.find((row) => row.name === 'types.info_tool');
+  assert.equal(tool.stageRemainingMs, 1993);
+  const query = observation.operations.find(
+    (row) => row.name === 'kis' && row.parentId === tool.id,
+  );
+  const request = observation.operations.find(
+    (row) => row.name === 'kis.http' && row.parentId === query.id,
+  );
+  assert.equal(request.stageRemainingMs, null);
+  assert.equal(request.requestRemainingMs, null);
+  assert.equal(request.executionRemainingMs, null);
+});
+
 test('CLI connects each type request and information tool to one execution observation', (t) => {
   const result = run(t, 'missing-final-completion', {
     TEST_STATISTICS_CLOCK: '1',
@@ -223,7 +269,7 @@ test('CLI measures each model request through body EOF rather than HTTP headers'
   });
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, '');
-  const diagnostic = JSON.parse(result.stderr).diagnostic;
+  const { diagnostic, observation } = JSON.parse(result.stderr);
   assert.equal(diagnostic.elapsedMs, 67);
   assert.equal(diagnostic.typeAssessment.statistics.elapsedMs, 67);
   assert.deepEqual(diagnostic.typeAssessment.requests, [
@@ -244,6 +290,18 @@ test('CLI measures each model request through body EOF rather than HTTP headers'
       cause: 'missing_completion',
     },
   ]);
+  assert.deepEqual(
+    observation.summaries.modelRequests.map(({ startedAt, headersAt, endedAt, elapsedMs }) => ({
+      startedAt,
+      headersAt,
+      endedAt,
+      elapsedMs,
+    })),
+    [
+      { startedAt: 0, headersAt: 7, endedAt: 20, elapsedMs: 20 },
+      { startedAt: 31, headersAt: 38, endedAt: 67, elapsedMs: 36 },
+    ],
+  );
 });
 
 test('CLI preserves the first observed provider failure after valid JSON and completion', (t) => {
