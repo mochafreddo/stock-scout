@@ -29,6 +29,8 @@
    npm test
    ```
 
+   전체 테스트를 시작하기 전에 `127.0.0.1`의 임시 포트에 바인딩하고 즉시 닫아 로컬 callback 서버를 사용할 수 있는지 확인합니다. 바인딩에 실패하면 환경 오류와 테스트 미실행을 알리고 종료합니다. 필요한 루프백 사용이 허용된 환경에서 다시 실행하세요. 권한을 자동으로 확대하거나 외부 서비스 호출로 대체하지 않습니다.
+
    실패한 테스트가 없으면 정상 관측, 오류와 비밀 필드 배제, 지원 모드와 시장, 빈 응답과 연속 조회 표시, 잘못된 입력, 인증 누락에 대한 모의 검사가 끝납니다. 이는 실제 KIS 인증이나 데이터 의미 검증의 결과가 아닙니다.
 
 테스트의 공개 경계는 CLI 인수·stdout·stderr·종료 코드입니다. 구현은 [scripts/kis-probe.ts](../scripts/kis-probe.ts), 테스트는 [tests/kis-probe.test.mjs](../tests/kis-probe.test.mjs), 외부 HTTP 대체 코드는 [tests/kis-http-mock.mjs](../tests/kis-http-mock.mjs)에 있습니다.

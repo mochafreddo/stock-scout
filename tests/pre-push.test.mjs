@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -50,12 +51,12 @@ function fixture(t, initial = true) {
   return { root, base };
 }
 
-function run(root, tip, base, args = []) {
+function run(root, tip, base, args = [], extraEnv = {}) {
   return spawnSync(process.execPath, [cli, ...args], {
     cwd: root,
     encoding: 'utf8',
     input: `refs/heads/main ${tip} refs/heads/main ${base}\n`,
-    env: { PATH: process.env.PATH, HOME: root, TMPDIR: tmpdir() },
+    env: { PATH: process.env.PATH, HOME: root, TMPDIR: tmpdir(), ...extraEnv },
   });
 }
 
@@ -862,4 +863,48 @@ test('pre-push requires a nonempty regular license only for adapted skills', (t)
   git(root, 'commit', '-m', 'native project skill');
   const native = run(root, git(root, 'rev-parse', 'HEAD'), base);
   assert.equal(native.status, 0, native.stderr);
+});
+
+test('push CLI honors the npm test loopback preflight', (t) => {
+  const { root, base } = fixture(t);
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const actualManifest = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  );
+  manifest.type = 'module';
+  manifest.scripts.pretest = actualManifest.scripts.pretest;
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  mkdirSync(join(root, 'scripts'));
+  copyFileSync(
+    new URL('../scripts/test-preflight.ts', import.meta.url),
+    join(root, 'scripts/test-preflight.ts'),
+  );
+  writeFileSync(
+    join(root, 'network.cjs'),
+    `
+const net = require('node:net');
+net.Server.prototype.listen = function () {
+  process.nextTick(() => this.emit('error', Object.assign(new Error('denied'), { code: 'EPERM' })));
+  return this;
+};
+`,
+  );
+  mkdirSync(join(root, 'bin'));
+  const nodeWrapper = join(root, 'bin/node');
+  writeFileSync(
+    nodeWrapper,
+    `#!/bin/sh\nNODE_OPTIONS="--require=${join(root, 'network.cjs')}" exec "${process.execPath}" "$@"\n`,
+  );
+  chmodSync(nodeWrapper, 0o755);
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'add preflight');
+  const tip = git(root, 'rev-parse', 'HEAD');
+  const denied = run(root, tip, base, [], { PATH: `${join(root, 'bin')}:${process.env.PATH}` });
+  assert.equal(denied.status, 1, denied.stderr);
+  assert.match(denied.stderr, /Environment error/);
+  assert.match(denied.stderr, /tests not run/);
+  assert.doesNotMatch(denied.stderr, /fixture test/);
+  const success = run(root, tip, base);
+  assert.equal(success.status, 0, success.stderr);
+  assert.match(success.stderr, /fixture test/);
 });
