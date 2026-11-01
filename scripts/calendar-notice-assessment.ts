@@ -1,7 +1,8 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, jsonSchema, Output, streamText, wrapLanguageModel } from 'ai';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
-import { type ObservedOperation, observeFetch, observeResponse } from './execution-observation.ts';
+import type { ObservedOperation } from './execution-observation.ts';
+import { ModelExecution } from './model-execution.ts';
 import { readSiwcCredentials } from './siwc-auth.ts';
 
 export type CalendarNotice = {
@@ -320,8 +321,11 @@ export async function assessCalendarNotices(
     safe(notices);
     context.runtime?.safe(notices);
     let requests = 0;
-    let completions = 0;
-    let failed = false;
+    const execution = new ModelExecution({
+      policy: 'calendar',
+      observation,
+      incomplete: () => new Error('MODEL_INCOMPLETE'),
+    });
     const provider = createOpenAI({
       apiKey: credentials.accessToken,
       fetch: async (url, init) => {
@@ -341,46 +345,14 @@ export async function assessCalendarNotices(
           requestRemainingMs: modelBudget,
           inputBytes: Buffer.byteLength(String(init?.body ?? '')),
         });
-        try {
-          const response = await observeFetch(url, { ...init, signal }, observation, request);
-          return observeResponse(response, observation, request, signal, true);
-        } catch (error) {
-          observation?.streamEnd(request, 'read_error', signal);
-          observation?.fail(request, error);
-          throw error;
-        }
+        return execution.fetch(url, { ...init, signal }, signal, request);
       },
     });
     try {
       const result = streamText({
         model: wrapLanguageModel({
           model: provider.responses(model),
-          middleware: {
-            wrapStream: async ({ doStream }) => {
-              const stream = await doStream();
-              return {
-                ...stream,
-                stream: stream.stream.pipeThrough(
-                  new TransformStream({
-                    transform(part, controller) {
-                      if (part.type === 'raw') {
-                        const raw = part.rawValue as { type?: string };
-                        if (raw.type === 'response.completed') completions++;
-                        if (
-                          ['response.failed', 'response.incomplete', 'error'].includes(
-                            raw.type ?? '',
-                          )
-                        ) {
-                          failed = true;
-                        }
-                      }
-                      controller.enqueue(part);
-                    },
-                  }),
-                ),
-              };
-            },
-          },
+          middleware: execution.middleware,
         }),
         system: instructions,
         prompt,
@@ -393,15 +365,10 @@ export async function assessCalendarNotices(
         abortSignal: modelAbortSignal,
         onError: () => {},
       });
-      const output = Promise.resolve(result.output).then(
-        (value) => ({ value }),
-        () => ({ value: undefined }),
-      );
-      for await (const part of result.stream) if (part.type === 'error') throw part.error;
-      const { value } = await output;
+      const value = await execution.read(result);
       if (performance.now() >= executionDeadline) throw new Error('EXECUTION_LIMIT');
       if (performance.now() - modelStartedAt >= modelBudget) throw new Error('MODEL_INCOMPLETE');
-      if (failed || completions !== 1 || requests !== 1) throw new Error('MODEL_INCOMPLETE');
+      execution.assertComplete(requests);
       if (!value || !Array.isArray(value.assessments)) throw new Error('MODEL_OUTPUT');
       validation = observation?.start('calendar.validation', operation?.id);
       safe(value);
@@ -454,6 +421,8 @@ export async function assessCalendarNotices(
       )
         throw error;
       return raise('MODEL_FAILED');
+    } finally {
+      execution.close();
     }
   } catch (error) {
     observation?.fail(operation, error);

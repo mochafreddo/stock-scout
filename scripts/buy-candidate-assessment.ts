@@ -11,12 +11,8 @@ import {
 } from 'ai';
 import { type CandidateRuntime, requestSignal } from './candidate-runtime.ts';
 import type { CandidateUniverse } from './candidate-universe.ts';
-import {
-  type ObservedOperation,
-  observeFetch,
-  observeResponse,
-  tagSignal,
-} from './execution-observation.ts';
+import { type ObservedOperation, tagSignal } from './execution-observation.ts';
+import { ModelExecution } from './model-execution.ts';
 import { PaidBudget } from './paid-api.ts';
 import { readSiwcCredentials } from './siwc-auth.ts';
 
@@ -128,18 +124,28 @@ export async function recommendCandidates(
   const context = { runtime, signal: controller.signal, observation, parentId: operation?.id };
   const deadline = setTimeout(() => controller.abort(), 180_000);
   deadline.unref();
-  let failure: Error | undefined;
+  const execution = new ModelExecution({
+    policy: 'recommendation',
+    observation,
+    incomplete: () => new Error('MODEL_INCOMPLETE'),
+    providerError: (code) =>
+      new Error(
+        code === 'subscription_sharing_usage_limit_exceeded'
+          ? 'SUBSCRIPTION_LIMIT'
+          : 'MODEL_INCOMPLETE',
+      ),
+    sdkError: modelFailure,
+  });
   let requests = 0;
-  let completions = 0;
   let paid = false;
   let rejectedRequests = 0;
   const check = () => {
     try {
       runtime.check();
-      if (failure) throw failure;
+      if (execution.failure) throw execution.failure;
       if (controller.signal.aborted || performance.now() - started >= 180_000) {
-        failure = new Error('MODEL_INCOMPLETE');
-        throw failure;
+        execution.fail(new Error('MODEL_INCOMPLETE'));
+        throw execution.failure;
       }
     } catch (error) {
       const request = phaseRequests.at(-1);
@@ -210,7 +216,7 @@ export async function recommendCandidates(
         );
         try {
           check();
-          if (++toolCalls > 12) failure = new Error('MODEL_LIMIT');
+          if (++toolCalls > 12) execution.fail(new Error('MODEL_LIMIT'));
           if (
             !Array.isArray(securityIds) ||
             !securityIds.length ||
@@ -218,8 +224,8 @@ export async function recommendCandidates(
             new Set(securityIds).size !== securityIds.length ||
             securityIds.some((id) => !securities.has(id))
           )
-            failure = new Error('MODEL_OUTPUT');
-          if (failure) throw failure;
+            execution.fail(new Error('MODEL_OUTPUT'));
+          if (execution.failure) throw execution.failure;
           for (const id of securityIds) read.add(id);
           const value = JSON.parse(
             runtime.safe(
@@ -256,10 +262,10 @@ export async function recommendCandidates(
       fetch: async (url, init) => {
         check();
         if (String(url) !== 'https://api.openai.com/v1/responses' || requests >= phaseLimit)
-          failure = new Error('MODEL_LIMIT');
+          execution.fail(new Error('MODEL_LIMIT'));
         if (Buffer.byteLength(String(init?.body ?? '')) > 256 * 1024)
-          failure = new Error('MODEL_INPUT_LIMIT');
-        if (failure) throw failure;
+          execution.fail(new Error('MODEL_INPUT_LIMIT'));
+        if (execution.failure) throw execution.failure;
         runtime.safe(String(init?.body ?? ''));
         const signal = requestSignal(
           context,
@@ -299,15 +305,14 @@ export async function recommendCandidates(
             },
           );
           phaseRequests.push(request);
-          const response = await observeFetch(
+          return execution.fetch(
             url,
             { ...init, ...authorization, redirect: 'error', signal },
-            observation,
+            signal,
             request,
           );
-          return observeResponse(response, observation, request, signal, true);
         } catch (error) {
-          if (error instanceof Error && error.message.startsWith('PAID_')) failure = error;
+          if (error instanceof Error && error.message.startsWith('PAID_')) execution.fail(error);
           observation.streamEnd(request, 'read_error', signal);
           observation.fail(request, error);
           throw error;
@@ -323,73 +328,7 @@ export async function recommendCandidates(
       const result = streamText({
         model: wrapLanguageModel({
           model: provider.responses(model),
-          middleware: {
-            wrapStream: async ({ doStream }) => {
-              let stream: Awaited<ReturnType<typeof doStream>>;
-              try {
-                stream = await doStream();
-              } catch (error) {
-                observation.fail(
-                  phaseRequests.at(-1),
-                  error,
-                  APICallError.isInstance(error) ? 'unknown' : undefined,
-                );
-                throw error;
-              }
-              const request = phaseRequests.at(-1);
-              let completed = false;
-              return {
-                ...stream,
-                stream: stream.stream.pipeThrough(
-                  new TransformStream({
-                    transform(part, output) {
-                      if (part.type === 'raw') {
-                        const raw = part.rawValue as {
-                          type?: string;
-                          code?: string;
-                          error?: { code?: string };
-                          response?: { error?: { code?: string } };
-                        };
-                        if (raw.type === 'response.completed') {
-                          if (completed) failure = new Error('MODEL_INCOMPLETE');
-                          completed = true;
-                          completions++;
-                        }
-                        if (
-                          ['response.failed', 'response.incomplete', 'error'].includes(
-                            raw.type ?? '',
-                          )
-                        ) {
-                          const code = raw.response?.error?.code ?? raw.error?.code ?? raw.code;
-                          failure = new Error(
-                            code === 'subscription_sharing_usage_limit_exceeded'
-                              ? 'SUBSCRIPTION_LIMIT'
-                              : 'MODEL_INCOMPLETE',
-                          );
-                        }
-                      }
-                      if (part.type === 'error' && !failure) {
-                        failure = modelFailure(part.error);
-                        observation.propagate(failure, part.error);
-                      }
-                      if (failure) {
-                        observation.fail(request, failure, undefined, false);
-                        throw failure;
-                      }
-                      output.enqueue(part);
-                    },
-                    flush() {
-                      if (!completed) {
-                        failure = new Error('MODEL_INCOMPLETE');
-                        observation.fail(request, failure);
-                        throw failure;
-                      }
-                    },
-                  }),
-                ),
-              };
-            },
-          },
+          middleware: execution.middleware,
         }),
         system,
         prompt: runtime.safe(input),
@@ -408,39 +347,30 @@ export async function recommendCandidates(
         ),
         onError: () => {},
       });
-      const output = Promise.resolve(result.output).then(
-        (value) => ({ value }),
-        () => ({ value: undefined }),
-      );
-      for await (const part of result.stream) {
-        if (part.type === 'error' && !failure) {
-          failure = modelFailure(part.error);
-          observation.propagate(failure, part.error);
-        }
+      const value = await execution.read(result, (part) => {
         if (part.type === 'tool-error' || (part.type === 'tool-call' && part.invalid))
-          failure ??= new Error('MODEL_OUTPUT');
-      }
-      const { value } = await output;
+          execution.fail(new Error('MODEL_OUTPUT'), false);
+      });
       check();
-      if (completions !== requests - rejectedRequests) throw new Error('MODEL_INCOMPLETE');
+      execution.assertComplete(requests - rejectedRequests);
       if (!value) throw new Error(requests >= phaseLimit ? 'MODEL_LIMIT' : 'MODEL_OUTPUT');
       runtime.safe(value);
       return value;
     };
     const run = async (...args: Parameters<typeof runAttempt>) => {
       const beforeRequests = requests;
-      const beforeCompletions = completions;
+      const beforeCompletions = execution.completions;
       try {
         return await runAttempt(...args);
       } catch (error) {
-        const cause = failure ?? modelFailure(error);
+        const cause = execution.failure ?? modelFailure(error);
         if (paid || cause.message !== 'SUBSCRIPTION_LIMIT') throw error;
         runtime.check();
         if (controller.signal.aborted) throw new Error('MODEL_INCOMPLETE');
-        failure = undefined;
+        execution.resetFailure();
         paidBudget.enable();
         paid = true;
-        rejectedRequests += requests - beforeRequests - (completions - beforeCompletions);
+        rejectedRequests += requests - beforeRequests - (execution.completions - beforeCompletions);
         if (args[3]) read.clear();
         check();
         return runAttempt(...args);
@@ -568,7 +498,12 @@ export async function recommendCandidates(
       validity:
         '표시한 다음 정규장의 매수 검토 결과입니다. 개장 후의 새 판단으로 재사용하지 마세요.',
       semanticReview: { supported: true, reliability: 'unverified' },
-      model: { id: model, authentication: paid ? 'openai_api' : 'siwc', requests, completions },
+      model: {
+        id: model,
+        authentication: paid ? 'openai_api' : 'siwc',
+        requests,
+        completions: execution.completions,
+      },
       ...(paid ? { paid: paidBudget.snapshot() } : {}),
       limits: { ...universe.limits, recommendationSeconds: 180, maxDailyToolCalls: 12 },
       usage: runtime.counts,
@@ -614,5 +549,6 @@ export async function recommendCandidates(
     throw mapped;
   } finally {
     clearTimeout(deadline);
+    execution.close();
   }
 }

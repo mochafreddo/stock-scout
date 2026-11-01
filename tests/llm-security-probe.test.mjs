@@ -344,6 +344,29 @@ test('CLI preserves the first observed provider failure after valid JSON and com
   }
 });
 
+for (const malformed of ['null', 'unparseable'])
+  test(`CLI preserves malformed SSE ${malformed} progress, cancellation and original unknown failure`, (t) => {
+    const result = run(t, 'ok', { TEST_MALFORMED_SSE: malformed });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, 'MODEL_FAILED');
+    assert.equal(output.diagnostic.typeAssessment.lastProgress, 'model_stream');
+    assert.equal(output.diagnostic.typeAssessment.cause, 'unknown');
+    assert.deepEqual(output.diagnostic.typeAssessment.requests, [
+      {
+        index: 1,
+        elapsedMs: 0,
+        httpStatus: 200,
+        completionEvents: 0,
+        status: 'cancelled',
+        cause: 'unknown',
+      },
+    ]);
+    assert.equal(output.observation.firstFailure.code, 'unknown');
+    assert.equal(output.observation.finalError.code, 'MODEL_FAILED');
+  });
+
 test('CLI distinguishes HTTP rejection and transport failures without exposing external errors', (t) => {
   for (const [scenario, env, status, httpStatus, completionEvents, cause] of [
     ['auth-failure', {}, 'AUTH_FAILED', 401, null, 'http_error'],

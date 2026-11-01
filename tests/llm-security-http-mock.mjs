@@ -219,6 +219,10 @@ if (scenario.startsWith('types') || identityExclusion)
 function sse(events) {
   const requestIndex = modelRequests;
   const signal = streamSignal;
+  if (process.env.TEST_MALFORMED_SSE && requestIndex === 1)
+    return new Response(`data: ${process.env.TEST_MALFORMED_SSE === 'null' ? 'null' : '{'}\n\n`, {
+      headers: { 'content-type': 'text/event-stream' },
+    });
   const delays = JSON.parse(process.env.TEST_STREAM_DELAYS ?? '[]');
   const delay = delays[requestIndex - 1];
   const ending = process.env.TEST_STREAM_END;

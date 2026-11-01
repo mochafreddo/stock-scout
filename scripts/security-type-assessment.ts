@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { createOpenAI } from '@ai-sdk/openai';
 import {
   APICallError,
@@ -11,14 +10,10 @@ import {
 } from 'ai';
 import { type ExecutionContext, requestSignal } from './candidate-runtime.ts';
 import { DiagnosticError } from './diagnostic-error.ts';
-import {
-  type ObservedOperation,
-  observeFetch,
-  observeResponse,
-  tagSignal,
-} from './execution-observation.ts';
+import { type ObservedOperation, tagSignal } from './execution-observation.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
+import { ModelExecution, type ModelRequest, type ModelRequestCause } from './model-execution.ts';
 
 const exchanges: KisExchange[] = ['NAS', 'NYS', 'AMS'];
 const types = [
@@ -49,24 +44,8 @@ export type AssessmentStatistics = {
   infoToolCalls: number;
   observedWebToolCalls: number;
 };
-type AssessmentCause =
-  | 'unknown'
-  | 'missing_completion'
-  | 'duplicate_completion'
-  | 'deadline_exceeded'
-  | 'provider_failed'
-  | 'provider_incomplete'
-  | 'provider_error'
-  | 'transport_error'
-  | 'http_error';
-type AssessmentRequest = {
-  index: number;
-  elapsedMs: number;
-  httpStatus: number | null;
-  completionEvents: number | null;
-  status: 'unknown' | 'completed' | 'failed' | 'cancelled';
-  cause: AssessmentCause;
-};
+type AssessmentCause = ModelRequestCause;
+type AssessmentRequest = ModelRequest;
 type WebResearch = {
   request: number;
   action: string;
@@ -258,8 +237,6 @@ export async function assessSecurityTypes({
   };
   let validation: ObservedOperation | undefined;
   let outputOperation: ObservedOperation | undefined;
-  let observationFailure: unknown;
-  const requestOperations = new Map<AssessmentRequest, ObservedOperation | undefined>();
   const toolRequests = new Map<string, ObservedOperation | undefined>();
   const webOperations = new Map<string, ObservedOperation | undefined>();
   const openTools = new Map<ObservedOperation, AbortSignal | undefined>();
@@ -278,32 +255,12 @@ export async function assessSecurityTypes({
     lastProgress: 'model_request',
     requests: [],
   };
-  const requestScope = new AsyncLocalStorage<{ record?: AssessmentRequest }>();
-  const openRequests = new Map<AssessmentRequest, { startedAt: number; signal: AbortSignal }>();
   let observedFailure = false;
-  const failedRequests = new Set<AssessmentRequest>();
-  const observeCause = (cause: AssessmentCause, record?: AssessmentRequest) => {
+  const observeCause = (cause: AssessmentCause) => {
     if (!observedFailure) {
       diagnostics.cause = cause;
       observedFailure = true;
     }
-    if (record && !failedRequests.has(record)) {
-      record.cause = cause;
-      failedRequests.add(record);
-    }
-  };
-  const closeRequest = (record: AssessmentRequest, status: AssessmentRequest['status']) => {
-    const timing = openRequests.get(record);
-    if (!timing) return;
-    record.elapsedMs = Math.round(performance.now() - timing.startedAt);
-    record.status = status;
-    const request = requestOperations.get(record);
-    if (status === 'failed' || status === 'cancelled') {
-      observationFailure = failure ?? new DiagnosticError('MODEL_INCOMPLETE');
-      observation?.fail(request, observationFailure);
-    }
-    observation?.end(request);
-    openRequests.delete(record);
   };
   onStage('assessment', statistics, diagnostics);
   const evaluation = inputMode === 'evaluation';
@@ -327,13 +284,10 @@ export async function assessSecurityTypes({
   let requests = 0;
   let queryCount = 0;
   let individualLookupFailures = 0;
-  let completions = 0;
-  const completedRequests = new Set<number>();
   const webCalls = new Set<string>();
   const webSources: { action: string; url: string }[] = [];
   const webResearch: WebResearch[] = [];
   const webFailures: { action: string; url: string | null; status: string }[] = [];
-  let failure: Error | undefined;
   const controller = new AbortController();
   let deadlineExpired = false;
   tagSignal(controller.signal, () => (deadlineExpired ? 'stage_limit' : 'unknown'));
@@ -343,13 +297,42 @@ export async function assessSecurityTypes({
     controller.abort();
   }, 180_000);
   deadline.unref();
+  const execution = new ModelExecution({
+    policy: 'types',
+    observation,
+    incomplete: () => new DiagnosticError('MODEL_INCOMPLETE'),
+    providerError: (code) =>
+      new DiagnosticError(
+        code === 'subscription_sharing_usage_limit_exceeded'
+          ? process.env.OPENAI_API_KEY
+            ? 'PAID_BUDGET_UNPROVABLE'
+            : 'SUBSCRIPTION_LIMIT'
+          : 'MODEL_INCOMPLETE',
+      ),
+    sdkError: modelFailure,
+    expired: () => performance.now() - stageStartedAt >= 180_000,
+    onRequest: (record) => {
+      diagnostics.requests.push(record);
+      diagnostics.lastProgress = 'model_request';
+    },
+    onCause: observeCause,
+    onRaw: (raw, record) => {
+      try {
+        observeRaw(raw, record);
+      } catch (error) {
+        execution.fail(error instanceof Error ? error : new Error('MODEL_OUTPUT'), true, record);
+        controller.abort();
+        throw execution.failure;
+      }
+    },
+  });
   const provider = createOpenAI({
     apiKey: accessToken,
     fetch: async (url, init) => {
       if (String(url) !== 'https://api.openai.com/v1/responses' || ++requests > 12) {
         observeCause('unknown');
-        failure = new DiagnosticError('MODEL_LIMIT');
-        throw failure;
+        execution.fail(new DiagnosticError('MODEL_LIMIT'));
+        throw execution.failure;
       }
       statistics.modelRequests++;
       context.runtime?.safe(String(init?.body ?? ''));
@@ -360,19 +343,6 @@ export async function assessSecurityTypes({
         'stage_limit',
       );
       context.runtime?.take('typeModel');
-      const record: AssessmentRequest = {
-        index: requests,
-        elapsedMs: 0,
-        httpStatus: null,
-        completionEvents: null,
-        status: 'unknown',
-        cause: 'unknown',
-      };
-      diagnostics.requests.push(record);
-      openRequests.set(record, { startedAt: performance.now(), signal });
-      const scope = requestScope.getStore();
-      if (scope) scope.record = record;
-      diagnostics.lastProgress = 'model_request';
       const request = observation?.start(
         'types.model.http',
         modelOperation?.id,
@@ -385,49 +355,7 @@ export async function assessSecurityTypes({
           securityCount: inputs.length,
         },
       );
-      requestOperations.set(record, request);
-      try {
-        const response = observeResponse(
-          await observeFetch(url, { ...init, signal }, observation, request),
-          observation,
-          request,
-          signal,
-          true,
-        );
-        record.httpStatus = response.status;
-        if (!response.ok) observeCause('http_error', record);
-        if (!response.body) return response;
-        const reader = response.body.getReader();
-        return new Response(
-          new ReadableStream({
-            async pull(streamController) {
-              try {
-                const next = await reader.read();
-                if (next.done) streamController.close();
-                else streamController.enqueue(next.value);
-              } catch (error) {
-                if (!signal.aborted) observeCause('transport_error', record);
-                streamController.error(error);
-              }
-            },
-            cancel: (reason) => reader.cancel(reason),
-          }),
-          { status: response.status, statusText: response.statusText, headers: response.headers },
-        );
-      } catch (error) {
-        observationFailure = error;
-        observation?.streamEnd(request, 'read_error', signal);
-        observation?.fail(request, error);
-        if (controller.signal.aborted || signal.aborted) {
-          if (performance.now() - stageStartedAt >= 180_000)
-            observeCause('deadline_exceeded', record);
-          closeRequest(record, 'cancelled');
-        } else {
-          observeCause('transport_error', record);
-          closeRequest(record, 'failed');
-        }
-        throw error;
-      }
+      return execution.fetch(url, { ...init, signal }, signal, request, requests);
     },
   });
   const tools = {
@@ -474,7 +402,7 @@ export async function assessSecurityTypes({
         try {
           diagnostics.lastProgress = 'info_tool';
           statistics.infoToolCalls += requested.length;
-          if (failure) throw failure;
+          if (execution.failure) throw execution.failure;
           const keys = requested.map(({ exchange, symbol }) => keyOf(exchange, symbol));
           if (
             !requested.length ||
@@ -482,15 +410,15 @@ export async function assessSecurityTypes({
             keys.some((key) => !securities.has(key))
           ) {
             observeCause('unknown');
-            failure = new Error('MODEL_OUTPUT');
+            execution.fail(new Error('MODEL_OUTPUT'));
             controller.abort();
-            throw failure;
+            throw execution.failure;
           }
           if (queryCount + requested.length > 32) {
             observeCause('unknown');
-            failure = new DiagnosticError('MODEL_LIMIT');
+            execution.fail(new DiagnosticError('MODEL_LIMIT'));
             controller.abort();
-            throw failure;
+            throw execution.failure;
           }
           toolSignal = requestSignal(
             context,
@@ -505,9 +433,9 @@ export async function assessSecurityTypes({
             context.runtime?.checkRequest('kis');
             if (performance.now() - stageStartedAt >= 180_000) {
               observeCause('deadline_exceeded');
-              failure = new DiagnosticError('MODEL_INCOMPLETE');
+              execution.fail(new DiagnosticError('MODEL_INCOMPLETE'));
               controller.abort();
-              throw failure;
+              throw execution.failure;
             }
             queryCount++;
             const source = `kis:${keyOf(exchange, symbol)}`;
@@ -538,16 +466,17 @@ export async function assessSecurityTypes({
                 results.push(output);
                 continue;
               }
-              failure =
+              execution.fail(
                 error instanceof DiagnosticError
                   ? new DiagnosticError(error.reason, 'QUERY_FAILED')
                   : error instanceof AuthError
                     ? new DiagnosticError('AUTH_FAILED')
-                    : new Error('QUERY_FAILED');
+                    : new Error('QUERY_FAILED'),
+              );
               observeCause('unknown');
               controller.abort();
-              observation?.propagate(failure, error);
-              throw failure;
+              observation?.propagate(execution.failure, error);
+              throw execution.failure;
             }
           }
           return results;
@@ -587,7 +516,7 @@ export async function assessSecurityTypes({
           { stageRemainingMs: 180_000 - (performance.now() - stageStartedAt) },
         );
         try {
-          if (failure) throw failure;
+          if (execution.failure) throw execution.failure;
           const result = [...knownSources].map(([id, source]) => ({ id, source }));
           observation?.end(toolOperation);
           return result;
@@ -599,204 +528,101 @@ export async function assessSecurityTypes({
     }),
     web_search: provider.tools.webSearch({ externalWebAccess: true }),
   };
-  const runAssessment = async () => {
-    const observeRaw = (rawValue: unknown, record: AssessmentRequest) => {
-      diagnostics.lastProgress = 'model_stream';
-      record.completionEvents ??= 0;
-      const raw = rawValue as {
+  const observeRaw = (rawValue: unknown, record: AssessmentRequest) => {
+    diagnostics.lastProgress = 'model_stream';
+    const raw = rawValue as {
+      type?: string;
+      response?: { error?: { code?: string } };
+      error?: { code?: string };
+      code?: string;
+      item?: {
         type?: string;
-        response?: { error?: { code?: string } };
-        error?: { code?: string };
-        code?: string;
-        item?: {
-          type?: string;
-          id?: string;
-          call_id?: string;
-          status?: string;
-          action?: { type?: string; url?: string; query?: string; queries?: string[] };
-        };
+        id?: string;
+        call_id?: string;
+        status?: string;
+        action?: { type?: string; url?: string; query?: string; queries?: string[] };
       };
-      const request = requestOperations.get(record);
-      if (raw.item?.type === 'function_call' && raw.item.call_id)
-        toolRequests.set(raw.item.call_id, request);
-      if (raw.item?.type === 'web_search_call') {
-        const key = raw.item.id ? `${record.index}:${raw.item.id}` : undefined;
-        if (key && !webOperations.has(key))
-          webOperations.set(
-            key,
-            observation?.start('types.web_tool', request?.id, 'tool', undefined, {
-              stageRemainingMs: 180_000 - (performance.now() - stageStartedAt),
-            }),
-          );
-        const webOperation = key ? webOperations.get(key) : undefined;
-        if (raw.type === 'response.output_item.done') {
-          if (raw.item.status === 'completed') observation?.end(webOperation);
-          else observation?.fail(webOperation, new Error('SEARCH_FAILED'));
-        }
-        if (raw.item.id) webCalls.add(raw.item.id);
-        statistics.observedWebToolCalls = webCalls.size;
-        if (webCalls.size > 32) {
-          observeCause('unknown', record);
-          failure = new DiagnosticError('MODEL_LIMIT');
-          controller.abort();
-        }
-        if (raw.type === 'response.output_item.done') {
-          const action = raw.item.action;
-          const researchUrl = text(action?.url) ? URL.parse(action.url) : null;
-          const research = {
-            request: record.index,
-            action: ['search', 'open_page', 'find_in_page'].includes(action?.type ?? '')
-              ? (action?.type as string)
-              : 'unknown',
-            status: ['completed', 'failed', 'incomplete'].includes(raw.item.status ?? '')
-              ? (raw.item.status as string)
-              : 'unknown',
-            queries: Array.isArray(action?.queries)
-              ? action.queries.filter(text)
-              : text(action?.query)
-                ? [action.query]
-                : [],
-            url:
-              researchUrl?.protocol === 'https:' && !researchUrl.username && !researchUrl.password
-                ? (action?.url ?? null)
-                : null,
-          };
-          safe(research, secrets);
-          webResearch.push(research);
-          diagnostics.webResearch = webResearch;
-          if (raw.item.status !== 'completed') {
-            if (
-              !['open_page', 'find_in_page'].includes(raw.item.action?.type ?? '') ||
-              !raw.item.action?.url
-            ) {
-              failure = new DiagnosticError('SEARCH_FAILED');
-              observeCause('unknown', record);
-              controller.abort();
-            } else observation?.recover(webOperation);
-            webFailures.push({
-              action: raw.item.action?.type ?? 'unknown',
-              url: research.url,
-              status: raw.item.status ?? 'unknown',
-            });
-          }
-          if (
-            raw.item.status === 'completed' &&
-            ['open_page', 'find_in_page'].includes(action?.type ?? '') &&
-            action?.url
-          ) {
-            const url = new URL(action.url);
-            if (url.protocol !== 'https:' || url.username || url.password)
-              throw new Error('MODEL_OUTPUT');
-            registerSource(action.url);
-            webSources.push({ action: action.type ?? '', url: action.url });
-          }
-        }
-      }
-      if (raw.type === 'response.completed') {
-        record.completionEvents++;
-        if (completedRequests.has(record.index)) {
-          observeCause('duplicate_completion', record);
-          failure = new DiagnosticError('MODEL_INCOMPLETE');
-        }
-        if (failure) {
-          observationFailure = failure;
-          observation?.fail(request, failure, undefined, false);
-        }
-        completedRequests.add(record.index);
-        completions = completedRequests.size;
-      }
-      if (['response.failed', 'response.incomplete', 'error'].includes(raw.type ?? '')) {
-        observeCause(
-          raw.type === 'response.failed'
-            ? 'provider_failed'
-            : raw.type === 'response.incomplete'
-              ? 'provider_incomplete'
-              : 'provider_error',
-          record,
-        );
-        const code = raw.response?.error?.code ?? raw.error?.code ?? raw.code;
-        failure = new DiagnosticError(
-          code === 'subscription_sharing_usage_limit_exceeded'
-            ? process.env.OPENAI_API_KEY
-              ? 'PAID_BUDGET_UNPROVABLE'
-              : 'SUBSCRIPTION_LIMIT'
-            : 'MODEL_INCOMPLETE',
-        );
-        observationFailure = failure;
-        observation?.fail(request, failure, undefined, false);
-      }
     };
+    const request = execution.operation(record);
+    if (raw.item?.type === 'function_call' && raw.item.call_id)
+      toolRequests.set(raw.item.call_id, request);
+    if (raw.item?.type === 'web_search_call') {
+      const key = raw.item.id ? `${record.index}:${raw.item.id}` : undefined;
+      if (key && !webOperations.has(key))
+        webOperations.set(
+          key,
+          observation?.start('types.web_tool', request?.id, 'tool', undefined, {
+            stageRemainingMs: 180_000 - (performance.now() - stageStartedAt),
+          }),
+        );
+      const webOperation = key ? webOperations.get(key) : undefined;
+      if (raw.type === 'response.output_item.done') {
+        if (raw.item.status === 'completed') observation?.end(webOperation);
+        else observation?.fail(webOperation, new Error('SEARCH_FAILED'));
+      }
+      if (raw.item.id) webCalls.add(raw.item.id);
+      statistics.observedWebToolCalls = webCalls.size;
+      if (webCalls.size > 32) {
+        execution.fail(new DiagnosticError('MODEL_LIMIT'), true, record);
+        controller.abort();
+      }
+      if (raw.type === 'response.output_item.done') {
+        const action = raw.item.action;
+        const researchUrl = text(action?.url) ? URL.parse(action.url) : null;
+        const research = {
+          request: record.index,
+          action: ['search', 'open_page', 'find_in_page'].includes(action?.type ?? '')
+            ? (action?.type as string)
+            : 'unknown',
+          status: ['completed', 'failed', 'incomplete'].includes(raw.item.status ?? '')
+            ? (raw.item.status as string)
+            : 'unknown',
+          queries: Array.isArray(action?.queries)
+            ? action.queries.filter(text)
+            : text(action?.query)
+              ? [action.query]
+              : [],
+          url:
+            researchUrl?.protocol === 'https:' && !researchUrl.username && !researchUrl.password
+              ? (action?.url ?? null)
+              : null,
+        };
+        safe(research, secrets);
+        webResearch.push(research);
+        diagnostics.webResearch = webResearch;
+        if (raw.item.status !== 'completed') {
+          if (
+            !['open_page', 'find_in_page'].includes(raw.item.action?.type ?? '') ||
+            !raw.item.action?.url
+          ) {
+            execution.fail(new DiagnosticError('SEARCH_FAILED'), true, record);
+            controller.abort();
+          } else observation?.recover(webOperation);
+          webFailures.push({
+            action: raw.item.action?.type ?? 'unknown',
+            url: research.url,
+            status: raw.item.status ?? 'unknown',
+          });
+        }
+        if (
+          raw.item.status === 'completed' &&
+          ['open_page', 'find_in_page'].includes(action?.type ?? '') &&
+          action?.url
+        ) {
+          const url = new URL(action.url);
+          if (url.protocol !== 'https:' || url.username || url.password)
+            throw new Error('MODEL_OUTPUT');
+          registerSource(action.url);
+          webSources.push({ action: action.type ?? '', url: action.url });
+        }
+      }
+    }
+  };
+  const runAssessment = async () => {
     const result = streamText({
       model: wrapLanguageModel({
         model: provider.responses(model),
-        middleware: {
-          wrapStream: async ({ doStream }) => {
-            const scope: { record?: AssessmentRequest } = {};
-            let result: Awaited<ReturnType<typeof doStream>>;
-            try {
-              result = await requestScope.run(scope, doStream);
-            } catch (error) {
-              if (scope.record) closeRequest(scope.record, 'failed');
-              throw error;
-            }
-            const record = scope.record;
-            const reader = result.stream.getReader();
-            return {
-              ...result,
-              stream: new ReadableStream({
-                async pull(streamController) {
-                  try {
-                    const next = await reader.read();
-                    if (next.done) {
-                      if (record) {
-                        if (openRequests.get(record)?.signal.aborted) {
-                          if (performance.now() - stageStartedAt >= 180_000)
-                            observeCause('deadline_exceeded', record);
-                          closeRequest(record, 'cancelled');
-                        } else {
-                          record.completionEvents ??= 0;
-                          if (record.completionEvents === 0)
-                            observeCause('missing_completion', record);
-                          closeRequest(record, failedRequests.has(record) ? 'failed' : 'completed');
-                        }
-                      }
-                      streamController.close();
-                      return;
-                    }
-                    const part = next.value;
-                    if (record && part.type === 'raw') {
-                      try {
-                        observeRaw(part.rawValue, record);
-                      } catch (error) {
-                        failure = error instanceof Error ? error : new Error('MODEL_OUTPUT');
-                        observeCause('unknown', record);
-                        controller.abort();
-                        throw failure;
-                      }
-                    }
-                    if (record && part.type === 'error') observeCause('unknown', record);
-                    streamController.enqueue(part);
-                  } catch (error) {
-                    if (record) {
-                      closeRequest(
-                        record,
-                        openRequests.get(record)?.signal.aborted ? 'cancelled' : 'failed',
-                      );
-                    }
-                    streamController.error(error);
-                  }
-                },
-                async cancel(reason) {
-                  try {
-                    await reader.cancel(reason);
-                  } finally {
-                    if (record) closeRequest(record, 'cancelled');
-                  }
-                },
-              }),
-            };
-          },
-        },
+        middleware: execution.middleware,
       }),
       system: assessmentInstructions,
       prepareStep: ({ messages }) => ({
@@ -841,25 +667,18 @@ export async function assessSecurityTypes({
       abortSignal: requestSignal(context, 180_000, controller.signal, 'stage_limit'),
       onError: () => {},
     });
-    const output = Promise.resolve(result.output).then(
-      (value) => ({ value }),
-      () => ({ value: undefined }),
-    );
-    for await (const part of result.stream) {
-      if (part.type === 'error') failure ??= modelFailure(part.error);
-    }
-    const parsed = await output;
+    const value = await execution.read(result);
     context.runtime?.check();
     context.signal?.throwIfAborted();
-    if (failure) throw failure;
+    if (execution.failure) throw execution.failure;
     if (controller.signal.aborted || performance.now() - stageStartedAt >= 180_000) {
       if (performance.now() - stageStartedAt >= 180_000) observeCause('deadline_exceeded');
       throw new DiagnosticError('MODEL_INCOMPLETE');
     }
-    if (!requests || completions !== requests) throw new DiagnosticError('MODEL_INCOMPLETE');
-    if (!parsed.value)
+    execution.assertComplete(requests);
+    if (!value)
       throw requests >= 12 ? new DiagnosticError('MODEL_LIMIT') : new Error('MODEL_OUTPUT');
-    return parsed.value;
+    return value;
   };
   try {
     const parsed = await runAssessment();
@@ -969,7 +788,7 @@ export async function assessSecurityTypes({
       webSources,
       webResearch,
       webFailures,
-      model: { id: model, requests, completions },
+      model: { id: model, requests, completions: execution.completions },
       limits: {
         ...(evaluation ? {} : { topPerRanking }),
         maxModelRequests: 12,
@@ -985,21 +804,13 @@ export async function assessSecurityTypes({
     return result;
   } catch (error) {
     if (outputOperation?.status === 'in_progress') observation?.fail(outputOperation, error);
-    for (const [record, timing] of openRequests) {
-      const request = requestOperations.get(record);
-      observation?.streamEnd(
-        request,
-        timing.signal.aborted ? 'cancelled' : 'read_error',
-        timing.signal,
-      );
-      observation?.fail(request, error);
-    }
+    execution.observeOpenRequestFailures(error);
     for (const [toolOperation, signal] of openTools) {
       if (signal?.aborted) observation?.streamEnd(toolOperation, 'cancelled', signal);
       observation?.fail(toolOperation, error);
     }
     if (validation?.status === 'in_progress') observation?.fail(validation, error);
-    if (observationFailure) observation?.propagate(error, observationFailure);
+    if (execution.observationFailure) observation?.propagate(error, execution.observationFailure);
     observation?.fail(modelOperation, error);
     observation?.fail(operation, error);
     for (const toolOperation of webOperations.values())
@@ -1007,15 +818,11 @@ export async function assessSecurityTypes({
     throw error;
   } finally {
     if (performance.now() - stageStartedAt >= 180_000) observeCause('deadline_exceeded');
-    for (const record of openRequests.keys()) {
-      if (performance.now() - stageStartedAt >= 180_000) observeCause('deadline_exceeded', record);
-      closeRequest(record, 'cancelled');
-    }
+    execution.close();
     if (activeStage !== 'output') {
       statistics.status = 'failed';
       statistics.elapsedMs = Math.round(performance.now() - stageStartedAt);
     }
     clearTimeout(deadline);
-    requestScope.disable();
   }
 }

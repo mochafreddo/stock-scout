@@ -421,6 +421,27 @@ test('request records distinguish missing and duplicate completion, provider fai
   }
 });
 
+test('recommendation preserves immediate provider-error cancellation and separate cleanup failures', (t) => {
+  for (const cleanupFails of [false, true]) {
+    const result = run(t, 'report-late-error-blocked', {
+      ...(cleanupFails ? { TEST_REPORT_CANCEL_FAIL: '1' } : {}),
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const output = JSON.parse(result.stderr);
+    assert.equal(output.error, 'MODEL_INCOMPLETE');
+    assert.equal(output.observation.firstFailure.code, 'MODEL_INCOMPLETE');
+    assert.equal(output.observation.finalError.code, 'MODEL_INCOMPLETE');
+    assert.equal(output.usage.recommendationModel, 2);
+    assert.ok(result.requests.some((row) => row.streamCancelled));
+    assert.ok(result.requests.every((row) => !row.streamDrained));
+    const cleanup = output.observation.operations.findLast((row) => row.name === 'http.cancel');
+    assert.equal(cleanup.status, cleanupFails ? 'failed' : 'completed');
+    if (cleanupFails) assert.equal(cleanup.failure.code, 'unknown');
+    assert.doesNotMatch(result.stderr, /synthetic-private-cleanup/);
+  }
+});
+
 test('observation failures preserve recommendation success, failed review and request counts', (t) => {
   const normal = run(t);
   assert.equal(normal.status, 0, normal.stderr);

@@ -45,6 +45,26 @@ const sse = (events) => {
     events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
   );
   let sent = false;
+  if (scenario === 'report-late-error-blocked' && recommendationRequests === 2) {
+    let fallback;
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoded);
+          fallback = originalSetTimeout(() => {
+            appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ streamDrained: true })}\n`);
+            controller.close();
+          }, 1000);
+        },
+        cancel() {
+          clearTimeout(fallback);
+          appendFileSync(process.env.TEST_TRACE, `${JSON.stringify({ streamCancelled: true })}\n`);
+          if (process.env.TEST_REPORT_CANCEL_FAIL) throw new Error('synthetic-private-cleanup');
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  }
   return new Response(
     scenario === 'report-body-error' && recommendationRequests === 2
       ? new ReadableStream(
@@ -358,7 +378,7 @@ globalThis.fetch = async (url, init = {}) => {
             },
           ]
         : [completed]),
-    ...(scenario === 'report-late-error'
+    ...(['report-late-error', 'report-late-error-blocked'].includes(scenario)
       ? [{ type: 'error', code: 'server_error', message: 'synthetic-subscription' }]
       : []),
     ...(scenario === 'report-duplicate-completion' ? [completed] : []),
