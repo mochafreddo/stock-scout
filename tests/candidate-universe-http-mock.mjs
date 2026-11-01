@@ -242,6 +242,12 @@ globalThis.fetch = async (url, init = {}) => {
     if (scenario === 'empty-ranks' && sample.exchange === 'NYS') rows.length = 0;
     if (scenario === 'conflicting-identity' && address.pathname.endsWith('trade-pbmn'))
       rows[0].rsym = 'CONFLICT';
+    if (scenario === 'ranking-alias' && address.pathname.endsWith('trade-pbmn'))
+      rows[0].symb = 'OTHER';
+    if (scenario === 'ranking-error-order' && address.pathname.endsWith('trade-pbmn')) {
+      rows[0].rsym = 'CONFLICT';
+      rows.push({ ...rows[0], rank: '0' });
+    }
     if (scenario === 'rank-failure') return new Response('test-secret', { status: 503 });
     return Response.json({ rt_cd: '0', output1: {}, output2: rows });
   }

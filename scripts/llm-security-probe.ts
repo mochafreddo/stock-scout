@@ -4,6 +4,7 @@ import { DiagnosticError } from './diagnostic-error.ts';
 import { ExecutionObservation, type ObservedOperation } from './execution-observation.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
+import { ListedSecurities } from './listed-securities.ts';
 import {
   type AssessmentDiagnostics,
   type AssessmentStage,
@@ -64,10 +65,10 @@ try {
       : !/^[1-9]$|^10$/.test(top ?? '') || extra.length)
   )
     throw new Error('USAGE');
-  const securities = new Map<string, Security>();
-  const identities = new Map<string, string>();
-  const observations: unknown[] = [];
+  let securities: Security[] = [];
+  let observations: unknown[] = [];
   if (evaluation) {
+    const inputs = new Map<string, Security>();
     let input: unknown;
     try {
       input = JSON.parse(readFileSync(extra[0], 'utf8'));
@@ -94,14 +95,15 @@ try {
         !exchanges.includes(row.exchange) ||
         typeof row.symbol !== 'string' ||
         !/^[A-Z0-9./^-]{1,20}$/.test(row.symbol) ||
-        securities.has(keyOf(row.exchange, row.symbol))
+        inputs.has(keyOf(row.exchange, row.symbol))
       )
         throw new Error('USAGE');
-      securities.set(keyOf(row.exchange, row.symbol), {
+      inputs.set(keyOf(row.exchange, row.symbol), {
         exchange: row.exchange,
         symbol: row.symbol,
       });
     }
+    securities = [...inputs.values()];
   }
   stage = 'authentication';
   const { readSiwcCredentials } = await import('./siwc-auth.ts');
@@ -120,10 +122,11 @@ try {
     inputMode: evaluation ? 'evaluation' : 'rankings',
     model,
     ...(evaluation ? {} : { topPerRanking: Number(top) }),
-    securities: [...securities.values()],
+    securities,
     observations,
   };
   if (!evaluation) {
+    const listings = new ListedSecurities();
     stage = 'ranking';
     for (const exchange of exchanges)
       for (const kind of ['volume', 'amount'] as const) {
@@ -146,73 +149,62 @@ try {
             throw mapped;
           }
           validation = observation.start('ranking.validation', ranking?.id);
-          const ranks = new Set<number>();
-          for (const row of record.rows) {
-            const rank = Number(row.rank);
-            if (
-              !Number.isSafeInteger(rank) ||
-              rank < 1 ||
-              ranks.has(rank) ||
-              typeof row.symb !== 'string' ||
-              !/^[A-Z0-9./^-]{1,20}$/.test(row.symb) ||
-              (row.excd && row.excd !== exchange) ||
-              typeof row.rsym !== 'string' ||
-              !row.rsym
-            )
-              throw new Error('RANKING_FAILED');
-            ranks.add(rank);
-            if (rank > Number(top)) continue;
-            const key = keyOf(exchange, row.symb);
-            const existing = securities.get(key);
-            if (
-              (existing && existing.rsym !== row.rsym) ||
-              (identities.has(row.rsym) && identities.get(row.rsym) !== key)
-            )
-              throw new DiagnosticError('IDENTITY_AMBIGUOUS');
-            identities.set(row.rsym, key);
-            const security: Security = existing ?? {
+          listings.addRanking(
+            {
               exchange,
-              symbol: row.symb,
-              rsym: row.rsym,
-              rankings: [],
-            };
-            security.rankings?.push({
               kind,
-              rank,
               requestedAt: record.requestedAt,
+              receivedAt: record.receivedAt,
+              continuation: record.continuation,
+              rowCount: record.rowCount,
+              request: record.request,
               source: record.source,
-            });
-            securities.set(key, security);
-          }
-          const selected = [...ranks].filter((rank) => rank <= Number(top));
-          if (selected.length < Number(top) && ['F', 'M'].includes(record.continuation))
-            throw new DiagnosticError('RANKING_INCOMPLETE');
-          inputSnapshot.securities = structuredClone([...securities.values()]);
-          observations.push({
-            exchange,
-            kind,
-            requestedAt: record.requestedAt,
-            receivedAt: record.receivedAt,
-            continuation: record.continuation,
-            rowCount: record.rowCount,
-            request: record.request,
-            source: record.source,
-          });
+            },
+            (include) => {
+              const ranks = new Set<number>();
+              for (const row of record.rows) {
+                const rank = Number(row.rank);
+                if (
+                  !Number.isSafeInteger(rank) ||
+                  rank < 1 ||
+                  ranks.has(rank) ||
+                  typeof row.symb !== 'string' ||
+                  !/^[A-Z0-9./^-]{1,20}$/.test(row.symb) ||
+                  (row.excd && row.excd !== exchange) ||
+                  typeof row.rsym !== 'string' ||
+                  !row.rsym
+                )
+                  throw new Error('RANKING_FAILED');
+                ranks.add(rank);
+                if (rank > Number(top)) continue;
+                include({ symbol: row.symb, rsym: row.rsym, rank });
+              }
+              const selected = [...ranks].filter((rank) => rank <= Number(top));
+              if (selected.length < Number(top) && ['F', 'M'].includes(record.continuation))
+                throw new DiagnosticError('RANKING_INCOMPLETE');
+            },
+          );
+          ({ securities, observations } = listings.snapshot());
+          Object.assign(inputSnapshot, { securities, observations });
           observation.end(validation);
           observation.end(ranking);
         } catch (error) {
-          if (validation?.status === 'in_progress') observation.fail(validation, error);
-          observation.fail(ranking, error);
-          throw error;
+          const failure =
+            error instanceof Error && error.message === 'IDENTITY_AMBIGUOUS'
+              ? new DiagnosticError('IDENTITY_AMBIGUOUS')
+              : error;
+          if (validation?.status === 'in_progress') observation.fail(validation, failure);
+          observation.fail(ranking, failure);
+          throw failure;
         }
       }
   }
-  if (!securities.size) throw new Error('ANALYSIS_INSUFFICIENT');
+  if (!securities.length) throw new Error('ANALYSIS_INSUFFICIENT');
   if (secrets.some((secret) => secret && JSON.stringify(inputSnapshot).includes(secret)))
     throw new DiagnosticError('SENSITIVE_OUTPUT');
   const result = await assessSecurityTypes({
     context,
-    securities: [...securities.values()],
+    securities,
     model,
     accessToken: credentials.accessToken,
     secrets,

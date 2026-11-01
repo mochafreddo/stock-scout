@@ -437,6 +437,16 @@ globalThis.fetch = async (url, init = {}) => {
     }
     if (scenario === 'partial-ranking-incomplete' && request.pathname.endsWith('trade-pbmn'))
       return Response.json(body, { headers: { tr_cont: 'F' } });
+    if (scenario === 'ranking-alias' && request.pathname.endsWith('trade-pbmn'))
+      body.output2[0].symb = 'MSFT';
+    if (scenario.startsWith('ranking-identity-') && request.pathname.endsWith('trade-pbmn')) {
+      body.output2[0].rsym = 'DIFFERENT';
+      if (scenario === 'ranking-identity-later-invalid')
+        body.output2.push({ ...body.output2[0], rank: '0' });
+      return Response.json(body, { headers: { tr_cont: 'F' } });
+    }
+    if (scenario === 'ranking-batch-alias')
+      body.output2.push({ ...body.output2[0], symb: 'MSFT', rank: '2' });
     if (scenario === 'empty-rankings') {
       body.output1.nrec = '0';
       body.output2 = [];

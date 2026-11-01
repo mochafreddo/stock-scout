@@ -570,7 +570,14 @@ function run(t, scenario = 'ok', extraEnv = {}, evaluationInput, credentialOverr
       directory,
       extraEnv.TEST_MODEL ?? 'gpt-6-luna',
       ...(evaluationInput === undefined
-        ? [scenario.startsWith('types') || scenario === 'partial-ranking-incomplete' ? '2' : '1']
+        ? [
+            scenario.startsWith('types') ||
+            scenario === 'partial-ranking-incomplete' ||
+            scenario.startsWith('ranking-identity-') ||
+            scenario === 'ranking-batch-alias'
+              ? '2'
+              : '1',
+          ]
         : ['--evaluation-input', inputFile]),
     ],
     {
@@ -2342,6 +2349,65 @@ test('CLI snapshot excludes mutations from a ranking that later fails validation
     snapshot.securities[0].rankings.map(({ kind, rank }) => ({ kind, rank })),
     [{ kind: 'volume', rank: 1 }],
   );
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 0);
+});
+
+test('characterization: an aliased KIS identity leaves only the last valid ranking in the snapshot', (t) => {
+  const result = run(t, 'ranking-alias');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const failure = JSON.parse(result.stderr);
+  assert.equal(failure.error, 'IDENTITY_AMBIGUOUS');
+  assert.equal(failure.diagnostic.reason, 'IDENTITY_AMBIGUOUS');
+  const snapshot = failure.diagnostic.inputSnapshot;
+  assert.equal(snapshot.observations.length, 1);
+  assert.deepEqual(snapshot.securities, [
+    {
+      exchange: 'NAS',
+      symbol: 'AAPL',
+      rsym: 'DNASAAPL',
+      rankings: [
+        {
+          kind: 'volume',
+          rank: 1,
+          requestedAt: new Date(now).toISOString(),
+          source: snapshot.observations[0].source,
+        },
+      ],
+    },
+  ]);
+  assert.equal(result.requests.filter((row) => row.url.includes('/ranking/')).length, 2);
+  assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 0);
+});
+
+test('characterization: probe identity conflicts precede later row and continuation failures', (t) => {
+  for (const scenario of ['ranking-identity-continuation', 'ranking-identity-later-invalid']) {
+    const result = run(t, scenario);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const failure = JSON.parse(result.stderr);
+    assert.equal(failure.error, 'IDENTITY_AMBIGUOUS');
+    assert.equal(failure.diagnostic.reason, 'IDENTITY_AMBIGUOUS');
+    const snapshot = failure.diagnostic.inputSnapshot;
+    assert.equal(snapshot.observations.length, 1);
+    assert.equal(snapshot.securities.length, 1);
+    assert.deepEqual(
+      snapshot.securities[0].rankings.map(({ kind, rank }) => ({ kind, rank })),
+      [{ kind: 'volume', rank: 1 }],
+    );
+    assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 0);
+  }
+});
+
+test('characterization: an identity conflict within the first ranking leaves the snapshot empty', (t) => {
+  const result = run(t, 'ranking-batch-alias');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const failure = JSON.parse(result.stderr);
+  assert.equal(failure.error, 'IDENTITY_AMBIGUOUS');
+  assert.deepEqual(failure.diagnostic.inputSnapshot.securities, []);
+  assert.deepEqual(failure.diagnostic.inputSnapshot.observations, []);
+  assert.equal(result.requests.filter((row) => row.url.includes('/ranking/')).length, 1);
   assert.equal(result.requests.filter((row) => row.url.endsWith('/responses')).length, 0);
 });
 

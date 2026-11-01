@@ -6,12 +6,9 @@ import { DiagnosticError } from './diagnostic-error.ts';
 import type { ObservedOperation } from './execution-observation.ts';
 import { AuthError } from './kis-auth.ts';
 import { type KisExchange, queryKis } from './kis-query.ts';
+import { ListedSecurities } from './listed-securities.ts';
 import { marketCalendar } from './market-calendar.ts';
-import {
-  type AssessmentDiagnostics,
-  assessSecurityTypes,
-  type Security,
-} from './security-type-assessment.ts';
+import { type AssessmentDiagnostics, assessSecurityTypes } from './security-type-assessment.ts';
 import { readSiwcCredentials } from './siwc-auth.ts';
 
 export async function candidateUniverse(
@@ -31,9 +28,7 @@ export async function candidateUniverse(
   if (!calendar.result.analysisEligible) throw new Error('MARKET_ACTIVE');
   runtime.targetOpen(calendar.result.targetSession.open);
   onStage('ranking');
-  const securities = new Map<string, Security>();
-  const identities = new Map<string, string>();
-  const observations: unknown[] = [];
+  const listings = new ListedSecurities();
   for (const exchange of ['NAS', 'NYS', 'AMS'] as const)
     for (const kind of ['volume', 'amount'] as const) {
       const ranking = runtime.observation.start('ranking');
@@ -41,65 +36,48 @@ export async function candidateUniverse(
       try {
         const record = await queryKis(kind, exchange, '', { ...context, parentId: ranking?.id });
         validation = runtime.observation.start('ranking.validation', ranking?.id);
-        if (!record.rows.length) throw new Error('RANKING_INCOMPLETE');
-        const ranks = new Set<number>();
-        for (const row of record.rows) {
-          const rank = Number(row.rank);
-          if (
-            !Number.isSafeInteger(rank) ||
-            rank < 1 ||
-            ranks.has(rank) ||
-            !/^[A-Z0-9./^-]{1,20}$/.test(row.symb ?? '') ||
-            (row.excd && row.excd !== exchange) ||
-            !row.rsym
-          )
-            throw new Error('RANKING_FAILED');
-          ranks.add(rank);
-        }
-        const row = record.rows.find((row) => Number(row.rank) === 1);
-        if (!row) throw new Error('RANKING_INCOMPLETE');
-        if (
-          !(row.name?.trim() || row.ename?.trim()) ||
-          ['tvol', 'tamt'].some(
-            (field) =>
-              !/^\d+(?:\.\d+)?$/.test(row[field] ?? '') || !Number.isFinite(Number(row[field])),
-          )
-        )
-          throw new Error('RANKING_FAILED');
-        const key = `${exchange}:${row.symb}`;
-        const existing = securities.get(key);
-        if (
-          (existing && existing.rsym !== row.rsym) ||
-          (identities.has(row.rsym) && identities.get(row.rsym) !== key)
-        )
-          throw new Error('IDENTITY_AMBIGUOUS');
-        identities.set(row.rsym, key);
-        const security: Security = existing ?? {
-          exchange,
-          symbol: row.symb,
-          rsym: row.rsym,
-          rankings: [],
-        };
-        security.rankings?.push({
-          kind,
-          rank: Number(row.rank),
-          requestedAt: record.requestedAt,
-          source: record.source,
-          row,
-        });
-        securities.set(key, security);
-        observations.push({
-          exchange,
-          kind,
-          requestedAt: record.requestedAt,
-          receivedAt: record.receivedAt,
-          source: record.source,
-          request: record.request,
-          rowCount: record.rowCount,
-          selectedCount: 1,
-          continuation: record.continuation,
-          scope: 'discovery ranking at query time; not the data-session ranking',
-        });
+        listings.addRanking(
+          {
+            exchange,
+            kind,
+            requestedAt: record.requestedAt,
+            receivedAt: record.receivedAt,
+            source: record.source,
+            request: record.request,
+            rowCount: record.rowCount,
+            selectedCount: 1,
+            continuation: record.continuation,
+            scope: 'discovery ranking at query time; not the data-session ranking',
+          },
+          (include) => {
+            if (!record.rows.length) throw new Error('RANKING_INCOMPLETE');
+            const ranks = new Set<number>();
+            for (const row of record.rows) {
+              const rank = Number(row.rank);
+              if (
+                !Number.isSafeInteger(rank) ||
+                rank < 1 ||
+                ranks.has(rank) ||
+                !/^[A-Z0-9./^-]{1,20}$/.test(row.symb ?? '') ||
+                (row.excd && row.excd !== exchange) ||
+                !row.rsym
+              )
+                throw new Error('RANKING_FAILED');
+              ranks.add(rank);
+            }
+            const row = record.rows.find((row) => Number(row.rank) === 1);
+            if (!row) throw new Error('RANKING_INCOMPLETE');
+            if (
+              !(row.name?.trim() || row.ename?.trim()) ||
+              ['tvol', 'tamt'].some(
+                (field) =>
+                  !/^\d+(?:\.\d+)?$/.test(row[field] ?? '') || !Number.isFinite(Number(row[field])),
+              )
+            )
+              throw new Error('RANKING_FAILED');
+            include({ symbol: row.symb, rsym: row.rsym, rank: Number(row.rank), row });
+          },
+        );
         runtime.observation.end(validation);
         runtime.observation.end(ranking);
       } catch (error) {
@@ -109,11 +87,12 @@ export async function candidateUniverse(
       }
     }
   onStage('authentication');
+  const { securities, observations } = listings.snapshot();
   const credentials = await readSiwcCredentials(directory, undefined, context);
   const secrets = [...runtime.secrets];
   onStage('assessment');
   const assessment = await assessSecurityTypes({
-    securities: [...securities.values()],
+    securities,
     model: models.types,
     accessToken: credentials.accessToken,
     secrets,

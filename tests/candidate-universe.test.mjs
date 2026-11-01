@@ -207,6 +207,25 @@ test('empty rankings, identity conflicts and query failures never return partial
   }
 });
 
+test('characterization: one KIS identity cannot name two candidate securities', (t) => {
+  const result = run(t, 'ranking-alias');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  const failure = JSON.parse(result.stderr);
+  assert.equal(failure.error, 'IDENTITY_AMBIGUOUS');
+  assert.equal(failure.diagnostic.reason, 'unknown');
+  assert.equal(result.requests.filter((row) => row.url.includes('/ranking/')).length, 2);
+  assert.equal(result.requests.filter((row) => row.body?.tools).length, 0);
+});
+
+test('characterization: candidate row validation precedes selected-security identity conflicts', (t) => {
+  const result = run(t, 'ranking-error-order');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.equal(JSON.parse(result.stderr).error, 'RANKING_FAILED');
+  assert.equal(result.requests.filter((row) => row.url.includes('/ranking/')).length, 2);
+});
+
 test('confirmed ineligible securities produce an empty universe while unknown types fail distinctly', (t) => {
   const empty = run(t, 'all-excluded');
   assert.equal(empty.status, 0, empty.stderr);
