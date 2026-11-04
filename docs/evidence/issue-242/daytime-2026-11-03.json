@@ -1,0 +1,228 @@
+{
+  "issue": 242,
+  "reviewBase": "bbe8ae82f895465e3f319e958197e52cbdd4212f",
+  "runtimeInputsSha256": "854a2355123a9895720e68a97c19553796c1f3bafb0f80856935f79284f70c43",
+  "runtimeFingerprintScope": "git-tracked scripts, package.json, package-lock.json, tsconfig.json; path-to-SHA256 map sorted as JSON",
+  "sourceUnchanged": true,
+  "daytimeAcceptanceConditions": "satisfied",
+  "live": {
+    "maximumAuthorizedRuns": 1,
+    "runsUsed": 1,
+    "startedAt": "2026-11-03T01:02:18.035382+00:00",
+    "finishedAt": "2026-11-03T01:04:53.654437+00:00",
+    "elapsedSeconds": 155.619,
+    "exitCode": 0,
+    "evaluatedAt": "2026-11-03T01:04:53.635Z",
+    "status": "no_candidates",
+    "dataSession": {
+      "date": "2026-11-02",
+      "open": "2026-11-02T14:30:00.000Z",
+      "close": "2026-11-02T21:00:00.000Z"
+    },
+    "targetSession": {
+      "date": "2026-11-03",
+      "open": "2026-11-03T14:30:00.000Z",
+      "close": "2026-11-03T21:00:00.000Z"
+    },
+    "rankings": [
+      {
+        "exchange": "NAS",
+        "kind": "volume",
+        "requestedAt": "2026-11-03T01:03:29.713Z",
+        "receivedAt": "2026-11-03T01:03:29.799Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "NAS",
+        "kind": "amount",
+        "requestedAt": "2026-11-03T01:03:29.807Z",
+        "receivedAt": "2026-11-03T01:03:29.951Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "NYS",
+        "kind": "volume",
+        "requestedAt": "2026-11-03T01:03:29.958Z",
+        "receivedAt": "2026-11-03T01:03:29.990Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "NYS",
+        "kind": "amount",
+        "requestedAt": "2026-11-03T01:03:29.995Z",
+        "receivedAt": "2026-11-03T01:03:30.121Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "AMS",
+        "kind": "volume",
+        "requestedAt": "2026-11-03T01:03:30.128Z",
+        "receivedAt": "2026-11-03T01:03:30.159Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      },
+      {
+        "exchange": "AMS",
+        "kind": "amount",
+        "requestedAt": "2026-11-03T01:03:30.165Z",
+        "receivedAt": "2026-11-03T01:03:30.284Z",
+        "rowCount": 100,
+        "selectedCount": 1,
+        "scope": "discovery ranking at query time; not the data-session ranking"
+      }
+    ],
+    "eligibleSecurities": [
+      {
+        "exchange": "NAS",
+        "symbol": "INLF",
+        "type": "common",
+        "dailyRequestedAt": "2026-11-03T01:04:25.966Z",
+        "dailyReceivedAt": "2026-11-03T01:04:26.086Z",
+        "rowCount": 20,
+        "dates": [
+          "2026-10-06",
+          "2026-10-07",
+          "2026-10-08",
+          "2026-10-09",
+          "2026-10-12",
+          "2026-10-13",
+          "2026-10-14",
+          "2026-10-15",
+          "2026-10-16",
+          "2026-10-19",
+          "2026-10-20",
+          "2026-10-21",
+          "2026-10-22",
+          "2026-10-23",
+          "2026-10-26",
+          "2026-10-27",
+          "2026-10-28",
+          "2026-10-29",
+          "2026-10-30",
+          "2026-11-02"
+        ],
+        "source": "https://github.com/koreainvestment/open-trading-api/blob/2077773a69a428daf63e148182511f068cc45de3/examples_llm/overseas_stock/dailyprice/dailyprice.py",
+        "validation": "runtime-required-dates-and-fields",
+        "adjustment": "unadjusted (MODP=0); KIS field definitions used as an operating assumption",
+        "units": "provider values preserved; unverified unit or scale conversion not applied",
+        "rowsSha256": "e614c9e01d58b3e153abf66e41030a906e38e24b64e45df1e4a0e356cc0e8309"
+      }
+    ],
+    "excluded": [
+      {
+        "exchange": "NAS",
+        "symbol": "QQQ",
+        "type": "etf",
+        "reason": "Invesco identifies QQQ as the Invesco QQQ Trust ETF. Excluded because it is an ETF."
+      },
+      {
+        "exchange": "NYS",
+        "symbol": "NU",
+        "type": "unknown",
+        "reason": "KIS confirms the NU Holdings listing identity, but the available KIS code 01 evidence does not establish security type. No opened type-specific source was obtained, so common-stock classification is unconfirmed."
+      },
+      {
+        "exchange": "NYS",
+        "symbol": "ORCL",
+        "type": "unknown",
+        "reason": "KIS confirms the Oracle listing identity, but the available KIS code 01 evidence does not establish security type. No opened type-specific source was obtained, so common-stock classification is unconfirmed."
+      },
+      {
+        "exchange": "AMS",
+        "symbol": "SOXL",
+        "type": "unknown",
+        "reason": "KIS confirms the SOXL listing identity, but the available KIS code 01 record and product name are not type-specific evidence under the assessment rules. ETF classification was not independently verified from an opened source."
+      },
+      {
+        "exchange": "AMS",
+        "symbol": "SPY",
+        "type": "unknown",
+        "reason": "KIS confirms the SPY listing identity, but the available KIS code 01 record and product name are not type-specific evidence under the assessment rules. ETF classification was not independently verified from an opened source."
+      }
+    ],
+    "typeModel": {
+      "id": "gpt-6-luna",
+      "requests": 4,
+      "completions": 4
+    },
+    "typeCoverage": {
+      "input": 6,
+      "included": 1,
+      "excluded": 5,
+      "unconfirmed": 4,
+      "individualLookupFailures": 0,
+      "inclusionRate": 0.16666666666666666
+    },
+    "recommendationModel": {
+      "id": "gpt-6.1-sol",
+      "authentication": "siwc",
+      "requests": 3,
+      "completions": 3
+    },
+    "usage": {
+      "kis": 14,
+      "issuance": 1,
+      "official": 39,
+      "calendarModel": 1,
+      "typeModel": 4,
+      "recommendationModel": 3,
+      "refresh": 1
+    },
+    "limits": {
+      "kis": 90,
+      "issuance": 2,
+      "official": 100,
+      "calendarModel": 1,
+      "typeModel": 12,
+      "recommendationModel": 4,
+      "refresh": 2,
+      "topPerRanking": 1,
+      "historySessions": 20,
+      "executionSeconds": 600,
+      "recommendationSeconds": 180,
+      "maxDailyToolCalls": 12
+    },
+    "fractionalTrading": {
+      "status": "unverified",
+      "guidance": "예약 전에 토스증권에서 소수점 거래 가능 여부를 직접 확인하세요."
+    },
+    "semanticReview": {
+      "supported": true,
+      "reliability": "unverified"
+    },
+    "paidSwitched": false,
+    "stdoutSha256": "74811e087a322c172781b8e23e2287ba1a39867ba3fcace1bfe25e1ee1f40d9c",
+    "stderrBytes": 0
+  },
+  "mockChecks": {
+    "cwd": "/Users/mochafreddo/GitHub/stock-scout",
+    "commands": [
+      { "command": "npm run check", "exitCode": 0 },
+      { "command": "npm run typecheck", "exitCode": 0 },
+      { "command": "npm test -- --test-concurrency=4", "exitCode": 0 }
+    ],
+    "tests": 402,
+    "passed": 402,
+    "failed": 0,
+    "skipped": 0,
+    "newMutationControls": "not_run_no_runtime_change"
+  },
+  "evidenceLimits": [
+    "한국 낮 전체의 데이터 가용성이나 모든 날짜·일정 경계의 실연동을 입증하지 않는다.",
+    "KIS 일봉의 정규장 집계는 승인된 운영 가정이며 독립 공급자 보장이 아니다.",
+    "성공 보고서·고정 소스의 일봉 도구 읽기 검사를 근거로 사용을 확인했으며, 이번 실행의 원시 도구 왕복이나 모든 원시 완료 이벤트를 별도 수집·대조하지 않았다.",
+    "후보가 있는 보고서·추천 품질·의미 검토 정확도·소수점 거래 가능 여부는 미검증이다.",
+    "유형 판단의 네 종목 미확인과 자료 조사 충분성은 #277의 별도 품질 범위다.",
+    "실제 구독 소진·유료 통합 보고서·독립 청구 대조·조회 중 실제 만료 복구는 이번 실행에서 검증하지 않았다.",
+    "코드 변경이 없어 새로운 실패 대조 변이는 수행하지 않았다. 과거 음성 대조 기록과 이번 전체 모의 회귀 결과를 구분한다."
+  ]
+}
