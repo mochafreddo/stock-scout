@@ -14,6 +14,8 @@
 
 저장소 루트에서 진행하세요. Node.js 24 이상과 npm이 필요합니다. 테스트는 외부 HTTP를 모의 응답으로 대체하므로 KIS 계정이나 OpenAI 인증이 필요하지 않습니다.
 
+이미 mise를 사용한다면 [mise.toml](../mise.toml)에 지정한 개발용 Node.js 버전으로 실행할 수 있습니다. 지정한 버전이 없다면 먼저 `mise install node`로 설치하세요. 이어서 `mise exec -- node --version`을 실행해 선택된 버전이 설정과 일치하는지 확인하세요. 셸에서 mise를 활성화하지 않았다면 아래 명령에 `mise exec --`를 붙여 실행하세요. mise 사용은 선택 사항입니다.
+
 1. 실행 환경을 확인하세요.
 
    ```sh
