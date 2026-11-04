@@ -107,10 +107,7 @@ export async function recommendCandidates(
   const started = performance.now();
   const volume = {
     securityCount: universe.securities.length,
-    rowCount: universe.securities.reduce(
-      (total, security) => total + security.daily.rows.length,
-      0,
-    ),
+    rowCount: universe.securities.reduce((total, security) => total + security.daily.rowCount, 0),
   };
   const operation = observation.start('recommendation', undefined, 'operation', undefined, {
     stageRemainingMs: 180_000,
@@ -154,28 +151,6 @@ export async function recommendCandidates(
     }
   };
   const securities = new Map(universe.securities.map((s) => [`${s.exchange}:${s.symbol}`, s]));
-  const observations = new Map(
-    [...securities].flatMap(([securityId, s]) =>
-      s.daily.rows.flatMap((row) =>
-        ['open', 'high', 'low', 'clos', 'tvol'].map((field) => {
-          const date = `${row.xymd.slice(0, 4)}-${row.xymd.slice(4, 6)}-${row.xymd.slice(6, 8)}`;
-          const id = `${securityId}:${date}:${field}`;
-          return [
-            id,
-            {
-              id,
-              securityId,
-              date,
-              field,
-              value: row[field],
-              requestedAt: s.daily.requestedAt,
-              source: s.daily.source,
-            },
-          ] as const;
-        }),
-      ),
-    ),
-  );
   const read = new Set<string>();
   let toolCalls = 0;
   const tools = {
@@ -208,7 +183,7 @@ export async function recommendCandidates(
             rowCount:
               Array.isArray(securityIds) && securityIds.every((id) => securities.has(id))
                 ? securityIds.reduce(
-                    (total, id) => total + (securities.get(id)?.daily.rows.length ?? 0),
+                    (total, id) => total + (securities.get(id)?.daily.rowCount ?? 0),
                     0,
                   )
                 : null,
@@ -231,11 +206,7 @@ export async function recommendCandidates(
             runtime.safe(
               securityIds.map((securityId) => ({
                 securityId,
-                adjustment: securities.get(securityId)?.daily.adjustment,
-                units: securities.get(securityId)?.daily.units,
-                observations: [...observations.values()].filter(
-                  (row) => row.securityId === securityId,
-                ),
+                ...securities.get(securityId)?.daily.read(),
               })),
             ),
           );
@@ -298,7 +269,7 @@ export async function recommendCandidates(
               rowCount:
                 phaseLimit === 3
                   ? [...read].reduce(
-                      (total, id) => total + (securities.get(id)?.daily.rows.length ?? 0),
+                      (total, id) => total + (securities.get(id)?.daily.rowCount ?? 0),
                       0,
                     )
                   : volume.rowCount,
@@ -437,13 +408,12 @@ export async function recommendCandidates(
       const evidence = row.evidence.map((item) => {
         const reference = record(item, ['observationId', 'explanation']);
         if (!text(reference.observationId) || !text(reference.explanation)) invalid();
-        const source = observations.get(reference.observationId);
-        if (!source || source.securityId !== row.securityId || seenObservations.has(source.id))
-          invalid();
+        const source = s.daily.observation(reference.observationId);
+        if (!source || seenObservations.has(source.id)) invalid();
         seenObservations.add(source.id);
         return { ...source, explanation: reference.explanation };
       });
-      const close = observations.get(`${row.securityId}:${universe.dataSession.date}:clos`);
+      const close = s.daily.referenceClose();
       if (!close) invalid();
       return {
         exchange: s.exchange,
@@ -473,7 +443,7 @@ export async function recommendCandidates(
           ...sessions,
           candidates,
           noCandidatesReason: value.noCandidatesReason,
-          observations: [...observations.values()],
+          observations: universe.securities.flatMap((security) => security.daily.observations()),
         },
         reviewSchema,
       ),

@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { recommendCandidates } from './buy-candidate-assessment.ts';
 import { CandidateRuntime } from './candidate-runtime.ts';
+import { CompletedDailyBars } from './completed-daily-bars.ts';
 import { DiagnosticError } from './diagnostic-error.ts';
 import type { ObservedOperation } from './execution-observation.ts';
 import { AuthError } from './kis-auth.ts';
@@ -117,50 +118,14 @@ export async function candidateUniverse(
         parentId: operation?.id,
       });
       validation = runtime.observation.start('daily.validation', operation?.id);
-      if (daily.summary.rsym !== undefined && daily.summary.rsym !== security.rsym)
-        throw new Error('IDENTITY_AMBIGUOUS');
-      const rows = new Map<string, Record<string, string>>();
-      for (const row of daily.rows) {
-        if (!/^\d{8}$/.test(row.xymd ?? '')) throw new Error('DATA_NOT_READY');
-        const date = `${row.xymd.slice(0, 4)}-${row.xymd.slice(4, 6)}-${row.xymd.slice(6, 8)}`;
-        if (
-          !Number.isFinite(Date.parse(date)) ||
-          new Date(date).toISOString().slice(0, 10) !== date ||
-          rows.has(date)
-        )
-          throw new Error('DATA_NOT_READY');
-        rows.set(date, row);
-      }
-      const requiredRows = calendar.historyDates.map((date) => {
-        const row = rows.get(date);
-        if (!row) throw new Error('DATA_NOT_READY');
-        const number = (field: string) => {
-          if (!/^\d+(?:\.\d+)?$/.test(row[field] ?? '') || !Number.isFinite(Number(row[field])))
-            throw new Error('DATA_NOT_READY');
-          return Number(row[field]);
-        };
-        const [open, high, low, close] = ['open', 'high', 'low', 'clos'].map(number);
-        if (
-          Math.min(open, high, low, close) <= 0 ||
-          low > Math.min(open, close) ||
-          high < Math.max(open, close) ||
-          low > high ||
-          number('tvol') < 0
-        )
-          throw new Error('DATA_NOT_READY');
-        return row;
-      });
       included.push({
         ...security,
-        daily: {
-          ...daily,
-          rows: requiredRows,
-          rowCount: requiredRows.length,
-          dataSession: calendar.result.dataSession.date,
-          validation: 'runtime-required-dates-and-fields',
-          adjustment: 'unadjusted (MODP=0); KIS field definitions used as an operating assumption',
-          units: 'provider values preserved; unverified unit or scale conversion not applied',
-        },
+        daily: new CompletedDailyBars(
+          daily,
+          security,
+          calendar.historyDates,
+          calendar.result.dataSession.date,
+        ),
       });
       runtime.observation.end(validation);
       runtime.observation.end(operation);
