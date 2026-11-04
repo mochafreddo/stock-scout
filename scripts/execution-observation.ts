@@ -344,17 +344,21 @@ export class ExecutionObservation {
       if (error && typeof error === 'object' && !previous?.operationId)
         this.errors.set(error, { operationId: operation.id, code: operation.failure.code });
       if (!this.operations.includes(operation)) {
-        let replace = this.operations.findIndex(
-          (row) => !row.failure && row.id !== this.finalError?.operationId,
-        );
-        if (replace < 0)
-          replace = this.operations.findIndex(
-            (row) => row !== this.firstFailure && row.id !== this.finalError?.operationId,
-          );
+        const replace = this.removalIndex(this.operations);
         if (replace >= 0) this.operations.splice(replace, 1, operation);
       }
       if (ended) this.end(operation);
     });
+  }
+  private removalIndex(operations: OperationRecord[]) {
+    const successful = operations.findIndex(
+      (row) => !row.failure && row.id !== this.finalError?.operationId,
+    );
+    return successful >= 0
+      ? successful
+      : operations.findIndex(
+          (row) => row !== this.firstFailure && row.id !== this.finalError?.operationId,
+        );
   }
   recover(token?: ObservedOperation) {
     this.attempt(() => {
@@ -509,6 +513,7 @@ export class ExecutionObservation {
         const operations = [...this.operations];
         const elapsedMs = this.now();
         let omittedOperations = this.omittedOperations;
+        const compactSummaries = summaries();
         const project = () => ({
           runId: this.runId,
           startedAt: this.startedAt,
@@ -526,17 +531,11 @@ export class ExecutionObservation {
               }
             : null,
           finalError: this.finalError,
-          summaries: summaries(),
+          summaries: compactSummaries,
           operations,
         });
         while (Buffer.byteLength(JSON.stringify(project())) > 256 * 1024 && operations.length) {
-          let index = operations.findIndex(
-            (row) => !row.failure && row.id !== this.finalError?.operationId,
-          );
-          if (index < 0)
-            index = operations.findIndex(
-              (row) => row !== this.firstFailure && row.id !== this.finalError?.operationId,
-            );
+          const index = this.removalIndex(operations);
           if (index < 0) break;
           operations.splice(index, 1);
           omittedOperations++;

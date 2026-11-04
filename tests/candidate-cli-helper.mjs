@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixture, now, putToken } from './kis-cli-helper.mjs';
+
+import { writeSiwcFixture } from './siwc-fixture.mjs';
 
 export function run(t, scenario = 'ok', env = {}, args, script = 'candidate-universe') {
   const f = fixture();
@@ -14,25 +16,9 @@ export function run(t, scenario = 'ok', env = {}, args, script = 'candidate-univ
     .replace('T', ' ');
   writeFileSync(join(f.cache, 'token.json'), JSON.stringify(token), { mode: 0o600 });
   const directory = join(f.home, 'siwc');
-  mkdirSync(directory, { mode: 0o700 });
-  const hostId = 'urn:uuid:859484d1-d773-489f-a0dd-a3021048bb7f';
-  writeFileSync(join(directory, 'host.json'), JSON.stringify({ hostId }), { mode: 0o600 });
-  writeFileSync(
-    join(directory, 'credentials.json'),
-    JSON.stringify({
-      schemaVersion: 1,
-      issuer: 'https://auth.openai.com',
-      subject: 'synthetic-user',
-      clientId: 'oaiapp_synthetic',
-      hostId,
-      accessToken: 'synthetic-subscription',
-      idToken: 'synthetic-identity',
-      refreshToken: 'synthetic-refresh',
-      tokenType: 'Bearer',
-      scopes: ['openid', 'resource.invoke', 'chatgpt.tokens.use.direct'],
-      expiresAt: env.AUTH_EXPIRES ? Date.parse(env.AUTH_EXPIRES) : initialNow + 3600_000,
-    }),
-    { mode: 0o600 },
+  writeSiwcFixture(
+    directory,
+    env.AUTH_EXPIRES ? Date.parse(env.AUTH_EXPIRES) : initialNow + 3600_000,
   );
   const trace = join(f.home, 'trace');
   writeFileSync(trace, '', { mode: 0o600 });

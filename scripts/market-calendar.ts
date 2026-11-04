@@ -496,7 +496,8 @@ export async function marketCalendar({
         if (!/^https:\/\/www\.nasdaqtrader\.com\/TraderNews\.aspx\?id=ET[AU]\d{4}-\d+$/.test(link))
           fail('SOURCE_SHAPE');
         activeNotice = link.split('=')[1];
-        dates.push(published(Date.parse(field('pubDate'))));
+        const publishedAt = published(Date.parse(field('pubDate')));
+        dates.push(publishedAt);
         const article = await collect(link);
         const root =
           '//div[@id="MainContainer"]//div[contains(concat(" ",normalize-space(@class)," ")," genTableNews ")]';
@@ -517,7 +518,7 @@ export async function marketCalendar({
           entries: [
             {
               id: `nasdaq:${activeNotice}:0`,
-              publishedAt: published(Date.parse(field('pubDate'))),
+              publishedAt,
               subject: field('title'),
               body,
             },
@@ -665,9 +666,10 @@ export async function marketCalendar({
     const p = parts(utc);
     const represented = Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:00Z`);
     const result = utc + (utc - represented);
+    const local = parts(result);
     if (
-      localDate(result) !== date ||
-      Number(parts(result).hour) * 60 + Number(parts(result).minute) !== minute
+      `${local.year}-${local.month}-${local.day}` !== date ||
+      Number(local.hour) * 60 + Number(local.minute) !== minute
     )
       fail('SOURCE_SHAPE');
     return new Date(result).toISOString();

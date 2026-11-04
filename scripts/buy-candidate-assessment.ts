@@ -115,7 +115,7 @@ export async function recommendCandidates(
   });
   let phase: ObservedOperation | undefined;
   let validation: ObservedOperation | undefined;
-  const phaseRequests: (ObservedOperation | undefined)[] = [];
+  let latestRequest: ObservedOperation | undefined;
   const controller = new AbortController();
   tagSignal(controller.signal, () => 'stage_limit');
   const context = { runtime, signal: controller.signal, observation, parentId: operation?.id };
@@ -145,8 +145,7 @@ export async function recommendCandidates(
         throw execution.failure;
       }
     } catch (error) {
-      const request = phaseRequests.at(-1);
-      if (request?.streamEnd === 'cancelled') observation.fail(request, error);
+      if (latestRequest?.streamEnd === 'cancelled') observation.fail(latestRequest, error);
       throw error;
     }
   };
@@ -174,7 +173,7 @@ export async function recommendCandidates(
       execute: async ({ securityIds }) => {
         const toolOperation = observation.start(
           'recommendation.tool',
-          phaseRequests.at(-1)?.id ?? phase?.id,
+          latestRequest?.id ?? phase?.id,
           'tool',
           undefined,
           {
@@ -275,7 +274,7 @@ export async function recommendCandidates(
                   : volume.rowCount,
             },
           );
-          phaseRequests.push(request);
+          latestRequest = request;
           return execution.fetch(
             url,
             { ...init, ...authorization, redirect: 'error', signal },
@@ -511,8 +510,7 @@ export async function recommendCandidates(
         ? cause
         : modelFailure(cause);
     observation.propagate(mapped, cause);
-    const request = phaseRequests.at(-1);
-    if (!validation && request?.status === 'failed') observation.fail(request, mapped);
+    if (!validation && latestRequest?.status === 'failed') observation.fail(latestRequest, mapped);
     if (validation?.status === 'in_progress') observation.fail(validation, mapped);
     if (phase?.status === 'in_progress') observation.fail(phase, mapped);
     observation.fail(operation, mapped);
