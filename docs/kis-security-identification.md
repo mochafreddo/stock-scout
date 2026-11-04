@@ -26,7 +26,7 @@
 
 공식 공개 마스터 세 ZIP을 TLS 검증을 유지한 채 메모리에서 읽고 cp949·탭 구분 24열로 해석했다. NAS/NYS/AMS의 행 수는 각각 5265/2839/4765, 유형 `4` 행 수는 모두 0이었다. 전체 파일에서 해당 코드의 존재를 확인한 뒤 필요한 소수 표본만 저장했으며, 모든 상장 종목의 유형을 조사하거나 정확도를 검증한 작업은 아니다. ZIP을 디스크에 추출하거나 공식 예제의 TLS 검증 해제를 실행하지 않았다.
 
-Context7에서 공식 저장소를 찾았으나 해당 코드 정의 검색은 결과가 없었다. 이후 고정 커밋의 공식 원본과 KIS 포털의 공개 상세 JSON을 직접 읽었다. 포털 HTML의 문서 로더가 사용하는 `/api/apis/public/detail?accessUrl=...` 경로이며 로그인·비공개 서비스 우회 경로가 아니다. 필요한 필드명과 설명만 [공식 필드 기록](evidence/issue-250/official-fields.json)에 보존했다. 이 설명을 실제 값과 별개로 대조했다.
+Context7에서 공식 저장소를 찾았으나 해당 코드 정의 검색은 결과가 없었다. 이후 고정 커밋의 공식 원본과 KIS 포털의 공개 상세 JSON을 직접 읽었다. 포털 HTML의 문서 로더가 사용하는 `/api/apis/public/detail?accessUrl=...` 경로이며 로그인·비공개 서비스 우회 경로가 아니다. 필요한 필드명과 설명만 [공식 필드 기록](evidence/issue-250/official-fields.json)에 보존했다. 공식 문서가 설명한 필드의 의미와 실제 응답에 담긴 값을 구분해 대조했다.
 
 ## 공식 정의와 실제 대응
 
@@ -53,7 +53,7 @@ Context7에서 공식 저장소를 찾았으나 해당 코드 정의 검색은 �
 | VXX ETN | [기존 상품](evidence/issue-243/info-AMS-VXX.json), [마스터](evidence/issue-250/master-ams.json) `3/006`, 상품 `01`, `US06748M1962` | KIS 공식 마스터의 `006=VIX Underlying ETN`과 실제 표본이 연결된다. 일반 ETN `002`의 실제 표본을 대신 검증한 것은 아니며 상품 정보와의 불일치도 남는다. |
 | BAC/B 우선주 성격의 예탁증권 | [기존 상품](evidence/issue-243/info-NYS-BAC_B.json), 마스터 `2/N`, 상품 `04`, `US0605052291` | [발행사 우선주 표](https://investor.bankofamerica.com/fixed-income/preferred-stock)의 Series GG는 CUSIP `060505229`, 티커 `BAC PrB`이며 우선주 지분을 나타내는 depositary shares다. BAC/B를 Series B와 혼동하지 않는다. 실제 `04`와 우선주 공식 정의가 대응하며 후보군 제외 대상이다. KIS의 DR `N`만으로 예탁증권 부재를 판정하지 않는다. |
 | BAC/L 우선주 | [기존 상품](evidence/issue-243/info-NYS-BAC_L.json), 마스터 `2/N`, 상품 `04`, `US0605056821` | 같은 발행사 표의 Series L Convertible/CUSIP `060505682`와 대응한다. BAC 보통주·BAC/B와 별도 증권이며 제외 대상이다. |
-| BBD 우선주 ADR / BBDO 보통주 ADR | [BBD 상품](evidence/issue-250/info-NYS-BBD.json)·[BBDO 상품](evidence/issue-250/info-NYS-BBDO.json), 둘 다 마스터 `2/N/빈 ETP`, 상품 `01` | [Bradesco 공식 자료](https://www.bradescori.com.br/en/services/bradesco-shares/)는 NYSE BBD가 preferred ADR, BBDO가 common ADR임을 명시한다. 표준상품번호는 `US0594603039`와 `US0594604029`로 다르다. 표본의 권리는 다르지만 현재 KIS 유형 필드로 자동 구분하는 근거는 없다. 둘을 회사명으로 합치거나 `01/N`을 이유로 BBD를 포함하지 않는다. |
+| BBD 우선주 ADR / BBDO 보통주 ADR | [BBD 상품](evidence/issue-250/info-NYS-BBD.json)·[BBDO 상품](evidence/issue-250/info-NYS-BBDO.json), 둘 다 마스터 `2/N/빈 ETP`, 상품 `01` | [Bradesco 공식 자료](https://www.bradescori.com.br/en/services/bradesco-shares/)는 NYSE BBD가 preferred ADR, BBDO가 common ADR임을 명시한다. 표준상품번호는 `US0594603039`와 `US0594604029`로 다르다. 두 표본의 기초 권리는 다르지만, 현재 확인한 KIS 유형 필드로 두 증권을 자동으로 구분할 근거는 없다. 둘을 회사명으로 합치거나 `01/N`을 이유로 BBD를 포함하지 않는다. |
 | ACONW·ADSEW 워런트 | [ACONW 상품](evidence/issue-250/info-NAS-ACONW.json)·[ADSEW 상품](evidence/issue-250/info-NAS-ADSEW.json), 모두 마스터 `2/N`, 상품 `01` | [Nasdaq ACONW 페이지](https://www.nasdaq.com/market-activity/stocks/aconw/analyst-research)와 [Nasdaq의 ADSEW 공지](https://www.nasdaqtrader.com/TraderNews.aspx?id=eca2021-291)가 워런트임을 명시한다. 실제 표본은 확보했으나 KIS `4/02` 대응을 확보한 결과가 아니다. 마스터와 상품의 주식 표시를 보통주로 신뢰하면 오분류한다. |
 
 ACONW·ADSEW는 조사할 표본을 찾는 단계에서만 마스터의 이름을 활용했고, 유형 결론은 거래소 공식 자료로 확인했다. 순위 밖 추가 표본은 분류 검증에만 사용하며 후보군에 편입하거나 상위 N개를 보충하지 않았다. 이름·티커 접미사 규칙이나 개별 종목 허용·차단 목록을 구현하지 않았다.

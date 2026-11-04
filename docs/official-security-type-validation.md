@@ -115,7 +115,7 @@ Context7의 SEC 문서 검색은 제3자 서비스·라이브러리만 반환하
 | [SPY 2026 투자설명서](https://www.sec.gov/Archives/edgar/data/884394/000119312526022316/d77353d485bpos.htm)와 [발행사 상품 페이지](https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-500-etf-trust-spy) | SPY와 NYSE Arca, ETF 성격의 명시적 근거가 있다. | 기초자산의 보통주 성격을 SPY 자체의 유형으로 혼동하지 않는다. |
 | [Barclays 2026-02-13 pricing supplement](https://www.sec.gov/Archives/edgar/data/312070/000191870426004069/form424b2.htm) | VXX는 CBOE BZX의 Series B ETN이며 ISIN `US06748M1962`가 기존 KIS 표본과 일치한다. 과거 VXX는 2019년 만기된 다른 증권이라고 명시한다. | 티커만으로 과거 증권을 연결하지 않는다. NYSE 매핑 `E`의 적용 관계와 후속 변경 확인은 미완료다. |
 
-위 표는 웹 추출로 읽은 공식 자료의 사실이다. 공시의 기간·제출일과 다운로드일을 구분한다. 최신 공시인지, 후속 변경·정정이 없는지까지 확인한 결과는 아니다. 원문 iXBRL의 결정적 추출·문맥 보존·지원하지 않는 발행사별 표현의 처리도 실행 검증하지 않았다. [SEC XBRL Guide](https://www.sec.gov/files/edgar/filer-information/specifications/xbrl-guide-2026-08-14.pdf)의 증권별 문맥 설명은 유용하지만 모든 공시에 같은 형태의 유형 열이 있다는 보장은 아니다.
+위 표에는 웹 추출로 읽은 공식 자료에서 확인한 사실을 정리했다. 공시의 기간·제출일과 다운로드일을 구분한다. 읽은 공시가 최신인지, 이후에 변경하거나 정정한 내용이 있는지까지는 확인하지 않았다. 원문 iXBRL의 결정적 추출·문맥 보존·지원하지 않는 발행사별 표현의 처리도 실행 검증하지 않았다. [SEC XBRL Guide](https://www.sec.gov/files/edgar/filer-information/specifications/xbrl-guide-2026-08-14.pdf)의 증권별 문맥 설명은 유용하지만 모든 공시에 같은 형태의 유형 열이 있다는 보장은 아니다.
 
 [Bradesco 주식 안내](https://www.bradescori.com.br/en/services/bradesco-shares/)와 [FAQ](https://www.bradescori.com.br/en/services/faq/)도 BBD 우선주 ADR·BBDO 보통주 ADR을 명시한다. 반면 [ADR Program](https://www.bradescori.com.br/en/services/adr-program/)의 표는 두 CUSIP 행의 티커를 모두 BBD로 표시하고 갱신일은 2025-07-23이다. 같은 발행사 자료도 식별 표를 무조건 우선하지 않는다. 이름이 같은 두 행을 합치지 않고 원본의 오류 가능성과 적용일을 확인해야 한다.
 

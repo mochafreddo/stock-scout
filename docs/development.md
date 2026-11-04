@@ -45,7 +45,7 @@ node scripts/pre-push.ts --install-pre-commit
 node scripts/pre-push.ts --install
 ```
 
-pre-commit은 staged 스냅샷의 공백·로컬 Markdown 링크·프로젝트 스킬 설정을 검사합니다. 코드 변경이 있으면 staged 스냅샷에서 `npm run check`와 `npm run typecheck`도 실행합니다. 부분 스테이징과 최초 커밋을 지원하며 작업 파일과 인덱스를 자동 수정하지 않습니다. 충돌 인덱스와 검사 중 staged 내용이 달라진 커밋은 차단합니다. 훅을 설치하지 않고 검사하려면 `node scripts/pre-push.ts --staged`를 실행하세요.
+pre-commit은 staged 스냅샷의 공백·로컬 Markdown 링크·프로젝트 스킬 설정을 검사합니다. 코드 변경이 있으면 staged 스냅샷에서 `npm run check`와 `npm run typecheck`도 실행합니다. 부분 스테이징과 최초 커밋을 지원하며 작업 파일과 인덱스를 자동 수정하지 않습니다. 인덱스에 충돌이 남아 있거나 검사 중 staged 내용이 바뀌면 커밋을 차단합니다. 훅을 설치하지 않고 검사하려면 `node scripts/pre-push.ts --staged`를 실행하세요.
 
 코드 검사에는 staged `package-lock.json`과 일치하는 작업 디렉터리의 lockfile 및 설치된 의존성이 필요합니다. 의존성이 없거나 버전이 맞지 않으면 먼저 개발 환경에서 준비한 뒤 다시 커밋하세요. 훅은 패키지를 설치하지 않으며 검사 실패와 검사 실행 불가를 오류 메시지로 구분합니다. 전체 테스트는 최종 검증과 pre-push에서 실행합니다.
 

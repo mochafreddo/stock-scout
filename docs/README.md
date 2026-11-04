@@ -17,7 +17,7 @@
 
 ## 설계 결정과 구현 위치
 
-[ADR 목록](adr/README.md)은 결정 이유와 대체 관계를 찾는 출발점입니다. 아래 설계 기록은 당시 검토 범위와 절차를 담고 있습니다. 현재 명령과 출력은 위 사용 안내를 확인하세요.
+[ADR 목록](adr/README.md)에서 각 결정의 이유와 어떤 결정이 이전 결정을 대체했는지 확인할 수 있습니다. 아래 설계 기록은 당시 검토 범위와 절차를 담고 있습니다. 현재 명령과 출력은 위의 「사용과 개발」에 연결된 문서에서 확인하세요.
 
 | 영역 | 구현 | 설계 기록 |
 | --- | --- | --- |
@@ -40,4 +40,4 @@
 | 종목 유형 판단 | [실행 이력](security-type-history.md), [독립 정답과 실제 평가](security-type-evaluation-samples.md), [ADR·워런트 표본 근거](security-evaluation-adr-warrant-research.md) |
 | 종목 유형 자료원 | [KIS 유형과 상장 식별](kis-security-identification.md), [외부 공식 자료](official-security-type-validation.md), [대체 공식 자료](alternative-official-security-sources.md), [제3자 자료](third-party-security-type-sources.md), [Massive 문의 초안](massive-reference-usage-inquiry.md) |
 
-선별한 실행·조사 자료와 평가 입력은 [증거 디렉터리](evidence)에 있습니다. 검증 범위는 각 기록에서 실제 실행, 모의 검사, 미검증 항목을 확인하세요.
+선별한 실행·조사 자료와 평가 입력은 [증거 디렉터리](evidence)에 있습니다. 각 기록에서 실제 실행으로 확인한 항목, 모의 검사로 확인한 항목, 아직 검증하지 않은 항목을 확인하세요.

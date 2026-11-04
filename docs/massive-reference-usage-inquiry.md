@@ -2,11 +2,11 @@
 
 2026-10-19 [이용 범위 확인 설계](security-type-probe-design.md#massive-이용-범위-확인의-후속-설계-인터뷰)에 따른 초안이다. [제3자 공급자 조사](third-party-security-type-sources.md)의 후속 확인을 위한 문서이며 전송하지 않았다. 공개 자료만으로 해소하지 못한 적용 관계를 질문으로 남긴다.
 
-2026-10-20의 현재 차단 범위는 [재검토 보고서](third-party-security-type-sources.md#2026-10-20-자동-이용보관-차단-범위-재검토)를 따른다. 아래 질문은 당시 초안이며 전송할 필수 확인 목록이 아니다. 자동 이용의 미해결 적용 관계, 보관·삭제 방법, 결과 공개 범위를 분리하고 보관 기간 설명 부족이나 결과 공개 미확정만으로 비공개 검증을 차단하지 않는다. 문의 전송과 답변 대기를 다음 필수 단계로 두지 않는다.
+2026-10-20의 현재 차단 범위는 [재검토 보고서](third-party-security-type-sources.md#2026-10-20-자동-이용보관-차단-범위-재검토)를 따른다. 아래 질문은 당시 작성한 초안으로, 다음 단계로 진행하기 전에 반드시 공급자에게 보낼 질문은 아니다. 자동 이용의 미해결 적용 관계, 보관·삭제 방법, 결과 공개 범위를 분리하고 보관 기간 설명 부족이나 결과 공개 미확정만으로 비공개 검증을 차단하지 않는다. 문의 전송과 답변 대기를 다음 필수 단계로 두지 않는다.
 
 ## 확인한 근거와 남은 질문
 
-[Individuals Terms §1–§2](https://massive.com/legal/individuals-terms-of-service)는 개인·비상업·비사업 목적의 사용권과 Market Data Terms의 추가 적용을 명시한다. [개인 앱 안내](https://massive.com/knowledge-base/article/which-plan-do-i-need-to-show-massive-data-in-my-app)는 본인만 사용하는 개인 앱·연구·스크립트·거래를 개인 요금제 범위에 포함한다. 따라서 개인 스크립트에 관한 안내가 없다는 전제로 문의하지 않는다.
+[Individuals Terms §1–§2](https://massive.com/legal/individuals-terms-of-service)는 개인·비상업·비사업 목적의 사용권과 Market Data Terms의 추가 적용을 명시한다. [개인 앱 안내](https://massive.com/knowledge-base/article/which-plan-do-i-need-to-show-massive-data-in-my-app)는 본인만 사용하는 개인 앱·연구·스크립트·거래를 개인 요금제 범위에 포함한다. 따라서 문의 초안에는 개인 스크립트에 관한 안내가 있다는 점을 반영한다.
 
 그러나 [Market Data Terms](https://massive.com/legal/market-data-terms-of-service) §2의 기본 표시용 제한, §5(c)의 데이터에 기반하거나 이를 참조한 연구 등을 포함하는 Derived Works의 제3자 공유 제한, §5(d)의 비표시 이용·투자 전략 등 파생물 생성 제한과 이 안내의 관계는 해당 CLI 용도에 대해 확정하지 못했다. §9는 약관 충돌 시 Market Data Terms의 우선을 규정한다. 개인 스크립트 안내만으로 참조 필드의 자동 분류나 원자료 없는 결과 공개까지 허용됐다고 판단하지 않는다.
 

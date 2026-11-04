@@ -10,7 +10,7 @@
 | 22:00 | 22:00:00.171 | 22:00:11.140 | 0.171~11.012초 | 9/9 성공 |
 | 22:15 | 22:15:00.168 | 22:15:11.293 | 0.168~11.169초 | 9/9 성공 |
 
-각 시점의 순서는 volume NAS, amount NAS, volume NYS, amount NYS, volume AMS, amount AMS, daily NAS AAPL, daily NYS TSM, daily AMS SPY다. 기존 [기록 도구](kis-observe.md)를 사용해 순차 조회했고 호출 사이에 1초 간격을 뒀다. 이는 공급자의 검증된 호출 한도가 아니다. 지연은 응답의 requestedAt과 목표 시각의 차이다. receivedAt은 응답 처리 시각이며 기록 프로세스 종료 시각과 다르다. 시각은 운영체제 시계 기준이며 별도 시계 오차를 검증하지 않았다.
+각 시점의 순서는 volume NAS, amount NAS, volume NYS, amount NYS, volume AMS, amount AMS, daily NAS AAPL, daily NYS TSM, daily AMS SPY다. 기존 [기록 도구](kis-observe.md)를 사용해 순차 조회했고 호출 사이에 1초 간격을 뒀다. 이는 공급자의 검증된 호출 한도가 아니다. 요청 시작 지연은 응답에 기록된 requestedAt이 목표 시각보다 얼마나 늦었는지를 나타낸다. receivedAt은 응답 처리 시각이며 기록 프로세스 종료 시각과 다르다. 시각은 운영체제 시계 기준이며 별도 시계 오차를 검증하지 않았다.
 
 27건 모두 100행이며 validation=unverified, dataSession=null을 유지한다. 여섯 순위의 각 응답은 rank 1~100, 해당 tvol 또는 tamt 내림차순, continuation=F였다. 행 수 100을 최대 페이지 크기나 최종 N으로 확정하지 않는다. 후속 페이지는 요청하지 않았다.
 
@@ -88,7 +88,7 @@
 | 2215 | daily NYS TSM | 2026-10-19T13:15:09.832Z | 2026-10-19T13:15:09.971Z | 2de2eda5fed3be276abe07e842f7954a51f59cb80bf4bf9af7058a2c6881f9d2 |
 | 2215 | daily AMS SPY | 2026-10-19T13:15:11.169Z | 2026-10-19T13:15:11.293Z | b1887f5a917fc04b6fafbb6c2a6cb66b3f0915059334bfecd303048a3d6aab1b |
 
-실행 소스 세 파일의 바이트는 준비 점검·실행 전후에 같았다. 문서 변경으로 Git 리비전은 달라질 수 있으므로 리비전만으로 실행 소스의 동일성을 판단하지 않았다. 관측 중 소스 리비전은 `97f90defcd98efa054431f01eb2966083cf36ef2`, `f66f7a0dbfa29e058e8b0fce2133709a1764c760`이다.
+준비 점검 때와 실행 전후에 확인한 소스 파일 세 개의 바이트가 일치했다. 문서 변경으로 Git 리비전은 달라질 수 있으므로 리비전만으로 실행 소스의 동일성을 판단하지 않았다. 관측 중 소스 리비전은 `97f90defcd98efa054431f01eb2966083cf36ef2`, `f66f7a0dbfa29e058e8b0fce2133709a1764c760`이다.
 
 | 실행 소스 | SHA-256 |
 | --- | --- |

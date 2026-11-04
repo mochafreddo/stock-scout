@@ -4,7 +4,7 @@
 
 ## 현재 검증 상태
 
-실제 여섯 순위의 두 실행은 종목별 결과와 집계를 남겼으며 모두 `analysis_insufficient`와 종료 코드 2로 끝났습니다. 이 기록은 여러 종목을 처리하고 분석 불충분을 알리는 실행 흐름의 근거입니다. [ADR 0010](adr/0010-incremental-security-type-validation.md), [실행 이력](security-type-history.md)
+실제 여섯 순위를 입력으로 사용한 두 실행은 종목별 결과와 집계를 남겼습니다. 두 실행 모두 `analysis_insufficient`와 종료 코드 2로 끝났습니다. 이 기록은 여러 종목을 처리하고 분석 불충분을 알리는 실행 흐름의 근거입니다. [ADR 0010](adr/0010-incremental-security-type-validation.md), [실행 이력](security-type-history.md)
 
 판단 품질은 별도 표본으로 확인했습니다. [#261의 첫 점검](security-type-evaluation-samples.md#261-첫-점검-결과)은 AAPL·BBD·BBDO의 결과와 제출 근거를 대조했습니다. #277은 제한된 표본과 종목별 조사 경과를 확인했습니다. 전체 시장의 유형 정확도와 추천 품질은 미검증입니다. [#277](https://github.com/mochafreddo/stock-scout/issues/277)
 
@@ -43,7 +43,7 @@ LLM에는 입력 종목에 한정한 `get_infos`, OpenAI 웹 검색과 읽기 �
 
 성공한 KIS 조회와 완료된 HTTPS `open_page`·`find_in_page`에만 코드가 실행별 출처 ID(`s1` 등)를 부여합니다. 같은 원본 출처를 다시 읽어도 ID를 유지합니다. `get_infos`는 각 성공한 조회의 출처 ID를 반환하고, `list_sources`는 등록된 ID와 원본 출처 목록만 반환하며 외부 요청을 하지 않습니다. 검색 결과 목록·인용 URL·열람 실패에는 웹 출처 ID를 부여하지 않습니다. 웹 검색의 실제 지원은 모델·계정 정책에 따라 달라지며 미지원 오류를 다른 서비스로 자동 우회하지 않습니다.
 
-묶음 하나를 정보 조회 한 번으로 세지 않습니다. 정보 조회 32회 한도는 시작하는 종목별 논리 조회에 적용합니다. `statistics.infoToolCalls`는 스키마에 맞는 도구 호출에서 요청한 종목 수이며 사전 거부·중간 실패 뒤 시작하지 않은 항목도 포함합니다. 실제 HTTP 전송 횟수와 구분하세요. 통합 경로의 KIS 집계는 기존처럼 인증·허용된 재조회까지 실제 전송마다 셉니다. 자세한 계약은 [보고서 완료 개선 설계](buy-candidate-completion-design.md)를 따릅니다.
+묶음 안에서 종목별 논리 조회를 시작할 때마다 한 번씩 셉니다. 정보 조회 32회 한도는 이 횟수에 적용합니다. `statistics.infoToolCalls`는 스키마에 맞는 도구 호출에서 요청한 종목 수이며 사전 거부·중간 실패 뒤 시작하지 않은 항목도 포함합니다. 실제 HTTP 전송 횟수와 구분하세요. 통합 경로의 KIS 집계는 기존처럼 인증·허용된 재조회까지 실제 전송마다 셉니다. 자세한 계약은 [보고서 완료 개선 설계](buy-candidate-completion-design.md)를 따릅니다.
 
 모델은 도구를 사용한 뒤 입력 종목마다 최종 유형·현재 적용 여부·판단 이유와 근거를 제출합니다. 각 근거에는 실제 읽은 출처의 `sourceId`와 짧은 `explanation`만 필수로 요구합니다. 코드는 등록된 출처 ID에서 원본 URL 또는 `kis:거래소:종목코드`를 복원해 종목별 근거의 `source`로 출력합니다. 별도 `e1` 근거 ID나 중간 조회 산출물은 만들지 않습니다. 미등록 출처 ID와 다른 증권의 KIS 출처 참조는 전체 실패입니다.
 
@@ -97,7 +97,7 @@ stdout에는 완성된 결과 JSON 한 줄만 출력합니다. `securities`에�
 
 `assessment` 실패의 `diagnostic.statistics`와 정상 결과의 `statistics`는 모델 흐름 전체의 통계입니다. `status`는 `completed` 또는 `failed`, `elapsedMs`는 준비·검증을 포함해 완료 또는 중단까지 단조 시계로 측정한 밀리초입니다. 두 단계 통계와 미시작 단계 출력은 제거했습니다. 다른 단계의 실패에는 모델 통계를 추가하지 않습니다. `coverage.inclusionRate`는 포함 수를 입력 수로 나눈 값입니다.
 
-`modelRequests`는 전송을 시도한 모델 HTTP 요청 수로 실패한 시도도 포함하며, 전송 전 한도로 차단한 요청은 포함하지 않습니다. `infoToolCalls`는 KIS 정보 도구 실행 횟수로 한도로 거부된 실행도 포함합니다. 인증·재발급 등 내부 HTTP 요청 수와는 다릅니다. `observedWebToolCalls`는 실행 중 관측한 서로 다른 웹 도구 호출 ID 수이며 같은 ID가 반복돼도 한 번만 셉니다. 공급자 내부 HTTP 요청 수는 아닙니다. 세 종류를 합산하지 않으며 ID 원문은 진단에 넣지 않습니다.
+`modelRequests`는 전송을 시도한 모델 HTTP 요청 수로 실패한 시도도 포함하며, 전송 전 한도로 차단한 요청은 포함하지 않습니다. `infoToolCalls`는 KIS 정보 도구에 요청한 종목 수를 누적한 값입니다. 한도에 걸려 조회를 시작하지 못한 종목도 포함합니다. 인증·재발급 등 내부 HTTP 요청 수와는 다릅니다. `observedWebToolCalls`는 실행 중 관측한 서로 다른 웹 도구 호출 ID 수이며 같은 ID가 반복돼도 한 번만 셉니다. 공급자 내부 HTTP 요청 수는 아닙니다. 세 종류를 합산하지 않으며 ID 원문은 진단에 넣지 않습니다.
 
 ### 유형 판단의 요청별 진단 읽기
 

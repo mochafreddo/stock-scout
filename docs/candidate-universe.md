@@ -44,9 +44,9 @@ node scripts/candidate-universe.ts --auth-dir /absolute/private/stock-scout --mo
 
 실패의 `diagnostic.elapsedMs`는 CLI 전체 경과 시간이며 `diagnostic.typeAssessment.statistics.elapsedMs`는 유형 판단에 걸린 시간입니다. 유형 판단을 시작하지 않았으면 상태는 `not_started`, 시간은 `null`, 호출 수는 0입니다. `typeAssessment`의 `cause`·`lastProgress`와 `requests`에서 관측한 중단 사유·마지막 진행 단계·모델 요청별 시간·HTTP 상태·완료 이벤트 수·종료 상태를 확인하세요. 요청 시간은 응답 헤더 수신에서 끝나지 않고 스트림 종료·중단까지 포함합니다. 확인하지 못한 상태는 `unknown` 또는 `null`로 남기며 요청 수를 완료 응답 수로 해석하지 마세요. 상세 의미와 한계는 [유형 판단 진단 안내](llm-security-probe.md#유형-판단의-요청별-진단-읽기)를 따릅니다.
 
-공통 마감은 작업 시작부터 600초와 판단 대상 개장 중 이른 시각입니다. 실제 전송 시도를 KIS·공식 일정 HTTP·일정 모델·유형 모델·SIWC 갱신으로 나누어 제한하고 기존 단계별 한도도 적용합니다. 합의값의 권위는 [ADR 0014](adr/0014-candidate-runtime-budget.md)입니다. 실패한 전송과 허용된 재조회도 세며 서버 내부 웹 요청 수를 사전에 보장하지 않습니다.
+작업을 시작한 지 600초가 되는 시각과 판단 대상 정규장이 열리는 시각 중 이른 때가 공통 마감입니다. 실제 전송 시도를 KIS·공식 일정 HTTP·일정 모델·유형 모델·SIWC 갱신으로 나누어 제한하고 기존 단계별 한도도 적용합니다. 합의값의 권위는 [ADR 0014](adr/0014-candidate-runtime-budget.md)입니다. 실패한 전송과 허용된 재조회도 세며 서버 내부 웹 요청 수를 사전에 보장하지 않습니다.
 
-실패의 `observation.summaries.stages`·`modelRequests`는 상세 기록이 잘려도 단계·모델 요청 요약을 보존합니다. 시작 시 `executionRemainingMs`·`stageRemainingMs`·`requestRemainingMs`를 함께 확인해 전체 마감과 공유 단계 제한을 구분하세요. 미관측 값은 `null`이며 단계·부모·자식의 중첩 시간을 합산하지 않습니다. 입력 규모와 요약의 자세한 의미는 [공통 요약 계약](rca-observability-design.md#2026-10-31-시간예산-요약-보강)을 따릅니다.
+실패의 `observation.summaries.stages`·`modelRequests`는 상세 기록이 잘려도 단계·모델 요청 요약을 보존합니다. 각 작업이 시작할 때의 `executionRemainingMs`·`stageRemainingMs`·`requestRemainingMs`를 함께 읽고, 전체 마감까지 남은 시간과 단계에서 공유하는 시간 제한을 구분하세요. 미관측 값은 `null`이며 단계·부모·자식의 중첩 시간을 합산하지 않습니다. 입력 규모와 요약의 자세한 의미는 [공통 요약 계약](rca-observability-design.md#2026-10-31-시간예산-요약-보강)을 따릅니다.
 
 ## 검증 범위와 한계
 
