@@ -4,7 +4,7 @@
 
 ## 실행
 
-Node.js 24 이상, 잠금 파일의 AI SDK 의존성, `/usr/bin/xmllint`, `PATH`에서 실행할 수 있는 `pdftotext`, 기존 Stock Scout 전용 SIWC 인증이 필요하다. 새 의존성이나 API 키는 추가하지 않는다. 소스 파서가 없으면 `XML_PARSER_UNAVAILABLE` 또는 `PDF_PARSER_UNAVAILABLE`로 종료한다. 인증은 [기존 연결 절차](llm-security-probe.md#공식-구독-인증-연결하기)를 따르며 Codex 인증이나 브라우저 쿠키로 대체하지 않는다.
+Node.js 24 이상, 잠금 파일의 AI SDK 의존성, `/usr/bin/xmllint`, `PATH`에서 실행할 수 있는 `pdftotext`, 기존 Stock Scout 전용 SIWC 인증이 필요하다. 새 의존성이나 API 키는 추가하지 않는다. 소스 파서가 없으면 `XML_PARSER_UNAVAILABLE` 또는 `PDF_PARSER_UNAVAILABLE`로 종료한다. 인증은 [기존 연결 절차](siwc-auth.md#공식-구독-인증-연결하기)를 따르며 Codex 인증이나 브라우저 쿠키로 대체하지 않는다.
 
 ```sh
 node scripts/market-calendar.ts --auth-dir /absolute/private/stock-scout --model gpt-6.1-sol
@@ -18,7 +18,7 @@ node scripts/market-calendar.ts --auth-dir /absolute/private/stock-scout --model
 
 실패 stderr JSON의 `observation`은 인증·공식 자료 수집·파싱·일정 모델·검증 작업의 부모 관계와 시간을 제공한다. HTTP 헤더 수신, 첫·마지막 SSE 이벤트, 완료·실패 이벤트 수, 자연 EOF·읽기 오류·취소를 구분하며 HTTP 200을 모델 완료로 표시하지 않는다. `firstFailure`는 최초 관측 사실이고 `finalError`는 기존 우선순위로 정한 공개 오류다. 확인하지 못한 시간·계수는 `null`, 취소 출처는 `unknown`으로 남는다. 관측 생성이나 해석에 문제가 있으면 `degraded`, 기록이 생략되면 `truncated`와 `omittedOperations`를 확인할 수 있다. 기존 성공 stdout·오류 코드·종료 코드는 유지한다.
 
-추가 관측에는 상세 작업·요청 최대 512개와 요약을 포함한 JSON 최대 256KiB의 방어 상한이 있다. 상세가 잘려도 `summaries.stages`·`summaries.modelRequests`에 단계·모델 요청 요약이 남는다. 시작 시 단계·요청 잔여 시간과 실제 모델 입력 바이트 수를 확인할 수 있으며 독립 일정 CLI의 전체 실행 잔여 시간은 `null`이다. 부모·자식 시간은 중첩되므로 단순 합산하지 않는다. 프롬프트·응답 원문·헤더 원문·인증값·개인 경로는 관측 기록에 포함하지 않는다. [공통 요약 계약](rca-observability-design.md#2026-10-31-시간예산-요약-보강)은 필드와 미관측 값의 의미를 설명한다. [2026-10-31 통합 실행](buy-candidates.md#두-번째-실행-실제-전체-통합)은 출력 이벤트가 있어도 완료 이벤트 없이 일정 모델의 단계 제한으로 중단될 수 있음을 보여준다. 공급자 내부 원인의 확인이나 모든 실행의 실패를 뜻하지 않는다.
+추가 관측에는 상세 작업·요청 최대 512개와 요약을 포함한 JSON 최대 256KiB의 방어 상한이 있다. 상세가 잘려도 `summaries.stages`·`summaries.modelRequests`에 단계·모델 요청 요약이 남는다. 시작 시 단계·요청 잔여 시간과 실제 모델 입력 바이트 수를 확인할 수 있으며 독립 일정 CLI의 전체 실행 잔여 시간은 `null`이다. 부모·자식 시간은 중첩되므로 단순 합산하지 않는다. 프롬프트·응답 원문·헤더 원문·인증값·개인 경로는 관측 기록에 포함하지 않는다. [공통 요약 계약](rca-observability-design.md#2026-10-31-시간예산-요약-보강)은 필드와 미관측 값의 의미를 설명한다. [2026-10-31 통합 실행](buy-candidate-history.md#두-번째-실행-실제-전체-통합)은 출력 이벤트가 있어도 완료 이벤트 없이 일정 모델의 단계 제한으로 중단될 수 있음을 보여준다. 공급자 내부 원인의 확인이나 모든 실행의 실패를 뜻하지 않는다.
 
 ## 자료와 수집 한도
 
@@ -62,4 +62,4 @@ NYSE의 명시적인 비대상 시장·데이터 상품 라벨은 NAS·NYS·AMS 
 
 공개 검증 경계는 CLI 인수·stdout·stderr·종료 코드와 외부 HTTP다. [회귀 검사](../tests/market-calendar.test.mjs)와 [시간 경계 검사](../tests/market-calendar-boundaries.test.mjs)는 외부 HTTP와 시각만 대체하며 실제 XML·PDF 파서를 실행한다. 모의 정상 결과는 실제 공지 전체의 해석 성공이나 제품 인수 완료가 아니다.
 
-2026-10-26 첫 실제 CLI의 NYSE DOM 추출 실패는 수정했고 다음 실행은 Nasdaq `ETA2022-79` 요청 중 `REQUEST_FAILED`로 끝났다. 당시 단건 진단은 HTTP 200이어서 원인은 미확정이며 저장 응답 재생은 미지원 본문으로 실패했다. 2026-10-28에는 실제 공지 113개 본문을 확보했지만 이 수집·크기 측정만으로 새 모델 경로의 정상 실행·판단 품질을 검증하지 않았다. 실제 검증의 현재 상태는 [검증 기록](market-calendar-validation.md)을 따른다. KIS·후보군 연결·매수 추천 인수는 이 도구의 검증으로 대체하지 않는다.
+공식 공지의 실제 수집과 일정 CLI 실행 결과, 앞선 실패는 [일정 검증 기록](market-calendar-validation.md)에 있습니다. 수집 범위 밖의 공지와 모델의 의미 판단 한계는 계속 적용됩니다.

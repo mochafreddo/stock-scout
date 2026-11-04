@@ -4,7 +4,7 @@
 
 ## 실행하기
 
-Node.js 24 이상, 설치된 잠금 파일의 의존성, `/usr/bin/xmllint`, `pdftotext`, 기존 KIS 자격 증명과 Stock Scout 전용 SIWC 인증이 필요합니다. 인증 준비는 [KIS 인증 안내](kis-auth.md)와 [SIWC 연결 안내](llm-security-probe.md#공식-구독-인증-연결하기)를 따르세요. 비밀 값을 명령 인수에 쓰지 마세요.
+Node.js 24 이상, 설치된 잠금 파일의 의존성, `/usr/bin/xmllint`, `pdftotext`, 기존 KIS 자격 증명과 Stock Scout 전용 SIWC 인증이 필요합니다. 인증 준비는 [KIS 인증 안내](kis-auth.md)와 [SIWC 연결 안내](siwc-auth.md#공식-구독-인증-연결하기)를 따르세요. 비밀 값을 명령 인수에 쓰지 마세요.
 
 ```sh
 node scripts/candidate-universe.ts --auth-dir /absolute/private/stock-scout --model gpt-6.1-sol
@@ -52,4 +52,4 @@ node scripts/candidate-universe.ts --auth-dir /absolute/private/stock-scout --mo
 
 공식 공지 수집 완전성과 모델의 의미적 신뢰도는 계속 `unverified`입니다. 제한된 현재 공지 밖의 변경과 모델 오판을 놓칠 수 있습니다. 후보군 출력은 한국 낮 전체의 데이터 가용성이나 토스증권 거래·예약·체결을 보장하지 않습니다. 주말·휴장일도 공식 일정과 필요한 일봉이 준비된 경우에만 다음 정규장을 판단 대상으로 삼습니다.
 
-공개 검증 경계는 CLI 인수·stdout·stderr·종료 코드와 외부 HTTP입니다. 외부 통신과 시간을 대체한 회귀 검사는 실제 공급자 의미·모델 정확도·실제 후보군 실행의 검증과 구분합니다. 선행 도구의 실연동 근거는 [KIS 검증 기록](kis-data-validation.md), [일정 검증 기록](market-calendar-validation.md), [유형 표본 평가](security-type-evaluation-samples.md)에 있습니다. 이 도구의 통합 실연동과 최종 매수 추천·제품 인수는 별도 검증 대상입니다.
+공개 검증 경계는 CLI 인수·stdout·stderr·종료 코드와 외부 HTTP입니다. 외부 통신과 시간을 대체한 회귀 검사는 실제 공급자 의미·모델 정확도·실제 후보군 실행의 검증과 구분합니다. 선행 도구의 실연동 근거는 [KIS 검증 기록](kis-data-validation.md), [일정 검증 기록](market-calendar-validation.md), [유형 표본 평가](security-type-evaluation-samples.md)에 있습니다. 보고서 CLI가 같은 후보군 수집 경로를 실제로 사용한 범위는 [첫 버전 인수 기록](first-version-acceptance.md#2026-11-03-한국-낮-통합-실행)에서 확인하세요. 그 실행과 독립 후보군 CLI의 실행 기록은 구분합니다.
