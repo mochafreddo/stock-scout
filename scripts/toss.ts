@@ -1,5 +1,6 @@
 import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
+import { orderbookResult, tradesResult } from './toss-market.ts';
 import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
 import { decimal, symbolPattern, validTime } from './toss-values.ts';
 
@@ -68,14 +69,23 @@ const endpoints: Record<string, string> = {
   prices: '/api/v1/prices',
   rankings: '/api/v1/rankings',
   tradable: '/api/v1/stocks/all',
+  orderbook: '/api/v1/orderbook',
+  trades: '/api/v1/trades',
 };
 const endpoint = Object.hasOwn(endpoints, command) ? endpoints[command] : endpoints.prices;
 const source = {
   provider: 'tossinvest',
   endpoint,
   freshness: 'unknown',
-  ...(endpoint === endpoints.prices
-    ? { session: 'unknown', snapshot: 'unknown', priceUnit: 'currency_per_security' }
+  ...(endpoint === endpoints.prices ||
+  endpoint === endpoints.orderbook ||
+  endpoint === endpoints.trades
+    ? {
+        session: 'unknown',
+        snapshot: 'unknown',
+        priceUnit: 'currency_per_security',
+        ...(endpoint !== endpoints.prices ? { volumeUnit: 'securities' } : {}),
+      }
     : {}),
 };
 try {
@@ -98,6 +108,13 @@ try {
             },
             { name: 'rankings', usage: 'node scripts/toss.ts rankings TYPE DURATION [COUNT]' },
             { name: 'stock', usage: 'node scripts/toss.ts stock SYMBOL [MARKET [ISIN]]' },
+            { name: 'orderbook', usage: 'node scripts/toss.ts orderbook SYMBOL' },
+            {
+              name: 'trades',
+              usage: 'node scripts/toss.ts trades SYMBOL [COUNT]',
+              defaultCount: 50,
+              maxCount: 50,
+            },
           ],
         },
       }),
@@ -109,6 +126,28 @@ try {
     return payload(await client.get(`${source.endpoint}?${query}`));
   }
   async function lookup() {
+    if (command === 'orderbook' || command === 'trades') {
+      const count = rest[0] ?? '50';
+      if (
+        !symbols ||
+        !symbolPattern.test(symbols) ||
+        (command === 'orderbook'
+          ? rest.length > 0
+          : rest.length > 1 || !/^(?:[1-9]|[1-4]\d|50)$/.test(count))
+      )
+        throw new TossError('INPUT_INVALID');
+      const query = new URLSearchParams({ symbol: symbols });
+      Object.assign(source, { symbol: symbols });
+      if (command === 'trades') {
+        query.set('count', count);
+        Object.assign(source, {
+          count: Number(count),
+          scope: 'provider_current_day_recent_trades',
+        });
+        return tradesResult(await read(query), Number(count));
+      }
+      return orderbookResult(await read(query));
+    }
     if (command === 'rankings') {
       const query = rankingQuery(symbols, rest);
       Object.assign(source, Object.fromEntries(query), { aggregation: 'US_market' });

@@ -1,6 +1,6 @@
 # 토스 미국 종목 조회 JSON CLI
 
-미국 시장 순위와 거래 가능 종목 목록을 조회하고, 토스 식별자로 종목 정보와 현재가를 확인하는 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
+미국 시장 순위와 거래 가능 종목 목록을 조회하고, 토스 식별자로 종목 정보·현재가·호가·최근 체결을 확인하는 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
 
 ## 명령 발견과 실행
 
@@ -35,6 +35,35 @@ node scripts/toss.ts tradable NYSE status=ACTIVE commonShare=false
 `tradable MARKET`은 NYSE·NASDAQ·AMEX·US_ETC 중 한 시장에서 토스증권으로 거래 가능한 종목을 조회합니다. `status`는 ACTIVE(기본값)·SCHEDULED·DELISTED 중 하나입니다. `securityType`은 아래 종목 정보 표의 아홉 유형 중 하나이며, `commonShare=true|false`로 보통주·우선주를 지정할 수 있습니다. 두 필터 모두 생략하면 해당 조건으로 제한하지 않습니다. `source`에는 적용한 시장과 필터가 담기며, 결과는 해당 조건의 목록입니다.
 
 [공식 OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)에서 두 API 모두 페이지와 커서를 제공하지 않습니다. 부분 순위에서 조회 범위를 넓히려면 예를 들어 `node scripts/toss.ts rankings MARKET_TRADING_VOLUME realtime 50`으로 처음부터 다시 조회하세요. 이 명령은 새 집계 결과를 받을 수 있으므로 앞선 순위에 이어 붙이지 마세요. 거래 가능 종목은 필터에 맞는 목록 전체를 한 번에 받습니다. `node scripts/toss.ts tradable NASDAQ cursor=X`와 같은 후속 페이지 요청은 HTTP 호출 전에 `INPUT_INVALID`로 종료합니다.
+
+## 호가와 최근 체결
+
+```sh
+node scripts/toss.ts orderbook AAPL
+node scripts/toss.ts trades AAPL
+node scripts/toss.ts trades BRK.B 10
+```
+
+`orderbook SYMBOL`은 매도·매수 호가와 잔량을 한 번 조회합니다. `trades SYMBOL [COUNT]`는 공급자가 제공하는 당일 최근 체결을 조회하며 개수는 1~50, 기본값은 50입니다. 두 명령 모두 공식 `symbol` 식별자 하나만 받으며, 쉼표로 여러 종목을 지정할 수 없습니다. `source.symbol`은 요청한 식별자입니다. 종목 정보나 유형을 먼저 조회하지 않습니다.
+
+2026-11-07 KST에 다시 확인한 [공식 REST OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)의 계약은 다음과 같습니다. `SymbolQuery`는 KRX 종목 코드와 미국 티커를 지원하며 기존 명령과 같은 식별자 문자 제한을 적용합니다. 호가·체결은 `MARKET_DATA` 호출 제한 그룹입니다.
+
+| 명령·필드 | 공식 계약과 CLI 처리 |
+| --- | --- |
+| `GET /api/v1/orderbook?symbol=...` | `result` 객체의 `currency`·`asks`·`bids`는 필수입니다. 정상 빈 호가는 두 배열이 비어 있는 객체로 반환합니다. 호가 단계 수·개수·페이지·기간 인수는 없으며 받은 단계를 자르지 않습니다. 공식 단계 수 상한은 미확인입니다. |
+| 호가 `asks[]`·`bids[]` | 각 항목의 `price`·`volume`은 필수이며 null이 아닌 최대 30자 소수 문자열입니다. 가격과 잔량을 그대로 반환합니다. 문서 설명은 매도 낮은 가격순·매수 높은 가격순이지만 매도 예시는 그 설명과 다릅니다. CLI는 순서를 재정렬하거나 호가를 합치지 않습니다. |
+| 호가 `timestamp` | 선택 필드이며 날짜·시각 문자열 또는 null입니다. 생략과 null을 그대로 구분하고, 값이 있으면 오프셋을 포함한 유효 시각인지 검사합니다. |
+| `GET /api/v1/trades?symbol=...&count=...` | `result` 배열을 반환합니다. `count`는 최대 반환 건수이며 적게 받거나 비어 있어도 정상입니다. 요청 개수보다 많은 응답은 형식 오류로 처리합니다. 페이지·커서·과거 날짜 인수는 없으며 추가 자동 조회를 하지 않습니다. |
+| 체결 `price`·`volume`·`timestamp`·`currency` | 네 필드 모두 필수이며 null·누락은 오류입니다. 가격·체결 수량은 최대 30자 소수 문자열, 체결 시각은 오프셋을 포함한 유효 시각입니다. 공급자 순서를 보존하고 값이 같은 체결도 삭제하지 않습니다. |
+| 통화와 단위 | `currency`는 공식 KRW·USD 및 비어 있지 않은 문자열인 확장 코드를 보존합니다. 가격은 표시 통화의 증권 단위 가격(`source.priceUnit`), `volume`은 증권 수량(`source.volumeUnit`)입니다. 호가 잔량과 개별 체결 수량을 누적 거래량으로 해석하지 마세요. |
+
+소수 문자열 `"0"`은 유효합니다. 가격·수량의 null·누락·숫자 자료형을 0으로 채우지 않습니다. 잘못된 호가 단계가 있으면 `omissions`에 `side`(asks 또는 bids)·0부터 시작하는 `index`·`reason="invalid_item"`을 남깁니다. 체결은 `index`와 같은 사유를 남깁니다. 유효 자료가 남으면 `partial`·종료 코드 2이며, 잘못된 항목만 남으면 `RESPONSE_INVALID`·종료 코드 1입니다. 호가의 필수 배열·통화가 잘못되면 전체 응답 오류입니다. 선택 시각만 잘못됐으면 시각을 제외하고 `omissions`에 `field="timestamp"`·`reason="invalid_timestamp"`를 표시한 부분 결과로 유효 호가를 보존합니다.
+
+호가 결과의 `data`에는 통화·선택 시각·두 배열을 담은 객체 하나가 있고, 체결 결과의 `data`에는 체결 항목들이 있습니다. 예를 들어 합성 호가 결과는 `data=[{"currency":"USD","timestamp":null,"asks":[{"price":"185.7500","volume":"0.1250"}],"bids":[]}]`입니다. 합성 체결 항목은 `{"price":"185.7000","volume":"0.0125","timestamp":"2026-11-06T10:30:42.100-05:00","currency":"USD"}`입니다.
+
+`source`는 공급자·엔드포인트·요청 심볼·단위와 미확인 최신성·세션·동일 시점 스냅샷을 표시합니다. 체결에는 요청 `count`와 `scope="provider_current_day_recent_trades"`도 있습니다. 당일의 날짜 경계·시간대, 세션별 포함 범위·지연·실시간성은 이 REST 스키마만으로 확인되지 않습니다. 호가의 생략되거나 null인 시각을 `retrievedAt`으로 채우지 않으며, 체결 시각이 없으면 해당 항목을 정상 자료로 사용하지 않습니다.
+
+`node scripts/toss.ts trades AAPL cursor=X`나 `node scripts/toss.ts orderbook AAPL 10`은 HTTP 전에 `INPUT_INVALID`로 끝납니다. 공급자의 미지원 응답은 `UNSUPPORTED`, 권한·인증·호출 제한은 공통 오류 코드로 구분하세요. 체결 조회는 계좌의 개인 거래내역이 아닙니다. REST 한 번의 조회를 실시간 구독이나 전체 당일 체결 이력으로 해석하지 마세요. 주문 변경·계좌 조회·내장 판단 모델은 이 두 명령에 포함하지 않습니다.
 
 ## 종목 식별과 선택
 
@@ -132,12 +161,12 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 ## 합성 검사와 후속 확장
 
 ```sh
-node --test tests/toss.test.mjs tests/toss-stock.test.mjs tests/toss-discovery.test.mjs
+node --test tests/toss.test.mjs tests/toss-stock.test.mjs tests/toss-discovery.test.mjs tests/toss-market.test.mjs
 npm run typecheck
 ```
 
 공개 검증 경계는 실제 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP입니다. `tests/toss-cli-helper.mjs`의 `fixture`와 `runCli`는 보호된 합성 설정 및 하위 프로세스를 만들며, `tests/toss-http-mock.mjs`는 네트워크·시계만 대체합니다. 후속 티켓은 이 도우미에 HTTP 시나리오를 추가하고 명령별 소비자 출력을 검사하세요. 서로 독립적인 인증·시계 도우미를 다시 만들지 마세요. 실제 프로세스 경합 검사는 실제 시계를 사용합니다.
 
-`scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
+`scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을, `scripts/toss-market.ts`가 호가·체결 응답 검증을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
 
 이번 검증은 합성 자료에 한정합니다. 실제 토스 조회, 실제 자격 증명 설정, 실제 자료 전달 허용, 공급자의 조회 전용 권한, Codex·Dot 각각의 연결과 전체 전환 완료는 별도 관문입니다. 기존 KIS·내장 모델 테스트는 기존 경로의 회귀 확인이며 새 토스 호환성의 근거가 아닙니다.

@@ -1,3 +1,5 @@
+import { TossError } from './toss-client.ts';
+
 export const symbolPattern = /^[A-Za-z0-9.-]+$/;
 
 export function validTime(value: unknown) {
@@ -20,4 +22,20 @@ export function validTime(value: unknown) {
 }
 export function decimal(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 30 && /^-?\d+(?:\.\d+)?$/.test(value);
+}
+
+export function record(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function items<T>(rows: unknown[], parse: (row: unknown) => T | undefined) {
+  const data: T[] = [];
+  const omissions: { index?: number; reason: string }[] = [];
+  for (const [index, row] of rows.entries()) {
+    const item = parse(row);
+    if (item === undefined) omissions.push({ index, reason: 'invalid_item' });
+    else data.push(item);
+  }
+  if (rows.length && !data.length) throw new TossError('RESPONSE_INVALID');
+  return { data, omissions };
 }

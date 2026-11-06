@@ -1,6 +1,6 @@
 import { TossError } from './toss-client.ts';
 import { isinPattern, securityTypes } from './toss-stock.ts';
-import { decimal, symbolPattern, validTime } from './toss-values.ts';
+import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
 
 export function rankingQuery(type: string | undefined, args: string[]) {
   const [duration, count = '20'] = args;
@@ -16,9 +16,6 @@ export function rankingQuery(type: string | undefined, args: string[]) {
   )
     throw new TossError('INPUT_INVALID');
   return new URLSearchParams({ type, duration, count, marketCountry: 'US' });
-}
-function record(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 function rankingItem(row: unknown) {
   if (
@@ -51,17 +48,6 @@ function rankingItem(row: unknown) {
     tradingVolume: row.tradingVolume,
     tradingAmount: row.tradingAmount,
   };
-}
-function items<T>(rows: unknown[], parse: (row: unknown) => T | undefined) {
-  const data: T[] = [];
-  const omissions: { index?: number; reason: string }[] = [];
-  for (const [index, row] of rows.entries()) {
-    const item = parse(row);
-    if (item === undefined) omissions.push({ index, reason: 'invalid_item' });
-    else data.push(item);
-  }
-  if (rows.length && !data.length) throw new TossError('RESPONSE_INVALID');
-  return { data, omissions };
 }
 export function rankingResult(value: unknown, count: number) {
   if (!record(value) || !Array.isArray(value.rankings) || value.rankings.length > count)
