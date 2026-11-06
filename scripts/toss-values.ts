@@ -1,3 +1,5 @@
+export const symbolPattern = /^[A-Za-z0-9.-]+$/;
+
 export function validTime(value: unknown) {
   if (
     typeof value !== 'string' ||

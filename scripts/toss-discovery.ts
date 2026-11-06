@@ -1,6 +1,6 @@
 import { TossError } from './toss-client.ts';
 import { isinPattern, securityTypes } from './toss-stock.ts';
-import { decimal, validTime } from './toss-values.ts';
+import { decimal, symbolPattern, validTime } from './toss-values.ts';
 
 export function rankingQuery(type: string | undefined, args: string[]) {
   const [duration, count = '20'] = args;
@@ -28,7 +28,7 @@ function rankingItem(row: unknown) {
     row.rank < 1 ||
     row.rank > 100 ||
     typeof row.symbol !== 'string' ||
-    !/^[A-Za-z0-9.-]+$/.test(row.symbol) ||
+    !symbolPattern.test(row.symbol) ||
     typeof row.currency !== 'string' ||
     !/^[A-Z]{3}$/.test(row.currency) ||
     !decimal(row.tradingVolume) ||
@@ -67,10 +67,7 @@ export function rankingResult(value: unknown, count: number) {
   if (!record(value) || !Array.isArray(value.rankings) || value.rankings.length > count)
     throw new TossError('RESPONSE_INVALID');
   const { rankedAt, rankings } = value;
-  if (
-    rankedAt !== undefined &&
-    (rankedAt === null ? rankings.length > 0 : !rankings.length || !validTime(rankedAt))
-  )
+  if (rankedAt !== undefined && (rankings.length ? !validTime(rankedAt) : rankedAt !== null))
     throw new TossError('RESPONSE_INVALID');
   const result = items(rankings, rankingItem);
   if (result.data.some((row, index) => index > 0 && row.rank < result.data[index - 1].rank))
@@ -108,7 +105,7 @@ export function tradableResult(value: unknown, query: URLSearchParams) {
     const { symbol, name, securityType, isCommonShare, isinCode } = row;
     if (
       typeof symbol !== 'string' ||
-      !/^[A-Za-z0-9.-]+$/.test(symbol) ||
+      !symbolPattern.test(symbol) ||
       typeof name !== 'string' ||
       !name.trim() ||
       typeof securityType !== 'string' ||

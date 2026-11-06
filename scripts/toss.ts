@@ -1,7 +1,7 @@
 import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
-import { decimal, validTime } from './toss-values.ts';
+import { decimal, symbolPattern, validTime } from './toss-values.ts';
 
 function containsSecret(json: string, secrets?: Set<string>) {
   for (const secret of secrets ?? [])
@@ -131,7 +131,7 @@ try {
           (rest[0] !== undefined && !marketPattern.test(rest[0])) ||
           (rest[1] !== undefined && rest[1] !== '-' && !isinPattern.test(rest[1]))) ||
       symbols.split(',').length > 200 ||
-      !symbols.split(',').every((symbol) => /^[A-Za-z0-9.-]+$/.test(symbol))
+      !symbols.split(',').every((symbol) => symbolPattern.test(symbol))
     )
       throw new TossError('INPUT_INVALID');
 
