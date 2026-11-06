@@ -1,6 +1,6 @@
 # 종목 유형 평가 표본과 독립 정답
 
-2026-10-22 [#260](https://github.com/mochafreddo/stock-scout/issues/260)의 표본 조사 기록이다. 기준은 [#250](https://github.com/mochafreddo/stock-scout/issues/250), [ADR 0007](adr/0007-llm-security-type-judgment.md)과 [실제 평가 재개 설계](security-type-live-evaluation-design.md)다. 모델 출력 없이 공식 자료로 정답을 확인했다. 실제 모델 평가는 실행하지 않았다.
+2026-10-22 [#260](https://github.com/mochafreddo/stock-scout/issues/260)의 표본 조사 기록이다. 기준은 [#250](https://github.com/mochafreddo/stock-scout/issues/250), [ADR 0007](adr/0007-llm-security-type-judgment.md)이며, 현재 평가 정책은 [ADR 0010](adr/0010-incremental-security-type-validation.md)다. 모델 출력 없이 공식 자료로 정답을 확인했다. 실제 모델 평가는 실행하지 않았다.
 
 ## 현재 상태
 

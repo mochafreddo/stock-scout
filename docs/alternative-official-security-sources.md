@@ -1,6 +1,6 @@
 # 대체 공식 종목 유형 출처 조사
 
-2026-10-19 [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 [추가 설계 합의](security-type-probe-design.md#수집-경로-채택-보류-이후의-설계-인터뷰)에 따라 고정한 세 경로를 한 차례 평가했다. 비용이나 로그인 없이 반복해서 자동으로 수집할 수 있는 근거를 먼저 확인했다. 조건을 충족한 경로에서만 표본 자료를 받기로 했다. [기존 조사](official-security-type-validation.md)와 [ADR 0005](adr/0005-official-security-type-sources.md)의 증권 연결·기초 권리·현재성 조건을 유지한다.
+2026-10-19 [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 추가 설계 합의에 따라 고정한 세 경로를 한 차례 평가했다. 비용이나 로그인 없이 반복해서 자동으로 수집할 수 있는 근거를 먼저 확인했다. 조건을 충족한 경로에서만 표본 자료를 받기로 했다. [기존 조사](official-security-type-validation.md)와 [ADR 0005](adr/0005-official-security-type-sources.md)의 증권 연결·기초 권리·현재성 조건을 유지한다.
 
 기존 보고서와 공식 안내를 바탕으로 거래소 목록인 Cboe를 우선 경로로, ADR 권리 보완 가능성이 있는 예탁기관 BNY·Citi를 나머지 두 경로로 고정했다. 아래 순서로 접근·자동 이용 조건을 확인했으며, 실패한 경로를 다른 후보로 교체하지 않았다.
 
