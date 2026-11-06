@@ -1,6 +1,6 @@
-# 토스 종목 정보와 현재가 JSON CLI
+# 토스 미국 종목 조회 JSON CLI
 
-토스 식별자로 종목 정보와 현재가를 개별 조회하는 새 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
+미국 시장 순위와 거래 가능 종목 목록을 조회하고, 토스 식별자로 종목 정보와 현재가를 확인하는 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
 
 ## 명령 발견과 실행
 
@@ -16,6 +16,25 @@ node scripts/toss.ts prices AAPL,MSFT
 `--help`는 인증 없이 명령 목록을 JSON으로 출력합니다. `prices`는 공식 API의 `symbols` 식별자 1~200개를 쉼표로 받습니다. 각 식별자는 영문 대소문자·숫자·`.`·`-`만 허용하며 빈 항목과 추가 인수는 거부합니다. 티커 검색·시장 추정·KIS 식별자 변환은 수행하지 않습니다. 공급자가 확인한 식별자를 사용하세요. 미국 장중에도 실행할 수 있으며 증권 유형 관문을 두지 않습니다.
 
 실제 토스 조회·인증 설정·자료의 외부 AI 전달은 아직 검증하거나 승인받지 않았습니다. [#284의 허용 범위 조사](https://github.com/mochafreddo/stock-scout/issues/284)에서 남은 조건을 확인하고 별도 승인을 받은 뒤에만 실제 자격 증명을 준비하세요. 원자료뿐 아니라 요약·가공 결과의 전달에도 같은 조건이 적용됩니다. 이 문서의 예시는 합성 자료입니다.
+
+## 미국 시장 순위와 거래 가능 종목
+
+```sh
+node scripts/toss.ts rankings MARKET_TRADING_VOLUME realtime
+node scripts/toss.ts rankings MARKET_TRADING_AMOUNT 1d 50
+node scripts/toss.ts rankings TOP_GAINERS 1w
+node scripts/toss.ts rankings TOP_LOSERS 1mo
+node scripts/toss.ts tradable NASDAQ securityType=ETF
+node scripts/toss.ts tradable NYSE status=ACTIVE commonShare=false
+```
+
+`rankings TYPE DURATION [COUNT]`는 미국 시장 전체를 집계한 순위를 한 번 조회합니다. 거래량·거래대금은 시장 체결 기준이며, 상승·하락은 기간 등락률 기준입니다. 기간은 `realtime`, `1d`, `1w`, `1mo`, `3mo`, `6mo`, `1y`이고, 상승·하락에는 `realtime`을 쓸 수 없습니다. 개수는 1~100이며 CLI 기본값은 20입니다. 공급자의 순서와 `rank`를 그대로 읽으세요. `source.rankedAt`은 집계 시각이고 `retrievedAt`은 CLI 조회 시각입니다. `price.changeRate`는 소수 비율입니다. 상승·하락에서는 기간 시작 가격, 거래량·거래대금에서는 전일 기준가와 비교합니다.
+
+집계 자료가 없어 순위가 비었으면 정상 빈 결과입니다. 예를 들어 20개 요청에 17개를 받으면 종료 코드 2와 `fewer_than_requested`를 반환합니다. 공급자가 시세를 얻지 못해 제외한 종목이 있을 수 있습니다. `invalid_item`은 받은 행의 필수 값이 잘못됐다는 뜻이며, 사용할 수 있는 행이 하나도 남지 않으면 종료 코드 1입니다.
+
+`tradable MARKET`은 NYSE·NASDAQ·AMEX·US_ETC 중 한 시장에서 토스증권으로 거래 가능한 종목을 조회합니다. `status`는 ACTIVE(기본값)·SCHEDULED·DELISTED 중 하나입니다. `securityType`은 아래 종목 정보 표의 아홉 유형 중 하나이며, `commonShare=true|false`로 보통주·우선주를 지정할 수 있습니다. 두 필터 모두 생략하면 해당 조건으로 제한하지 않습니다. `source`에는 적용한 시장과 필터가 담기며, 결과는 해당 조건의 목록입니다.
+
+[공식 OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)에서 두 API 모두 페이지와 커서를 제공하지 않습니다. 부분 순위에서 조회 범위를 넓히려면 예를 들어 `node scripts/toss.ts rankings MARKET_TRADING_VOLUME realtime 50`으로 처음부터 다시 조회하세요. 이 명령은 새 집계 결과를 받을 수 있으므로 앞선 순위에 이어 붙이지 마세요. 거래 가능 종목은 필터에 맞는 목록 전체를 한 번에 받습니다. `node scripts/toss.ts tradable NASDAQ cursor=X`와 같은 후속 페이지 요청은 HTTP 호출 전에 `INPUT_INVALID`로 종료합니다.
 
 ## 종목 식별과 선택
 
@@ -95,7 +114,7 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 | 상태·종료 코드 | 의미 |
 | --- | --- |
 | `success`·0 | 유효한 응답입니다. `prices`의 정상 빈 배열은 성공, `stock`의 정상 빈 배열은 `NOT_FOUND`입니다. |
-| `partial`·2 | 유효 자료가 남지만 잘못된 행, 요청 종목 누락 또는 종목 유형 미확인이 있습니다. `omissions`에 원래 행의 0부터 시작하는 `index` 또는 요청 `symbol`과 `reason`을 반환합니다. |
+| `partial`·2 | 유효 자료가 남지만 잘못된 행, 요청 종목 누락, 요청보다 짧은 순위 또는 종목 유형 미확인이 있습니다. `omissions`의 `reason`을 확인하세요. 특정 행이나 심볼에 해당하면 0부터 시작하는 `index` 또는 요청 `symbol`도 반환합니다. |
 | `error`·1 | 입력·조회 실패 또는 유효 행이 없는 잘못된 응답입니다. `data`는 빈 배열이며 `error.code`로 원인을 구분합니다. |
 
 오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다.
@@ -113,7 +132,7 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 ## 합성 검사와 후속 확장
 
 ```sh
-node --test tests/toss.test.mjs tests/toss-stock.test.mjs
+node --test tests/toss.test.mjs tests/toss-stock.test.mjs tests/toss-discovery.test.mjs
 npm run typecheck
 ```
 

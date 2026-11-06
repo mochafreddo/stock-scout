@@ -1,6 +1,6 @@
 import { TossError } from './toss-client.ts';
 
-const securityTypes = new Set([
+export const securityTypes = new Set([
   'STOCK',
   'FOREIGN_STOCK',
   'DEPOSITARY_RECEIPT',
