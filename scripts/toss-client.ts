@@ -107,21 +107,17 @@ function failure(response: Response, body: unknown) {
         response.headers.get('referenceId') ??
         response.headers.get('x-amz-cf-id'));
   const requestId = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;
-  const code =
-    response.status === 403
-      ? 'PERMISSION_DENIED'
-      : response.status === 401
-        ? 'AUTH_FAILED'
-        : providerCode?.startsWith('unsupported-') ||
-            (response.status === 404 && providerCode === 'edge-blocked')
-          ? 'UNSUPPORTED'
-          : response.status === 400
-            ? 'INPUT_INVALID'
-            : response.status === 404
-              ? 'NOT_FOUND'
-              : response.status === 429
-                ? 'RATE_LIMIT'
-                : 'UPSTREAM_ERROR';
+  let code = 'UPSTREAM_ERROR';
+  if (response.status === 403) code = 'PERMISSION_DENIED';
+  else if (response.status === 401) code = 'AUTH_FAILED';
+  else if (
+    providerCode?.startsWith('unsupported-') ||
+    (response.status === 404 && providerCode === 'edge-blocked')
+  )
+    code = 'UNSUPPORTED';
+  else if (response.status === 400) code = 'INPUT_INVALID';
+  else if (response.status === 404) code = 'NOT_FOUND';
+  else if (response.status === 429) code = 'RATE_LIMIT';
   return new TossError(code, providerCode, requestId);
 }
 
@@ -177,18 +173,17 @@ export class TossClient {
   private async wait(milliseconds: number) {
     this.check();
     if (milliseconds >= this.remaining()) throw new TossError('TIMEOUT');
-    if (milliseconds > 0)
-      await new Promise<void>((resolveWait, reject) => {
-        const abort = () => {
-          clearTimeout(timer);
-          reject(new TossError('INTERRUPTED'));
-        };
-        const timer = setTimeout(() => {
-          this.signal.removeEventListener('abort', abort);
-          resolveWait();
-        }, milliseconds);
-        this.signal.addEventListener('abort', abort, { once: true });
-      });
+    await new Promise<void>((resolveWait, reject) => {
+      const abort = () => {
+        clearTimeout(timer);
+        reject(new TossError('INTERRUPTED'));
+      };
+      const timer = setTimeout(() => {
+        this.signal.removeEventListener('abort', abort);
+        resolveWait();
+      }, milliseconds);
+      this.signal.addEventListener('abort', abort, { once: true });
+    });
     this.check();
   }
   private load(): State {
@@ -293,10 +288,7 @@ export class TossClient {
           requestWall = Date.now();
           requestStarted = performance.now();
           requestLimit = Math.max(1, Math.floor(Math.min(15000, this.remaining())));
-          timer = setTimeout(() => {
-            controller.abort();
-            rejectDeadline(new TossError('TIMEOUT'));
-          }, requestLimit);
+          timer = setTimeout(() => controller.abort(), requestLimit);
           flight = fetch(`https://openapi.tossinvest.com${path}`, {
             method: token ? 'GET' : 'POST',
             redirect: 'error',
@@ -442,17 +434,12 @@ export class TossClient {
     let token = await this.token();
     let recovered = false,
       retried = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (;;) {
       let result: { response: Response; body: unknown };
       try {
         result = await this.transmit(path, token);
       } catch (error) {
-        if (
-          error instanceof TossError &&
-          error.code === 'NETWORK_ERROR' &&
-          !retried &&
-          attempt < 2
-        ) {
+        if (error instanceof TossError && error.code === 'NETWORK_ERROR' && !retried) {
           retried = true;
           continue;
         }
@@ -461,18 +448,12 @@ export class TossClient {
       const { response, body } = result;
       if (response.ok) return body;
       const error = failure(response, body);
-      if (
-        response.status === 401 &&
-        error.providerCode === 'expired-token' &&
-        !recovered &&
-        attempt < 2
-      ) {
+      if (response.status === 401 && error.providerCode === 'expired-token' && !recovered) {
         recovered = true;
         token = await this.token(token);
-      } else if ((response.status === 429 || response.status >= 500) && !retried && attempt < 2) {
+      } else if ((response.status === 429 || response.status >= 500) && !retried) {
         retried = true;
       } else throw error;
     }
-    throw new TossError('UPSTREAM_ERROR');
   }
 }

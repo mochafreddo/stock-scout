@@ -1,17 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { fixture, price, runCli } from './toss-cli-helper.mjs';
+import { fixture, price, readRequests, runCli } from './toss-cli-helper.mjs';
 
 test('Toss CLI preserves decimal prices and data time through real arguments and HTTP', async () => {
   const f = fixture();
@@ -163,10 +156,7 @@ test('Toss CLI shares token issuance and one-second HTTP spacing across independ
       runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' }),
     ]);
     for (const r of results) assert.equal(r.status, 0, r.stdout + r.stderr);
-    const requests = readFileSync(f.trace, 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
+    const requests = readRequests(f.trace);
     assert.equal(requests.filter((x) => x.method === 'POST').length, 1);
     assert.equal(requests.filter((x) => x.method === 'GET').length, 2);
     for (let i = 1; i < requests.length; i++)
@@ -433,10 +423,7 @@ test('Toss CLI applies a peer Retry-After while another process is waiting to se
     writeFileSync(gate, '', { mode: 0o600 });
     const results = await Promise.all([first, peer]);
     for (const r of results) assert.equal(r.status, 0, r.stdout + r.stderr);
-    const requests = readFileSync(f.trace, 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
+    const requests = readRequests(f.trace);
     for (const r of requests.slice(2))
       assert.ok(r.at >= releasedAt + 3000, JSON.stringify(requests));
   } finally {

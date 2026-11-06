@@ -14,6 +14,13 @@ export function fixture() {
   writeFileSync(trace, '', { mode: 0o600 });
   return { directory, trace, close: () => rmSync(directory, { recursive: true, force: true }) };
 }
+export function readRequests(trace) {
+  return readFileSync(trace, 'utf8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
 export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
   const child = spawn(
     process.execPath,
@@ -55,11 +62,7 @@ export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
         signal,
         stdout,
         stderr,
-        requests: readFileSync(f.trace, 'utf8')
-          .trim()
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line)),
+        requests: readRequests(f.trace),
       });
     });
   });
