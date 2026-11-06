@@ -12,6 +12,7 @@ const securityTypes = new Set([
   'STOCK_WARRANTS',
 ]);
 export const isinPattern = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
+export const marketPattern = /^[A-Z][A-Z0-9_]*$/;
 type StockChoice = { symbol: string; name: string | null; market: string; isinCode: string | null };
 export class AmbiguousStock extends TossError {
   readonly choices: StockChoice[];
@@ -25,7 +26,7 @@ function stockChoice(row: Record<string, unknown>, symbol: string): StockChoice 
   if (
     row.symbol !== symbol ||
     typeof row.market !== 'string' ||
-    !/^[A-Z][A-Z0-9_]*$/.test(row.market) ||
+    !marketPattern.test(row.market) ||
     typeof row.isinCode !== 'string' ||
     (row.isinCode !== '' && !isinPattern.test(row.isinCode))
   )

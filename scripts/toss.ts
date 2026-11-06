@@ -1,5 +1,11 @@
 import { TossClient, TossError } from './toss-client.ts';
-import { AmbiguousStock, isinPattern, stockResult } from './toss-stock.ts';
+import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
+
+function containsSecret(json: string, secrets?: Set<string>) {
+  for (const secret of secrets ?? [])
+    if (json.includes(JSON.stringify(secret).slice(1, -1))) return true;
+  return false;
+}
 
 function validTime(value: unknown) {
   if (
@@ -108,7 +114,7 @@ try {
     (command === 'prices'
       ? rest.length > 0
       : rest.length > 2 ||
-        (rest[0] !== undefined && !/^[A-Z][A-Z0-9_]*$/.test(rest[0])) ||
+        (rest[0] !== undefined && !marketPattern.test(rest[0])) ||
         (rest[1] !== undefined && rest[1] !== '-' && !isinPattern.test(rest[1]))) ||
     symbols.split(',').length > 200 ||
     !symbols.split(',').every((symbol) => /^[A-Za-z0-9.-]+$/.test(symbol))
@@ -139,8 +145,7 @@ try {
     source,
     retrievedAt: new Date().toISOString(),
   });
-  if ([...client.secrets].some((secret) => output.includes(JSON.stringify(secret).slice(1, -1))))
-    throw new TossError('SENSITIVE_OUTPUT');
+  if (containsSecret(output, client.secrets)) throw new TossError('SENSITIVE_OUTPUT');
   console.log(output);
   process.exitCode = status === 'partial' ? 2 : 0;
 } catch (error) {
@@ -152,11 +157,7 @@ try {
       ? { providerCode: error.providerCode, requestId: error.requestId }
       : {}),
   };
-  if (
-    [...(client?.secrets ?? [])].some((secret) =>
-      JSON.stringify(detail).includes(JSON.stringify(secret).slice(1, -1)),
-    )
-  )
+  if (containsSecret(JSON.stringify(detail), client?.secrets))
     detail = { code: 'SENSITIVE_OUTPUT' };
   console.log(
     JSON.stringify({
