@@ -1,0 +1,492 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { fixture, price, runCli } from './toss-cli-helper.mjs';
+
+test('Toss CLI preserves decimal prices and data time through real arguments and HTTP', async () => {
+  const f = fixture();
+  try {
+    const r = await runCli(f);
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.version, 1);
+    assert.equal(out.status, 'success');
+    assert.deepEqual(out.data, [price]);
+    assert.equal(out.source.provider, 'tossinvest');
+    assert.equal(out.source.endpoint, '/api/v1/prices');
+    assert.equal(out.source.freshness, 'unknown');
+    assert.equal(r.requests.length, 2);
+    assert.equal(r.requests[1].query, '?symbols=AAPL');
+    assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI rejects invalid arguments before authentication and advertises commands as JSON', async () => {
+  const f = fixture();
+  try {
+    for (const args of [
+      [],
+      ['prices'],
+      ['prices', 'AAPL,,MSFT'],
+      ['prices', 'AAPL/A'],
+      ['prices', 'AAPL', 'extra'],
+      ['prices', Array.from({ length: 201 }, (_, i) => `A${i}`).join(',')],
+      ['orders', 'AAPL'],
+    ]) {
+      const r = await runCli(f, [], args);
+      assert.equal(r.status, 1);
+      assert.equal(JSON.parse(r.stdout).error.code, 'INPUT_INVALID');
+      assert.equal(r.requests.length, 0);
+    }
+    const help = await runCli(f, [], ['--help']);
+    assert.equal(help.status, 0);
+    assert.equal(JSON.parse(help.stdout).data.commands[0].name, 'prices');
+    assert.equal(help.requests.length, 0);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI distinguishes empty, partial and malformed prices without losing null, zero or missing time', async () => {
+  const f = fixture();
+  try {
+    for (const [rows, expectedStatus, expectedCode, args] of [
+      [[], 0, 'success'],
+      [[{ ...price, lastPrice: '0', timestamp: null }], 0, 'success'],
+      [[{ symbol: 'AAPL', lastPrice: '1.00', currency: 'EUR' }], 0, 'success'],
+      [
+        [price, { symbol: 'MSFT', lastPrice: 4, currency: 'USD' }],
+        2,
+        'partial',
+        ['prices', 'AAPL,MSFT'],
+      ],
+      [[price], 2, 'partial', ['prices', 'AAPL,MSFT']],
+      [[{ ...price, lastPrice: null }], 1, 'error'],
+      [[{ ...price, timestamp: '2026-02-30T10:00:00Z' }], 1, 'error'],
+      [[{ ...price, timestamp: '2026-11-06' }], 1, 'error'],
+      [[{ ...price, timestamp: '2026-11-06T24:00:00Z' }], 1, 'error'],
+      [[{ ...price, symbol: 'MSFT' }], 1, 'error'],
+      [[price, price], 1, 'error'],
+    ]) {
+      const r = await runCli(f, [{ body: { result: rows } }], args);
+      assert.equal(r.status, expectedStatus, r.stdout);
+      const out = JSON.parse(r.stdout);
+      assert.equal(out.status, expectedCode);
+      if (expectedCode === 'error') assert.equal(out.error.code, 'RESPONSE_INVALID');
+      if (expectedCode === 'partial') {
+        assert.deepEqual(out.data, [price]);
+        assert.ok(out.omissions.length);
+      }
+      if (expectedCode === 'success') assert.deepEqual(out.data, rows);
+    }
+    for (const body of [{}, { result: null }, { result: [], error: {} }]) {
+      const r = await runCli(f, [{ body }]);
+      assert.equal(JSON.parse(r.stdout).error.code, 'RESPONSE_INVALID');
+    }
+    const leak = await runCli(
+      f,
+      [{ body: { result: [{ ...price, symbol: 'synthetic-secret' }] } }],
+      ['prices', 'synthetic-secret'],
+    );
+    assert.doesNotMatch(leak.stdout + leak.stderr, /synthetic-secret/);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI classifies HTTP failures and only retries transient reads once', async () => {
+  for (const [status, code, expected] of [
+    [400, 'invalid-request', 'INPUT_INVALID'],
+    [401, 'invalid-token', 'AUTH_FAILED'],
+    [403, 'ip-not-allowed', 'PERMISSION_DENIED'],
+    [404, 'stock-not-found', 'NOT_FOUND'],
+    [404, 'edge-blocked', 'UNSUPPORTED'],
+    [422, 'unsupported-market', 'UNSUPPORTED'],
+    [429, 'rate-limit-exceeded', 'RATE_LIMIT'],
+    [503, 'internal-error', 'UPSTREAM_ERROR'],
+  ]) {
+    const f = fixture();
+    try {
+      const body = {
+        error: {
+          code,
+          requestId: 'SAFE_REQUEST_1',
+          message: 'synthetic-secret synthetic-token',
+          data: { secret: 'synthetic-secret' },
+        },
+      };
+      const r = await runCli(f, [
+        { status, body },
+        { status, body },
+      ]);
+      assert.equal(r.status, 1, r.stdout);
+      const out = JSON.parse(r.stdout);
+      assert.equal(out.error.code, expected);
+      assert.equal(out.error.providerCode, code);
+      assert.equal(out.error.requestId, 'SAFE_REQUEST_1');
+      assert.equal(
+        r.requests.filter((x) => x.method === 'GET').length,
+        [429, 503].includes(status) ? 2 : 1,
+      );
+      assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token)/);
+    } finally {
+      f.close();
+    }
+  }
+  const f = fixture();
+  try {
+    const r = await runCli(f, [{ transport: true }, { body: { result: [price] } }]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.requests.filter((x) => x.method === 'GET').length, 2);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI shares token issuance and one-second HTTP spacing across independent processes', async () => {
+  const f = fixture();
+  try {
+    const results = await Promise.all([
+      runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' }),
+      runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' }),
+    ]);
+    for (const r of results) assert.equal(r.status, 0, r.stdout + r.stderr);
+    const requests = readFileSync(f.trace, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(requests.filter((x) => x.method === 'POST').length, 1);
+    assert.equal(requests.filter((x) => x.method === 'GET').length, 2);
+    for (let i = 1; i < requests.length; i++)
+      assert.ok(requests[i].at - requests[i - 1].at >= 1000, JSON.stringify(requests));
+    const again = await runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' });
+    assert.equal(again.status, 0, again.stdout);
+    assert.equal(again.requests.filter((x) => x.method === 'POST').length, 1);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI bounds expiry recovery and transient retries together, and retains ambiguous issuance', async () => {
+  const expired = { status: 401, body: { error: { code: 'expired-token' } } };
+  for (const steps of [
+    [expired, { status: 503, body: {} }, { body: { result: [price] } }],
+    [{ status: 503, body: {} }, expired, { body: { result: [price] } }],
+  ]) {
+    const f = fixture();
+    try {
+      const r = await runCli(f, steps);
+      assert.equal(r.status, 0, r.stdout);
+      assert.equal(r.requests.filter((x) => x.method === 'GET').length, 3);
+      assert.equal(r.requests.filter((x) => x.method === 'POST').length, 2);
+    } finally {
+      f.close();
+    }
+  }
+  const f = fixture();
+  try {
+    const r = await runCli(f, [expired, expired]);
+    assert.equal(r.status, 1);
+    assert.equal(r.requests.filter((x) => x.method === 'POST').length, 2);
+    assert.equal(r.requests.filter((x) => x.method === 'GET').length, 2);
+  } finally {
+    f.close();
+  }
+  for (const auth of [
+    { transport: true },
+    { status: 503, body: {} },
+    { body: { access_token: 'synthetic-token', token_type: 'Bearer', expires_in: '86400' } },
+  ]) {
+    const f = fixture();
+    try {
+      const first = await runCli(f, [], undefined, { TEST_AUTH_STEPS: JSON.stringify([auth]) });
+      assert.equal(first.status, 1);
+      assert.equal(first.requests.length, 1);
+      const second = await runCli(f);
+      assert.equal(second.status, 1, second.stdout);
+      assert.equal(JSON.parse(second.stdout).error.code, 'AUTH_ISSUANCE_UNKNOWN');
+      assert.equal(second.requests.length, 1);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('Toss CLI includes Retry-After, body reads and lock waits in its time budget', async () => {
+  for (const [steps, expectedRequests] of [
+    [[{ status: 429, body: {}, headers: { 'Retry-After': '61' } }], 2],
+    [[{ hang: true }], 2],
+    [[{ bodyHang: true }], 2],
+    [[{ advance: 60000, body: { result: [price] } }], 2],
+    [[{ monotonicAdvance: 60000, body: { result: [price] } }], 2],
+  ]) {
+    const f = fixture();
+    try {
+      const r = await runCli(f, steps);
+      assert.equal(r.status, 1, r.stdout);
+      assert.equal(JSON.parse(r.stdout).error.code, 'TIMEOUT');
+      assert.equal(r.requests.length, expectedRequests);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('Toss CLI reuses a token replaced by a peer before expired-token recovery', async () => {
+  const f = fixture();
+  try {
+    const gate = join(f.directory, 'gate');
+    const first = runCli(
+      f,
+      [
+        { gate: true, status: 401, body: { error: { code: 'expired-token' } } },
+        { expectedToken: 'synthetic-peer-token', body: { result: [price] } },
+      ],
+      undefined,
+      { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
+    );
+    for (let i = 0; !existsSync(`${gate}.ready`); i++) {
+      assert.ok(i < 500);
+      await sleep(10);
+    }
+    const peer = await runCli(
+      f,
+      [
+        { status: 401, body: { error: { code: 'expired-token' } } },
+        { expectedToken: 'synthetic-peer-token', body: { result: [price] } },
+      ],
+      undefined,
+      {
+        TEST_REAL_CLOCK: '1',
+        TEST_AUTH_STEPS: JSON.stringify([
+          {
+            body: { access_token: 'synthetic-peer-token', token_type: 'Bearer', expires_in: 86400 },
+          },
+        ]),
+      },
+    );
+    assert.equal(peer.status, 0, peer.stdout + peer.stderr);
+    writeFileSync(gate, '', { mode: 0o600 });
+    const result = await first;
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(result.requests.filter((x) => x.method === 'POST').length, 2);
+    assert.equal(result.requests.filter((x) => x.method === 'GET').length, 4);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI rejects unsafe storage, bounds abandoned locks and releases locks on interruption', async () => {
+  for (const kind of ['permissions', 'symlink', 'lock', 'interrupt']) {
+    const f = fixture();
+    try {
+      if (kind === 'permissions') chmodSync(join(f.directory, 'credentials.json'), 0o644);
+      if (kind === 'symlink')
+        symlinkSync(join(f.directory, 'missing'), join(f.directory, 'state.json'));
+      if (kind === 'lock') mkdirSync(join(f.directory, 'client.lock'), { mode: 0o700 });
+      const result = await runCli(f, kind === 'interrupt' ? [{ interrupt: true }] : []);
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.equal(
+        JSON.parse(result.stdout).error.code,
+        kind === 'lock' ? 'TIMEOUT' : kind === 'interrupt' ? 'INTERRUPTED' : 'AUTH_STORAGE',
+      );
+      if (kind === 'interrupt') assert.equal(existsSync(join(f.directory, 'client.lock')), false);
+      else assert.equal(result.requests.length, 0);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('Toss CLI respects stricter provider spacing and HTTP timeout without exposing arbitrary messages', async () => {
+  const f = fixture();
+  try {
+    const result = await runCli(f, [
+      {
+        status: 429,
+        headers: { 'Retry-After': '3', 'X-RateLimit-Reset': '4' },
+        body: { error: { code: 'rate-limit-exceeded', message: 'synthetic-secret' } },
+      },
+      { body: { result: [price] } },
+    ]);
+    assert.equal(result.status, 0, result.stdout);
+    assert.ok(result.requests[2].at - result.requests[1].at >= 4000);
+    const timeout = await runCli(f, [{ hang: true }]);
+    assert.equal(JSON.parse(timeout.stdout).error.code, 'TIMEOUT');
+    const lastAt = timeout.requests.at(-1).at;
+    assert.equal(Date.parse(JSON.parse(timeout.stdout).retrievedAt) - lastAt, 15000);
+    assert.doesNotMatch(
+      result.stdout + result.stderr + timeout.stdout + timeout.stderr,
+      /synthetic-(secret|token)/,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI does not mark issuance unknown when no token request fits the cooldown', async () => {
+  const f = fixture();
+  try {
+    const first = await runCli(f, [], undefined, {
+      TEST_AUTH_STEPS: JSON.stringify([
+        {
+          status: 429,
+          headers: { 'Retry-After': '120' },
+          body: { error: { code: 'rate-limit-exceeded' } },
+        },
+      ]),
+    });
+    assert.equal(JSON.parse(first.stdout).error.code, 'RATE_LIMIT');
+    const second = await runCli(f);
+    assert.equal(JSON.parse(second.stdout).error.code, 'TIMEOUT');
+    assert.equal(second.requests.length, 1);
+    const third = await runCli(f, [], undefined, {
+      TEST_CLOCK_START: String(Date.parse('2026-11-06T15:03:00Z')),
+    });
+    assert.equal(third.status, 0, third.stdout);
+    assert.equal(third.requests.filter((x) => x.method === 'POST').length, 2);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI anchors shared spacing to actual fetch start after scheduling delay', async () => {
+  const f = fixture();
+  try {
+    const r = await runCli(f, [], undefined, { TEST_START_DELAY: '5000' });
+    assert.equal(r.status, 0, r.stdout);
+    assert.ok(r.requests[1].at - r.requests[0].at >= 1000, JSON.stringify(r.requests));
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI rejects FIFO credentials without blocking', async () => {
+  const f = fixture();
+  try {
+    const fifo = join(f.directory, 'fifo');
+    const made = spawnSync('mkfifo', ['-m', '600', fifo]);
+    assert.equal(made.status, 0);
+    const fs = await import('node:fs');
+    fs.renameSync(fifo, join(f.directory, 'credentials.json'));
+    const r = await runCli(f);
+    assert.equal(r.status, 1);
+    assert.equal(JSON.parse(r.stdout).error.code, 'AUTH_STORAGE');
+    assert.equal(r.requests.length, 0);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI rejects oversized rate headers without poisoning shared state', async () => {
+  const f = fixture();
+  try {
+    const r = await runCli(f, [
+      { status: 429, headers: { 'Retry-After': '9'.repeat(400) }, body: {} },
+    ]);
+    assert.equal(JSON.parse(r.stdout).error.code, 'RESPONSE_INVALID');
+    const second = await runCli(f);
+    assert.equal(second.status, 0, second.stdout);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI applies a peer Retry-After while another process is waiting to send', async () => {
+  const f = fixture();
+  let first;
+  try {
+    const gate = join(f.directory, 'cooldown-gate');
+    first = runCli(
+      f,
+      [
+        {
+          gate: true,
+          status: 429,
+          headers: { 'Retry-After': '3' },
+          body: { error: { code: 'rate-limit-exceeded' } },
+        },
+        { body: { result: [price] } },
+      ],
+      undefined,
+      { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
+    );
+    for (let i = 0; !existsSync(`${gate}.ready`); i++) {
+      assert.ok(i < 500);
+      await sleep(10);
+    }
+    const peer = runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' });
+    await sleep(150);
+    const releasedAt = Date.now();
+    writeFileSync(gate, '', { mode: 0o600 });
+    const results = await Promise.all([first, peer]);
+    for (const r of results) assert.equal(r.status, 0, r.stdout + r.stderr);
+    const requests = readFileSync(f.trace, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    for (const r of requests.slice(2))
+      assert.ok(r.at >= releasedAt + 3000, JSON.stringify(requests));
+  } finally {
+    if (first) {
+      writeFileSync(join(f.directory, 'cooldown-gate'), '', { mode: 0o600 });
+      await first;
+    }
+    f.close();
+  }
+});
+
+test('Toss CLI enforces request deadlines even when timers run late and masks stream cancellation errors', async () => {
+  for (const [step, expected] of [
+    [{ monotonicAdvance: 16000, body: { result: [price] } }, 'TIMEOUT'],
+    [{ oversizedCancel: true }, 'RESPONSE_INVALID'],
+  ]) {
+    const f = fixture();
+    try {
+      const r = await runCli(f, [step]);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.equal(JSON.parse(r.stdout).error.code, expected);
+      assert.doesNotMatch(r.stdout + r.stderr, /synthetic-secret/);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('Toss CLI treats late transport rejection as timeout without another GET', async () => {
+  const f = fixture();
+  try {
+    const r = await runCli(f, [{ monotonicAdvance: 16000, transport: true }]);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.equal(JSON.parse(r.stdout).error.code, 'TIMEOUT', r.stdout + r.stderr);
+    assert.equal(r.requests.filter((request) => request.method === 'GET').length, 1);
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI checks each execution clock before sending HTTP', async () => {
+  for (const clock of ['wall', 'monotonic']) {
+    const f = fixture();
+    try {
+      const r = await runCli(f, [], undefined, { TEST_CLOCK_JUMP: clock });
+      assert.equal(r.status, 1, r.stdout);
+      assert.equal(JSON.parse(r.stdout).error.code, 'TIMEOUT');
+      assert.equal(r.requests.length, 0);
+    } finally {
+      f.close();
+    }
+  }
+});
