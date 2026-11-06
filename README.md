@@ -2,6 +2,10 @@
 
 직전에 끝난 미국 정규장의 KIS 일봉을 바탕으로 다음 정규장의 매수 검토 후보를 최대 5개 찾는 개인용 CLI입니다. 보고서에서 기준 종가, 선정 근거, 관찰 기간, 주요 위험을 확인할 수 있습니다. 주문과 소수점 거래 가능 여부는 증권사에서 직접 확인하세요.
 
+## 토스 조회 도구 전환
+
+새 제품은 외부 AI 에이전트가 필요한 자료를 조회하는 로컬 JSON CLI입니다. [현재가 명령과 합성 검사 안내](docs/toss-cli.md)에서 `node scripts/toss.ts --help`로 명령을 발견할 수 있습니다. 구현 범위는 [#285](https://github.com/mochafreddo/stock-scout/issues/285), 새 요구사항은 [#278의 통합 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)를 따릅니다. 실제 토스 조회·자료 전달 허용·Codex 및 Dot 연결은 미검증이며, 아래 기존 KIS 제품은 전환 검증 전까지 유지합니다.
+
 ## 시작하기
 
 1. [실행 환경과 인증을 준비하세요](docs/getting-started.md).
