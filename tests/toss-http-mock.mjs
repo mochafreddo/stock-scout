@@ -43,7 +43,7 @@ globalThis.fetch = async (url, init) => {
     assert.deepEqual(Object.fromEntries(new URLSearchParams(init.body)), {
       grant_type: 'client_credentials',
       client_id: 'synthetic-client',
-      client_secret: 'synthetic-secret',
+      client_secret: process.env.TEST_CLIENT_SECRET || 'synthetic-secret',
     });
     const step = authSteps.shift();
     if (step?.transport) throw new TypeError('synthetic-secret');
@@ -55,7 +55,6 @@ globalThis.fetch = async (url, init) => {
       expires_in: 86400,
     });
   }
-  assert.equal(address.pathname, '/api/v1/prices');
   assert.equal(init.method, 'GET');
   const step = steps.shift() || {
     body: {
@@ -69,6 +68,7 @@ globalThis.fetch = async (url, init) => {
       ],
     },
   };
+  assert.equal(address.pathname, step.path || '/api/v1/prices');
   assert.equal(init.headers.authorization, `Bearer ${step.expectedToken || 'synthetic-token'}`);
   if (step.gate) {
     writeFileSync(`${process.env.TEST_GATE}.ready`, 'ready', { mode: 0o600 });

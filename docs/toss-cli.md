@@ -1,6 +1,6 @@
-# 토스 현재가 JSON CLI
+# 토스 종목 정보와 현재가 JSON CLI
 
-토스 식별자로 현재가를 개별 조회하는 새 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
+토스 식별자로 종목 정보와 현재가를 개별 조회하는 새 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
 
 ## 명령 발견과 실행
 
@@ -8,6 +8,7 @@
 
 ```sh
 node scripts/toss.ts --help
+node scripts/toss.ts stock AAPL
 node scripts/toss.ts prices AAPL
 node scripts/toss.ts prices AAPL,MSFT
 ```
@@ -15,6 +16,36 @@ node scripts/toss.ts prices AAPL,MSFT
 `--help`는 인증 없이 명령 목록을 JSON으로 출력합니다. `prices`는 공식 API의 `symbols` 식별자 1~200개를 쉼표로 받습니다. 각 식별자는 영문 대소문자·숫자·`.`·`-`만 허용하며 빈 항목과 추가 인수는 거부합니다. 티커 검색·시장 추정·KIS 식별자 변환은 수행하지 않습니다. 공급자가 확인한 식별자를 사용하세요. 미국 장중에도 실행할 수 있으며 증권 유형 관문을 두지 않습니다.
 
 실제 토스 조회·인증 설정·자료의 외부 AI 전달은 아직 검증하거나 승인받지 않았습니다. [#284의 허용 범위 조사](https://github.com/mochafreddo/stock-scout/issues/284)에서 남은 조건을 확인하고 별도 승인을 받은 뒤에만 실제 자격 증명을 준비하세요. 원자료뿐 아니라 요약·가공 결과의 전달에도 같은 조건이 적용됩니다. 이 문서의 예시는 합성 자료입니다.
+
+## 종목 식별과 선택
+
+`stock SYMBOL [MARKET [ISIN]]`은 한 종목을 조회합니다. [공식 OpenAPI](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json) 1.2.28의 `GET /api/v1/stocks`는 쉼표로 구분한 심볼을 최대 200개 받습니다. 이 명령은 식별과 선택을 한 번에 한 심볼로 제한합니다. 공급자에 보내는 인수는 `symbols=SYMBOL` 하나입니다. 시장과 ISIN은 새로 받은 행에 적용하는 선택 조건입니다.
+
+| 출력 | 해석 |
+| --- | --- |
+| `symbol`, `name`, `market` | 요청 심볼과 일치하는 행의 한글 종목명과 상장 시장입니다. 시장은 KOSPI·KOSDAQ·NYSE·NASDAQ·AMEX·KR_ETC·US_ETC이며 확장 코드도 원문으로 표시합니다. |
+| `securityType` | STOCK·FOREIGN_STOCK·DEPOSITARY_RECEIPT·INFRASTRUCTURE_FUND·REIT·ETF·FOREIGN_ETF·ETN·STOCK_WARRANTS를 그대로 반환합니다. 빈 문자열 또는 해석할 수 없는 새 유형은 `null`, `partial`, `omissions[].reason="type_unknown"`으로 표시합니다. |
+| `status` | 공급자의 상장 상태입니다. 공식 값은 SCHEDULED·ACTIVE·DELISTED이며 확장 코드도 원문으로 표시합니다. 거래 가능 여부와 구분하세요. |
+| `isinCode` | 공식 필수 문자열입니다. 비어 있으면 CLI는 `null`을 반환합니다. 그 밖에는 국가 코드 두 글자, 영문 대문자·숫자 아홉 자리, 마지막 숫자 한 자리의 형식을 검사합니다. |
+| `source`, `retrievedAt` | 출처는 `tossinvest`의 `/api/v1/stocks`입니다. 종목 정보에 공급자 갱신 시각이 없어 최신성은 `unknown`으로 표시합니다. `retrievedAt`는 CLI 조회 시각입니다. |
+
+공식 `StockInfo`의 필수 필드는 위 여섯 필드와 `englishName`, `isCommonShare`, `currency`, `sharesOutstanding`입니다. 먼저 요청 심볼·시장·ISIN으로 식별할 수 있는 행을 선택지로 묶습니다. 서로 다른 선택지가 남으면 다른 필드가 잘못됐더라도 `IDENTITY_AMBIGUOUS`로 선택을 요청합니다. 선택지가 하나로 좁혀진 뒤 해당 행이 중복이거나 필수 값이 누락·null·잘못된 자료형이면 `RESPONSE_INVALID`입니다. 식별할 수 없는 행은 `invalid_item`으로 제외합니다. 제외 후 선택한 종목의 유효 자료가 남으면 종료 코드 2와 누락 사유를 확인하세요. 이 경우 심볼의 유일성을 확정할 수 없습니다. 제외한 행 때문에 선택 결과를 확인할 수 없으면 `RESPONSE_INVALID`, 정상 빈 배열 또는 유효한 응답에 선택 조건과 일치하는 종목이 없으면 `NOT_FOUND`입니다. 공급자 권한·통신 오류는 공통 오류 계약을 따릅니다.
+
+### 같은 심볼에서 한 종목 고르기
+
+다음은 합성 예시입니다. 실제 인증 없이 전체 흐름을 재현하려면 `node --test tests/toss-stock.test.mjs`를 실행하세요.
+
+1. `node scripts/toss.ts stock DEMO`를 호출합니다. 같은 심볼로 서로 다른 증권이 두 개 반환되면 종료 코드 1, `error.code="IDENTITY_AMBIGUOUS"`, 빈 `data`와 다음과 같은 `error.choices`를 받습니다.
+
+   ```json
+   [
+     {"symbol":"DEMO","name":"합성 ETN","market":"NYSE","isinCode":"US0000000010"},
+     {"symbol":"DEMO","name":"합성 ETF","market":"NASDAQ","isinCode":"US0000000002"}
+   ]
+   ```
+
+2. 사용자가 첫 번째 종목을 선택하면 `node scripts/toss.ts stock DEMO NYSE US0000000010`으로 다시 조회하세요. 이 예시의 결과 행은 `{"symbol":"DEMO","name":"합성 ETN","market":"NYSE","securityType":"ETN","status":"ACTIVE","isinCode":"US0000000010"}`입니다. 시장만으로 구별할 수 있으면 ISIN을 생략해도 됩니다. 같은 시장에서 ISIN이 없는 행은 마지막 인수로 `-`를 지정하세요. 같은 시장·ISIN의 중복 행은 하나의 선택지로 표시하되, 그 선택지를 다시 조회해도 중복이면 `RESPONSE_INVALID`입니다. 다른 시장·ISIN의 선택지는 독립적으로 조회할 수 있습니다. 선택지의 이름을 확인할 수 없으면 `name`이 `null`입니다.
+3. 유형만 미확인이면 확인된 심볼로 `prices DEMO`를 독립적으로 요청할 수 있습니다. 여러 증권이 같은 심볼을 쓰면 `stock`에서 선택한 시장·ISIN이 `prices`로 전달되지 않습니다. 이 경우 심볼만으로 받은 가격을 선택한 증권의 가격이라고 단정하지 마세요.
 
 ## 보호된 설정과 공통 상태
 
@@ -63,13 +94,13 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 
 | 상태·종료 코드 | 의미 |
 | --- | --- |
-| `success`·0 | 유효한 응답. 정상 빈 `result: []`도 포함합니다. |
-| `partial`·2 | 유효 자료가 남지만 잘못된 행 또는 요청 종목 누락이 있습니다. `omissions`에 원래 행의 0부터 시작하는 `index` 또는 요청 `symbol`과 `reason`을 반환합니다. |
+| `success`·0 | 유효한 응답입니다. `prices`의 정상 빈 배열은 성공, `stock`의 정상 빈 배열은 `NOT_FOUND`입니다. |
+| `partial`·2 | 유효 자료가 남지만 잘못된 행, 요청 종목 누락 또는 종목 유형 미확인이 있습니다. `omissions`에 원래 행의 0부터 시작하는 `index` 또는 요청 `symbol`과 `reason`을 반환합니다. |
 | `error`·1 | 입력·조회 실패 또는 유효 행이 없는 잘못된 응답입니다. `data`는 빈 배열이며 `error.code`로 원인을 구분합니다. |
 
 오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다.
 
-오류 코드는 `INPUT_INVALID`, `AUTH_CONFIG`, `AUTH_STORAGE`, `AUTH_FAILED`, `AUTH_RESPONSE_INVALID`, `AUTH_ISSUANCE_UNKNOWN`, `PERMISSION_DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `RESPONSE_INVALID`, `RATE_LIMIT`, `NETWORK_ERROR`, `UPSTREAM_ERROR`, `REQUEST_LIMIT`, `TIMEOUT`, `INTERRUPTED`, `SENSITIVE_OUTPUT`, `INTERNAL_ERROR`입니다. 인증·권한·미지원·한도 오류는 정상 빈 결과로 바꾸지 않습니다.
+오류 코드는 `IDENTITY_AMBIGUOUS`, `INPUT_INVALID`, `AUTH_CONFIG`, `AUTH_STORAGE`, `AUTH_FAILED`, `AUTH_RESPONSE_INVALID`, `AUTH_ISSUANCE_UNKNOWN`, `PERMISSION_DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `RESPONSE_INVALID`, `RATE_LIMIT`, `NETWORK_ERROR`, `UPSTREAM_ERROR`, `REQUEST_LIMIT`, `TIMEOUT`, `INTERRUPTED`, `SENSITIVE_OUTPUT`, `INTERNAL_ERROR`입니다. 인증·권한·미지원·한도 오류는 정상 빈 결과로 바꾸지 않습니다.
 
 ## 실행 한도와 재시도
 
@@ -82,12 +113,12 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 ## 합성 검사와 후속 확장
 
 ```sh
-node --test tests/toss.test.mjs
+node --test tests/toss.test.mjs tests/toss-stock.test.mjs
 npm run typecheck
 ```
 
 공개 검증 경계는 실제 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP입니다. `tests/toss-cli-helper.mjs`의 `fixture`와 `runCli`는 보호된 합성 설정 및 하위 프로세스를 만들며, `tests/toss-http-mock.mjs`는 네트워크·시계만 대체합니다. 후속 티켓은 이 도우미에 HTTP 시나리오를 추가하고 명령별 소비자 출력을 검사하세요. 서로 독립적인 인증·시계 도우미를 다시 만들지 마세요. 실제 프로세스 경합 검사는 실제 시계를 사용합니다.
 
-`scripts/toss.ts`가 명령 선택·입력·명령별 응답 검증·JSON 출력을 소유합니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
+`scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
 
 이번 검증은 합성 자료에 한정합니다. 실제 토스 조회, 실제 자격 증명 설정, 실제 자료 전달 허용, 공급자의 조회 전용 권한, Codex·Dot 각각의 연결과 전체 전환 완료는 별도 관문입니다. 기존 KIS·내장 모델 테스트는 기존 경로의 회귀 확인이며 새 토스 호환성의 근거가 아닙니다.

@@ -3,11 +3,11 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export function fixture() {
+export function fixture(clientSecret = 'synthetic-secret') {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-toss-')));
   writeFileSync(
     join(directory, 'credentials.json'),
-    JSON.stringify({ clientId: 'synthetic-client', clientSecret: 'synthetic-secret' }),
+    JSON.stringify({ clientId: 'synthetic-client', clientSecret }),
     { mode: 0o600 },
   );
   const trace = join(directory, 'trace.jsonl');

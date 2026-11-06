@@ -1,4 +1,5 @@
 import { TossClient, TossError } from './toss-client.ts';
+import { AmbiguousStock, isinPattern, stockResult } from './toss-stock.ts';
 
 function validTime(value: unknown) {
   if (
@@ -18,21 +19,69 @@ function validTime(value: unknown) {
     month >= 1 && month <= 12 && day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate()
   );
 }
+function priceResult(rows: unknown[], symbols: string) {
+  const requested = new Set(symbols.split(','));
+  const data: Record<string, unknown>[] = [];
+  const omissions: { index?: number; symbol?: string; reason: string }[] = [];
+  const counts = new Map<string, number>();
+  for (const row of rows)
+    if (row && typeof row === 'object' && 'symbol' in row && typeof row.symbol === 'string')
+      counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1);
+  for (const [index, row] of rows.entries()) {
+    if (
+      !row ||
+      typeof row !== 'object' ||
+      !('symbol' in row) ||
+      typeof row.symbol !== 'string' ||
+      !('lastPrice' in row) ||
+      !('currency' in row) ||
+      !requested.has(row.symbol) ||
+      counts.get(row.symbol) !== 1 ||
+      typeof row.lastPrice !== 'string' ||
+      row.lastPrice.length > 30 ||
+      !/^-?\d+(?:\.\d+)?$/.test(row.lastPrice) ||
+      typeof row.currency !== 'string' ||
+      !/^[A-Z]{3}$/.test(row.currency) ||
+      ('timestamp' in row &&
+        row.timestamp !== undefined &&
+        row.timestamp !== null &&
+        !validTime(row.timestamp))
+    ) {
+      omissions.push({ index, reason: 'invalid_item' });
+      continue;
+    }
+    data.push({
+      symbol: row.symbol,
+      lastPrice: row.lastPrice,
+      currency: row.currency,
+      ...('timestamp' in row ? { timestamp: row.timestamp } : {}),
+    });
+  }
+  if (rows.length && !data.length) throw new TossError('RESPONSE_INVALID');
+  if (rows.length)
+    for (const symbol of requested)
+      if (!data.some((row) => row.symbol === symbol))
+        omissions.push({ symbol, reason: 'missing_item' });
+  return { data, omissions };
+}
 const interruption = new AbortController();
 const interrupt = () => interruption.abort();
 process.on('SIGINT', interrupt);
 process.on('SIGTERM', interrupt);
 let client: TossClient | undefined;
-const source = {
-  provider: 'tossinvest',
-  endpoint: '/api/v1/prices',
-  freshness: 'unknown',
-  session: 'unknown',
-  snapshot: 'unknown',
-  priceUnit: 'currency_per_security',
-};
+const [command, symbols, ...rest] = process.argv.slice(2);
+const source =
+  command === 'stock'
+    ? { provider: 'tossinvest', endpoint: '/api/v1/stocks', freshness: 'unknown' }
+    : {
+        provider: 'tossinvest',
+        endpoint: '/api/v1/prices',
+        freshness: 'unknown',
+        session: 'unknown',
+        snapshot: 'unknown',
+        priceUnit: 'currency_per_security',
+      };
 try {
-  const [command, symbols, ...rest] = process.argv.slice(2);
   if (command === '--help' && symbols === undefined) {
     console.log(
       JSON.stringify({
@@ -45,6 +94,7 @@ try {
               usage: 'node scripts/toss.ts prices SYMBOL[,SYMBOL...]',
               maxSymbols: 200,
             },
+            { name: 'stock', usage: 'node scripts/toss.ts stock SYMBOL [MARKET [ISIN]]' },
           ],
         },
       }),
@@ -52,15 +102,20 @@ try {
     process.exit(0);
   }
   if (
-    command !== 'prices' ||
+    (command !== 'prices' && command !== 'stock') ||
+    (command === 'stock' && symbols?.includes(',')) ||
     !symbols ||
-    rest.length ||
+    (command === 'prices'
+      ? rest.length > 0
+      : rest.length > 2 ||
+        (rest[0] !== undefined && !/^[A-Z][A-Z0-9_]*$/.test(rest[0])) ||
+        (rest[1] !== undefined && rest[1] !== '-' && !isinPattern.test(rest[1]))) ||
     symbols.split(',').length > 200 ||
     !symbols.split(',').every((symbol) => /^[A-Za-z0-9.-]+$/.test(symbol))
   )
     throw new TossError('INPUT_INVALID');
   client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
-  const body = await client.get(`/api/v1/prices?${new URLSearchParams({ symbols })}`);
+  const body = await client.get(`${source.endpoint}?${new URLSearchParams({ symbols })}`);
   if (
     !body ||
     typeof body !== 'object' ||
@@ -69,41 +124,11 @@ try {
     'error' in body
   )
     throw new TossError('RESPONSE_INVALID');
-  const requested = new Set(symbols.split(','));
-  const data: Record<string, unknown>[] = [];
-  const omissions: { index?: number; symbol?: string; reason: string }[] = [];
-  const counts = new Map<string, number>();
-  for (const row of body.result)
-    if (row && typeof row.symbol === 'string')
-      counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1);
-  for (const [index, row] of body.result.entries()) {
-    if (
-      !row ||
-      typeof row !== 'object' ||
-      !requested.has(row.symbol) ||
-      counts.get(row.symbol) !== 1 ||
-      typeof row.lastPrice !== 'string' ||
-      row.lastPrice.length > 30 ||
-      !/^-?\d+(?:\.\d+)?$/.test(row.lastPrice) ||
-      typeof row.currency !== 'string' ||
-      !/^[A-Z]{3}$/.test(row.currency) ||
-      (row.timestamp !== undefined && row.timestamp !== null && !validTime(row.timestamp))
-    ) {
-      omissions.push({ index, reason: 'invalid_item' });
-      continue;
-    }
-    data.push({
-      symbol: row.symbol,
-      lastPrice: row.lastPrice,
-      currency: row.currency,
-      ...('timestamp' in row ? { timestamp: row.timestamp } : {}),
-    });
-  }
-  if (body.result.length && !data.length) throw new TossError('RESPONSE_INVALID');
-  if (body.result.length)
-    for (const symbol of requested)
-      if (!data.some((row) => row.symbol === symbol))
-        omissions.push({ symbol, reason: 'missing_item' });
+  const result =
+    command === 'stock'
+      ? stockResult(body.result, symbols, rest[0], rest[1])
+      : priceResult(body.result, symbols);
+  const { data, omissions } = result;
   const status = omissions.length ? 'partial' : 'success';
   client.check();
   const output = JSON.stringify({
@@ -114,7 +139,7 @@ try {
     source,
     retrievedAt: new Date().toISOString(),
   });
-  if ([...client.secrets].some((secret) => output.includes(secret)))
+  if ([...client.secrets].some((secret) => output.includes(JSON.stringify(secret).slice(1, -1))))
     throw new TossError('SENSITIVE_OUTPUT');
   console.log(output);
   process.exitCode = status === 'partial' ? 2 : 0;
@@ -122,11 +147,16 @@ try {
   const code = error instanceof TossError ? error.code : 'INTERNAL_ERROR';
   let detail = {
     code,
+    ...(error instanceof AmbiguousStock ? { choices: error.choices } : {}),
     ...(error instanceof TossError
       ? { providerCode: error.providerCode, requestId: error.requestId }
       : {}),
   };
-  if ([...(client?.secrets ?? [])].some((secret) => JSON.stringify(detail).includes(secret)))
+  if (
+    [...(client?.secrets ?? [])].some((secret) =>
+      JSON.stringify(detail).includes(JSON.stringify(secret).slice(1, -1)),
+    )
+  )
     detail = { code: 'SENSITIVE_OUTPUT' };
   console.log(
     JSON.stringify({
@@ -138,7 +168,7 @@ try {
       error: detail,
     }),
   );
-  console.error(code);
+  console.error(detail.code);
   process.exitCode = 1;
 }
 

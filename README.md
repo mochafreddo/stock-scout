@@ -4,7 +4,7 @@
 
 ## 토스 조회 도구 전환
 
-새 제품은 외부 AI 에이전트가 필요한 자료를 조회하는 로컬 JSON CLI입니다. [현재가 명령과 합성 검사 안내](docs/toss-cli.md)에서 `node scripts/toss.ts --help`로 명령을 발견할 수 있습니다. 구현 범위는 [#285](https://github.com/mochafreddo/stock-scout/issues/285), 새 요구사항은 [#278의 통합 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)를 따릅니다. 실제 토스 조회·자료 전달 허용·Codex 및 Dot 연결은 미검증이며, 아래 기존 KIS 제품은 전환 검증 전까지 유지합니다.
+새 제품은 외부 AI 에이전트가 필요한 자료를 조회하는 로컬 JSON CLI입니다. [종목 식별·현재가 명령과 합성 검사 안내](docs/toss-cli.md)에서 `node scripts/toss.ts --help`로 명령을 발견할 수 있습니다. 구현 범위는 [현재가 #285](https://github.com/mochafreddo/stock-scout/issues/285)와 [종목 정보 #286](https://github.com/mochafreddo/stock-scout/issues/286), 새 요구사항은 [#278의 통합 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)를 따릅니다. 실제 토스 조회·자료 전달 허용·Codex 및 Dot 연결은 미검증이며, 아래 기존 KIS 제품은 전환 검증 전까지 유지합니다.
 
 ## 시작하기
 
