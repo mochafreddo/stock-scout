@@ -4,8 +4,8 @@ import { decimal, items, record, validTime } from './toss-values.ts';
 function currency(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
-function level(row: unknown) {
-  if (!record(row) || !decimal(row.price) || !decimal(row.volume)) return;
+function level(row: Record<string, unknown>) {
+  if (!decimal(row.price) || !decimal(row.volume)) return;
   return { price: row.price, volume: row.volume };
 }
 export function orderbookResult(value: unknown) {
@@ -23,7 +23,7 @@ export function orderbookResult(value: unknown) {
   function side(rows: unknown[], name: string) {
     const data = [];
     for (const [index, row] of rows.entries()) {
-      const item = level(row);
+      const item = record(row) ? level(row) : undefined;
       if (item) data.push(item);
       else omissions.push({ side: name, index, reason: 'invalid_item' });
     }
@@ -49,8 +49,9 @@ export function orderbookResult(value: unknown) {
 export function tradesResult(value: unknown, count: number) {
   if (!Array.isArray(value) || value.length > count) throw new TossError('RESPONSE_INVALID');
   return items(value, (row) => {
+    if (!record(row)) return;
     const item = level(row);
-    if (!item || !record(row) || !currency(row.currency) || !validTime(row.timestamp)) return;
+    if (!item || !currency(row.currency) || !validTime(row.timestamp)) return;
     return { ...item, timestamp: row.timestamp, currency: row.currency };
   });
 }

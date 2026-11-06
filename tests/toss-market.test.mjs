@@ -2,15 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fixture, runCli } from './toss-cli-helper.mjs';
 
-async function lookup(t, command, result, args = ['AAPL'], extra = {}) {
+async function lookup(t, command, result, args = ['AAPL']) {
   const f = fixture();
   t.after(f.close);
-  const r = await runCli(
-    f,
-    [{ path: `/api/v1/${command}`, body: { result } }],
-    [command, ...args],
-    extra,
-  );
+  const r = await runCli(f, [{ path: `/api/v1/${command}`, body: { result } }], [command, ...args]);
   return { ...r, out: JSON.parse(r.stdout) };
 }
 const book = {
