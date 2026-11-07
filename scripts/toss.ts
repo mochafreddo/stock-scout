@@ -2,6 +2,7 @@ import { candleQuery, candleResult } from './toss-candles.ts';
 import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
+import { constraintResult, sessionResult, validDate } from './toss-sessions.ts';
 import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
 import { decimal, symbolPattern, validTime } from './toss-values.ts';
 
@@ -73,6 +74,8 @@ const endpoints: Record<string, string> = {
   orderbook: '/api/v1/orderbook',
   trades: '/api/v1/trades',
   candles: '/api/v1/candles',
+  sessions: '/api/v1/market-calendar/US',
+  constraints: '/api/v1/market-calendar/US',
 };
 const endpoint = Object.hasOwn(endpoints, command) ? endpoints[command] : endpoints.prices;
 const source = {
@@ -125,6 +128,8 @@ try {
               defaultCount: 50,
               maxCount: 50,
             },
+            { name: 'sessions', usage: 'node scripts/toss.ts sessions DATE' },
+            { name: 'constraints', usage: 'node scripts/toss.ts constraints SYMBOL DATE' },
           ],
         },
       }),
@@ -136,6 +141,35 @@ try {
     return payload(await client.get(`${source.endpoint}?${query}`));
   }
   async function lookup() {
+    if (command === 'sessions' || command === 'constraints') {
+      const date = command === 'sessions' ? symbols : rest[0];
+      if (
+        !validDate(date) ||
+        (command === 'sessions'
+          ? rest.length > 0
+          : !symbols || !symbolPattern.test(symbols) || rest.length !== 1)
+      )
+        throw new TossError('INPUT_INVALID');
+      Object.assign(source, {
+        date,
+        dateTimeZone: 'America/New_York',
+        sessionTimeZone: 'Asia/Seoul',
+        scope: 'provider_US_market_calendar',
+      });
+      if (command === 'constraints')
+        Object.assign(source, {
+          symbol: symbols,
+          symbolMarket: 'unverified_US_requested',
+          rulesVersion: '1.2.28',
+          rulesCheckedOn: '2026-11-07',
+          rulesSource: 'https://openapi.tossinvest.com/openapi-docs/latest/openapi.json',
+          rulesScope: 'documented_API_rules_not_live_eligibility',
+        });
+      const value = await read(new URLSearchParams({ date }));
+      return command === 'sessions'
+        ? sessionResult(value, date)
+        : constraintResult(value, symbols, date);
+    }
     if (command === 'candles') {
       const query = candleQuery(symbols, rest);
       const daily = query.get('interval') === '1d';
