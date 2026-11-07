@@ -7,6 +7,7 @@
 | 필요한 작업 | 문서 |
 | --- | --- |
 | 미국 순위·거래 가능 종목·종목 정보·가격 조회 | [토스 JSON CLI](toss-cli.md) |
+| 토스 실자료 전달·조회 전용 권한과 접근 준비 | [허용·권한 확인 및 미전송 문의 초안](toss-access-readiness.md) |
 | 다음 정규장의 매수 후보 확인 | [매수 후보 보고서](buy-candidates.md) |
 | 후보군, 제외 사유, 일봉 확인 | [후보군 조회 CLI](candidate-universe.md) |
 | 거래 일정과 다음 정규장 확인 | [공식 거래 일정 CLI](market-calendar.md) |
