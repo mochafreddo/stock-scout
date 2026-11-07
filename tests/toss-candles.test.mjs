@@ -11,7 +11,7 @@ const candle = {
   volume: '0',
   currency: 'USD',
 };
-async function lookup(t, result, args = ['AAPL', '1d'], extra = {}) {
+async function lookup(t, result, args = ['AAPL', '1d'], extra) {
   const f = fixture();
   t.after(f.close);
   const r = await runCli(

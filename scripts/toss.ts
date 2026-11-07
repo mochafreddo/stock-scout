@@ -140,12 +140,10 @@ try {
       const query = candleQuery(symbols, rest);
       const daily = query.get('interval') === '1d';
       Object.assign(source, {
-        symbol: symbols,
-        interval: query.get('interval'),
+        ...Object.fromEntries(query),
         count: Number(query.get('count')),
         adjusted: query.get('adjusted') === 'true',
         originalPricesGuaranteed: false,
-        ...(query.has('before') ? { before: query.get('before') } : {}),
         priceUnit: 'currency_per_security',
         volumeUnit: 'securities',
         timestampMeaning: daily ? 'trade_date_local_midnight' : 'minute_end_exclusive',

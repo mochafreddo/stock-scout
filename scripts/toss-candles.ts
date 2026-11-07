@@ -70,6 +70,6 @@ export function candleResult(value: unknown, query: URLSearchParams) {
   else if (value.nextBefore !== null) result.omissions.push({ reason: 'next_page' });
   return {
     ...result,
-    page: 'nextBefore' in value ? { nextBefore: value.nextBefore } : {},
+    page: { nextBefore: value.nextBefore },
   };
 }
