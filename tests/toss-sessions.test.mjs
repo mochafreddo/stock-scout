@@ -116,13 +116,14 @@ test('sessions preserves positive submillisecond intervals across offsets and fr
     ['2026-03-25T09:30:00.12340000000000000001-04:00', '2026-03-25T13:30:00.12340000000000000002Z'],
     ['2026-03-25T13:30:00Z', '2026-03-25T22:30:00.00000000000000000001+09:00'],
   ]) {
-    const today = Object.fromEntries([
-      ['date', day.date],
-      ...['dayMarket', 'preMarket', 'regularMarket', 'afterMarket'].map((name) => [
-        name,
-        { startTime, endTime },
-      ]),
-    ]);
+    const session = { startTime, endTime };
+    const today = {
+      date: day.date,
+      dayMarket: session,
+      preMarket: session,
+      regularMarket: session,
+      afterMarket: session,
+    };
     const value = { ...calendar, today };
     const r = await lookup(t, value);
     assert.equal(r.status, 0, r.stdout);

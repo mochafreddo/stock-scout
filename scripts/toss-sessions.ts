@@ -1,5 +1,5 @@
 import { TossError } from './toss-client.ts';
-import { laterThan, record, validTime } from './toss-values.ts';
+import { laterThan, record, validTime, wholeSecondMillis } from './toss-values.ts';
 
 const sessions = ['dayMarket', 'preMarket', 'regularMarket', 'afterMarket'] as const;
 type MarketDay = { date: string } & Partial<
@@ -69,7 +69,7 @@ export function constraintResult(value: unknown, symbol: string, date: string) {
   if (regular === null) acceptanceWindow = { status: 'closed' };
   else if (regular !== undefined) {
     const fraction = (/\.\d+/.exec(regular.endTime)?.[0] ?? '.000').padEnd(4, '0');
-    const end = new Date(Date.parse(regular.endTime.replace(/\.\d+/, '')) - 3_600_000)
+    const end = new Date(wholeSecondMillis(regular.endTime) - 3_600_000)
       .toISOString()
       .replace('.000', fraction);
     if (laterThan(end, regular.startTime))

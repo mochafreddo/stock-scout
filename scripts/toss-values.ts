@@ -2,8 +2,11 @@ import { TossError } from './toss-client.ts';
 
 export const symbolPattern = /^[A-Za-z0-9.-]+$/;
 
+export function wholeSecondMillis(value: string) {
+  return Date.parse(value.replace(/\.\d+/, ''));
+}
+
 export function laterThan(left: string, right: string) {
-  const wholeSecondMillis = (value: string) => Date.parse(value.replace(/\.\d+/, ''));
   const difference = wholeSecondMillis(left) - wholeSecondMillis(right);
   if (difference !== 0) return difference > 0;
   const fraction = (value: string) => /\.(\d+)/.exec(value)?.[1] ?? '';
