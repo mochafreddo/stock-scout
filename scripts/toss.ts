@@ -192,8 +192,8 @@ try {
         snapshot: 'unknown',
         ...(transaction
           ? {
-              from: transaction.query.get('from'),
-              to: transaction.query.get('to'),
+              from: transaction.from,
+              to: transaction.to,
               transactionTypes: transaction.query.get('transactionTypes'),
               limit: Number(transaction.query.get('limit')),
               dateTimeZone: 'Asia/Seoul',
@@ -234,22 +234,15 @@ try {
         query.set(command === 'buying-power' ? 'currency' : 'symbol', symbols);
       const value = payload(await client.get(`${endpoint}?${query}`, account.accountSeq));
       if (transaction) {
-        const result = transactionResult(value, query);
-        if (client.accountIdentifiers.has(String(result.page.nextCursor)))
-          throw new TossError('SENSITIVE_OUTPUT');
+        const result = transactionResult(value, transaction);
+        const cursor = result.page.nextCursor;
+        if (cursor === null) return result;
+        if (client.accountIdentifiers.has(cursor)) throw new TossError('SENSITIVE_OUTPUT');
         return {
           ...result,
           page: {
             ...result.page,
-            ...(typeof result.page.nextCursor === 'string'
-              ? {
-                  context: client.accountCursorContext(
-                    account.accountSeq,
-                    query,
-                    result.page.nextCursor,
-                  ),
-                }
-              : {}),
+            context: client.accountCursorContext(account.accountSeq, query, cursor),
           },
         };
       }

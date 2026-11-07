@@ -42,19 +42,24 @@ export function transactionQuery(from: string | undefined, args: string[]) {
     else query.set(key, value);
   }
   if (query.has('cursor') !== (context !== undefined)) throw new TossError('INPUT_INVALID');
-  return { query, context };
+  return { query, context, from, to };
 }
-export function transactionResult(value: unknown, query: URLSearchParams) {
+export function transactionResult(
+  value: unknown,
+  { query, from, to }: ReturnType<typeof transactionQuery>,
+) {
   if (
     !record(value) ||
     !Array.isArray(value.transactions) ||
     value.transactions.length > Number(query.get('limit')) ||
     typeof value.hasNext !== 'boolean' ||
-    (value.hasNext
-      ? typeof value.nextCursor !== 'string' || !value.nextCursor.length
-      : value.nextCursor !== null)
+    (value.nextCursor !== null &&
+      (typeof value.nextCursor !== 'string' || !value.nextCursor.length)) ||
+    value.hasNext !== (value.nextCursor !== null)
   )
     throw new TossError('RESPONSE_INVALID');
+  const filter = query.get('transactionTypes');
+  const requestedTypes = filter ? new Set(filter.split(',')) : undefined;
   const result = items(value.transactions, (row) => {
     if (!record(row)) return;
     const output: Record<string, unknown> = {};
@@ -84,13 +89,12 @@ export function transactionResult(value: unknown, query: URLSearchParams) {
     }
     if (
       !validDate(row.settlementDate) ||
-      row.settlementDate < (query.get('from') ?? '') ||
-      row.settlementDate > (query.get('to') ?? '') ||
+      row.settlementDate < from ||
+      row.settlementDate > to ||
       typeof row.settled !== 'boolean' ||
       typeof row.isCancellation !== 'boolean' ||
       (row.transactionTime !== null && (!row.settled || !validTime(row.transactionTime))) ||
-      (query.get('transactionTypes') &&
-        !query.get('transactionTypes')?.split(',').includes(String(row.transactionType)))
+      (requestedTypes && !requestedTypes.has(String(row.transactionType)))
     )
       return;
     return {

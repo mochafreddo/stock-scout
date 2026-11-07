@@ -336,3 +336,36 @@ test('opaque cursors containing a short account identifier remain usable', async
     f.close();
   }
 });
+
+test('transaction type filters and inclusive settlement boundaries preserve valid rows only', async () => {
+  const f = fixture();
+  try {
+    await select(f);
+    const firstDay = { ...row, settlementDate: '2026-09-01' };
+    const lastDay = { ...row, settlementDate: '2026-10-31' };
+    const sold = { ...row, transactionType: 'SELL' };
+    const outside = { ...row, settlementDate: '2026-08-31' };
+    const result = await runCli(
+      f,
+      [accounts, page([firstDay, lastDay, sold, outside])],
+      ['transactions', ...period, 'transactionTypes=BUY'],
+    );
+    assert.equal(result.status, 2, result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout).data, [firstDay, lastDay]);
+    assert.deepEqual(JSON.parse(result.stdout).omissions, [
+      { index: 2, reason: 'invalid_item' },
+      { index: 3, reason: 'invalid_item' },
+    ]);
+    for (const filter of [[], ['transactionTypes=']]) {
+      const unfiltered = await runCli(
+        f,
+        [accounts, page([row, sold])],
+        ['transactions', ...period, ...filter],
+      );
+      assert.equal(unfiltered.status, 0, unfiltered.stdout);
+      assert.deepEqual(JSON.parse(unfiltered.stdout).data, [row, sold]);
+    }
+  } finally {
+    f.close();
+  }
+});
