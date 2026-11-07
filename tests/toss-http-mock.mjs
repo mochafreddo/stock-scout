@@ -36,7 +36,7 @@ globalThis.fetch = async (url, init) => {
   assert.equal(init.redirect, 'error');
   appendFileSync(
     process.env.TEST_TRACE,
-    `${JSON.stringify({ path: address.pathname, query: address.search, method: init.method, at: Date.now(), authorization: init.headers.authorization, body: init.body })}\n`,
+    `${JSON.stringify({ path: address.pathname, query: address.search, method: init.method, at: Date.now(), authorization: init.headers.authorization, account: init.headers['X-Tossinvest-Account'], body: init.body })}\n`,
   );
   if (address.pathname === '/oauth2/token') {
     assert.equal(init.headers['content-type'], 'application/x-www-form-urlencoded');
@@ -97,5 +97,6 @@ globalThis.fetch = async (url, init) => {
   }
   if (step.transport) throw new TypeError('synthetic-secret');
   if (step.hang) return new Promise(() => {});
+  if (step.rawBody) return new Response(step.rawBody, { status: step.status || 200 });
   return Response.json(step.body, { status: step.status || 200, headers: step.headers });
 };

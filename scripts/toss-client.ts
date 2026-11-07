@@ -28,6 +28,30 @@ export class TossError extends Error {
     this.requestId = requestId;
   }
 }
+type AccountSelection = { alias: string; accountSeq: string; scopes: string[] };
+function accountId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^(?:-[1-9]\d{0,18}|0|[1-9]\d{0,18})$/.test(value) &&
+    BigInt(value) >= -9223372036854775808n &&
+    BigInt(value) <= 9223372036854775807n
+  );
+}
+function accountSelection(value: unknown): AccountSelection {
+  const account = value as Partial<AccountSelection> | null;
+  if (
+    !account ||
+    typeof account.alias !== 'string' ||
+    !/^[a-z][a-z-]{0,39}$/.test(account.alias) ||
+    !accountId(account.accountSeq) ||
+    !Array.isArray(account.scopes) ||
+    !account.scopes.length ||
+    !account.scopes.every((scope) => scope === 'holdings' || scope === 'buying-power') ||
+    new Set(account.scopes).size !== account.scopes.length
+  )
+    throw new TossError('ACCOUNT_SELECTION_REQUIRED');
+  return { alias: account.alias, accountSeq: account.accountSeq, scopes: account.scopes };
+}
 type State = {
   fingerprint: string;
   nextAt: number;
@@ -43,6 +67,13 @@ function secure(path: string, directory = false) {
   )
     throw new TossError('AUTH_STORAGE');
 }
+function parseJson(text: string, provider = false) {
+  return JSON.parse(text, (key, value, context?: { source?: string }) => {
+    if (key !== 'accountSeq') return value;
+    const id = typeof value === 'number' ? context?.source : provider ? undefined : value;
+    return accountId(id) ? id : null;
+  });
+}
 function read(path: string) {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -55,13 +86,13 @@ function read(path: string) {
       stat.size > 16384
     )
       throw new TossError('AUTH_STORAGE');
-    return JSON.parse(readFileSync(fd, 'utf8'));
+    return parseJson(readFileSync(fd, 'utf8'));
   } finally {
     closeSync(fd);
   }
 }
-function save(directory: string, value: State) {
-  const target = join(directory, 'state.json');
+function save(directory: string, value: unknown, filename = 'state.json') {
+  const target = join(directory, filename);
   if (existsSync(target)) secure(target);
   const temporary = join(directory, `${randomUUID()}.tmp`);
   const fd = openSync(
@@ -108,7 +139,9 @@ function failure(response: Response, body: unknown) {
         response.headers.get('x-amz-cf-id'));
   const requestId = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;
   let code = 'UPSTREAM_ERROR';
-  if (response.status === 403) code = 'PERMISSION_DENIED';
+  if (providerCode === 'account-not-found' || providerCode === 'account-header-required')
+    code = 'ACCOUNT_SELECTION_REQUIRED';
+  else if (response.status === 403) code = 'PERMISSION_DENIED';
   else if (response.status === 401) code = 'AUTH_FAILED';
   else if (
     providerCode?.startsWith('unsupported-') ||
@@ -123,6 +156,7 @@ function failure(response: Response, body: unknown) {
 
 export class TossClient {
   readonly secrets = new Set<string>();
+  readonly accountIdentifiers = new Set<string>();
   private readonly directory: string;
   private readonly clientId: string;
   private readonly clientSecret: string;
@@ -159,6 +193,35 @@ export class TossClient {
     } catch (error) {
       throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
     }
+  }
+  async selectAccount(path: string) {
+    let selected: AccountSelection;
+    try {
+      selected = accountSelection(read(path));
+    } catch {
+      throw new TossError('ACCOUNT_SELECTION_REQUIRED');
+    }
+    this.load();
+    for (const secret of this.secrets)
+      if (selected.alias.includes(secret)) throw new TossError('SENSITIVE_OUTPUT');
+    await this.withLock('account.lock', async () => {
+      save(this.directory, { ...selected, fingerprint: this.fingerprint }, 'account.json');
+    });
+    return { alias: selected.alias, scopes: selected.scopes };
+  }
+  selectedAccount(scope: string) {
+    let selected: AccountSelection;
+    try {
+      const value = read(join(this.directory, 'account.json'));
+      if (value?.fingerprint !== this.fingerprint)
+        throw new TossError('ACCOUNT_SELECTION_REQUIRED');
+      selected = accountSelection(value);
+    } catch {
+      throw new TossError('ACCOUNT_SELECTION_REQUIRED');
+    }
+    if (!selected.scopes.includes(scope)) throw new TossError('ACCOUNT_SCOPE_DENIED');
+    this.accountIdentifiers.add(selected.accountSeq);
+    return selected;
   }
   private remaining() {
     return Math.min(
@@ -236,7 +299,7 @@ export class TossClient {
   private locked<T>(operation: (state: State) => Promise<T>) {
     return this.withLock('client.lock', () => operation(this.load()));
   }
-  private async transmit(path: string, token?: string) {
+  private async transmit(path: string, token?: string, account?: string) {
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, this.signal]);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -294,7 +357,10 @@ export class TossClient {
             redirect: 'error',
             signal,
             headers: token
-              ? { authorization: `Bearer ${token}` }
+              ? {
+                  authorization: `Bearer ${token}`,
+                  ...(account === undefined ? {} : { 'X-Tossinvest-Account': String(account) }),
+                }
               : { 'content-type': 'application/x-www-form-urlencoded' },
             ...(token
               ? {}
@@ -356,8 +422,9 @@ export class TossClient {
           }
           let body: unknown;
           try {
-            body = JSON.parse(
+            body = parseJson(
               new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)),
+              true,
             );
           } catch {
             if (response.ok) throw new TossError('RESPONSE_INVALID');
@@ -429,7 +496,7 @@ export class TossClient {
       return token;
     });
   }
-  async get(path: string) {
+  async get(path: string, account?: string) {
     if (!path.startsWith('/api/v1/') || /[\r\n#]/.test(path)) throw new TossError('INPUT_INVALID');
     let token = await this.token();
     let recovered = false,
@@ -437,7 +504,7 @@ export class TossClient {
     for (;;) {
       let result: { response: Response; body: unknown };
       try {
-        result = await this.transmit(path, token);
+        result = await this.transmit(path, token, account);
       } catch (error) {
         if (error instanceof TossError && error.code === 'NETWORK_ERROR' && !retried) {
           retried = true;

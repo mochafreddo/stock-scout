@@ -1,3 +1,4 @@
+import { buyingPowerResult, holdingsResult } from './toss-account.ts';
 import { candleQuery, candleResult } from './toss-candles.ts';
 import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
@@ -76,6 +77,9 @@ const endpoints: Record<string, string> = {
   candles: '/api/v1/candles',
   sessions: '/api/v1/market-calendar/US',
   constraints: '/api/v1/market-calendar/US',
+  'account-select': 'local:account-selection',
+  'buying-power': '/api/v1/buying-power',
+  holdings: '/api/v1/holdings',
 };
 const endpoint = Object.hasOwn(endpoints, command) ? endpoints[command] : endpoints.prices;
 const source = {
@@ -128,6 +132,12 @@ try {
               defaultCount: 50,
               maxCount: 50,
             },
+            {
+              name: 'account-select',
+              usage: 'node scripts/toss.ts account-select PROTECTED_JSON_FILE',
+            },
+            { name: 'holdings', usage: 'node scripts/toss.ts holdings [SYMBOL]' },
+            { name: 'buying-power', usage: 'node scripts/toss.ts buying-power CURRENCY' },
             { name: 'sessions', usage: 'node scripts/toss.ts sessions DATE' },
             { name: 'constraints', usage: 'node scripts/toss.ts constraints SYMBOL DATE' },
           ],
@@ -141,6 +151,60 @@ try {
     return payload(await client.get(`${source.endpoint}?${query}`));
   }
   async function lookup() {
+    if (command === 'account-select') {
+      if (!symbols || rest.length) throw new TossError('INPUT_INVALID');
+      client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
+      return { data: [await client.selectAccount(symbols)], omissions: [] };
+    }
+    if (command === 'buying-power' || command === 'holdings') {
+      if (
+        rest.length ||
+        (command === 'buying-power'
+          ? !symbols || !/^[A-Z]{3}$/.test(symbols)
+          : symbols !== undefined && !symbolPattern.test(symbols))
+      )
+        throw new TossError('INPUT_INVALID');
+      client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
+      const account = client.selectedAccount(command);
+      Object.assign(source, {
+        accountAlias: account.alias,
+        snapshot: 'unknown',
+        ...(command === 'buying-power'
+          ? { currency: symbols, scope: 'cash_based_excluding_margin' }
+          : {
+              scope: 'KR_US_stocks_excluding_options_bonds',
+              quantityUnit: 'securities',
+              priceUnit: 'currency_per_security',
+              ...(symbols ? { symbol: symbols } : {}),
+            }),
+      });
+      const accounts = payload(await client.get('/api/v1/accounts'));
+      if (
+        !Array.isArray(accounts) ||
+        accounts.some(
+          (row) =>
+            typeof row?.accountSeq !== 'string' ||
+            typeof row.accountNo !== 'string' ||
+            !row.accountNo ||
+            typeof row.accountType !== 'string' ||
+            !row.accountType,
+        )
+      )
+        throw new TossError('RESPONSE_INVALID');
+      for (const row of accounts) {
+        if (typeof row?.accountNo === 'string' && row.accountNo) client.secrets.add(row.accountNo);
+        if (typeof row?.accountSeq === 'string') client.accountIdentifiers.add(row.accountSeq);
+      }
+      const matches = accounts.filter((row) => row?.accountSeq === account.accountSeq);
+      if (!matches.length) throw new TossError('ACCOUNT_SELECTION_REQUIRED');
+      if (matches.length !== 1) throw new TossError('RESPONSE_INVALID');
+      const query = new URLSearchParams();
+      if (symbols) query.set(command === 'buying-power' ? 'currency' : 'symbol', symbols);
+      const value = payload(await client.get(`${endpoint}?${query}`, account.accountSeq));
+      return command === 'holdings'
+        ? holdingsResult(value, symbols)
+        : buyingPowerResult(value, symbols ?? '');
+    }
     if (command === 'sessions' || command === 'constraints') {
       const date = command === 'sessions' ? symbols : rest[0];
       if (
@@ -267,6 +331,7 @@ try {
       ? { providerCode: error.providerCode, requestId: error.requestId }
       : {}),
   };
+  if (containsSecret(JSON.stringify(detail), client?.accountIdentifiers)) detail = { code };
   if (containsSecret(JSON.stringify(detail), client?.secrets))
     detail = { code: 'SENSITIVE_OUTPUT' };
   console.log(
