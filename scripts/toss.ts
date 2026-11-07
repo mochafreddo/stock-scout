@@ -192,10 +192,10 @@ try {
       )
         throw new TossError('RESPONSE_INVALID');
       for (const row of accounts) {
-        if (typeof row?.accountNo === 'string' && row.accountNo) client.secrets.add(row.accountNo);
-        if (typeof row?.accountSeq === 'string') client.accountIdentifiers.add(row.accountSeq);
+        client.secrets.add(row.accountNo);
+        client.accountIdentifiers.add(row.accountSeq);
       }
-      const matches = accounts.filter((row) => row?.accountSeq === account.accountSeq);
+      const matches = accounts.filter((row) => row.accountSeq === account.accountSeq);
       if (!matches.length) throw new TossError('ACCOUNT_SELECTION_REQUIRED');
       if (matches.length !== 1) throw new TossError('RESPONSE_INVALID');
       const query = new URLSearchParams();
@@ -203,7 +203,7 @@ try {
       const value = payload(await client.get(`${endpoint}?${query}`, account.accountSeq));
       return command === 'holdings'
         ? holdingsResult(value, symbols)
-        : buyingPowerResult(value, symbols ?? '');
+        : buyingPowerResult(value, symbols);
     }
     if (command === 'sessions' || command === 'constraints') {
       const date = command === 'sessions' ? symbols : rest[0];

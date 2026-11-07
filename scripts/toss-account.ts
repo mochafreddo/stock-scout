@@ -21,7 +21,7 @@ function price(value: unknown) {
 function valuation(value: unknown, overview: boolean, profit = false) {
   if (!record(value)) throw new TossError('RESPONSE_INVALID');
   return {
-    ...(overview ? {} : !profit ? decimals(value, ['purchaseAmount']) : {}),
+    ...(!overview && !profit ? decimals(value, ['purchaseAmount']) : {}),
     ...(overview
       ? { amount: price(value.amount), amountAfterCost: price(value.amountAfterCost) }
       : decimals(value, ['amount', 'amountAfterCost'])),

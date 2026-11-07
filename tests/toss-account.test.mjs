@@ -361,7 +361,7 @@ test('duplicate and malformed selected account responses stop before financial H
   try {
     await selection(f);
     for (const rows of [
-      [accounts.body.result[0], { accountSeq: 741, accountNo: '99887766554' }],
+      [accounts.body.result[0], accounts.body.result[0]],
       [{ accountSeq: 741, accountType: 'BROKERAGE' }],
     ]) {
       const result = await runCli(f, [{ ...accounts, body: { result: rows } }], ['holdings']);

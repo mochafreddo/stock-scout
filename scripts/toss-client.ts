@@ -38,20 +38,24 @@ function accountId(value: unknown): value is string {
   );
 }
 function accountSelection(value: unknown): AccountSelection {
-  const account = value as Partial<AccountSelection> | null;
   if (
-    !account ||
-    typeof account.alias !== 'string' ||
-    !/^[a-z][a-z-]{0,39}$/.test(account.alias) ||
-    !accountId(account.accountSeq) ||
-    !Array.isArray(account.scopes) ||
-    !account.scopes.length ||
-    !account.scopes.every((scope) => scope === 'holdings' || scope === 'buying-power') ||
-    new Set(account.scopes).size !== account.scopes.length
+    !value ||
+    typeof value !== 'object' ||
+    !('alias' in value) ||
+    typeof value.alias !== 'string' ||
+    !/^[a-z][a-z-]{0,39}$/.test(value.alias) ||
+    !('accountSeq' in value) ||
+    typeof value.accountSeq !== 'string' ||
+    !('scopes' in value) ||
+    !Array.isArray(value.scopes) ||
+    !value.scopes.length ||
+    !value.scopes.every((scope) => scope === 'holdings' || scope === 'buying-power') ||
+    new Set(value.scopes).size !== value.scopes.length
   )
     throw new TossError('ACCOUNT_SELECTION_REQUIRED');
-  return { alias: account.alias, accountSeq: account.accountSeq, scopes: account.scopes };
+  return { alias: value.alias, accountSeq: value.accountSeq, scopes: value.scopes };
 }
+
 type State = {
   fingerprint: string;
   nextAt: number;
@@ -359,7 +363,7 @@ export class TossClient {
             headers: token
               ? {
                   authorization: `Bearer ${token}`,
-                  ...(account === undefined ? {} : { 'X-Tossinvest-Account': String(account) }),
+                  ...(account === undefined ? {} : { 'X-Tossinvest-Account': account }),
                 }
               : { 'content-type': 'application/x-www-form-urlencoded' },
             ...(token
