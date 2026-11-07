@@ -1,17 +1,9 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { test } from 'node:test';
-import { fixture, runAccountCli as runCli } from './toss-cli-helper.mjs';
+import { accounts, fixture, runAccountCli as runCli, selectAccount } from './toss-cli-helper.mjs';
 
-const accounts = {
-  path: '/api/v1/accounts',
-  body: { result: [{ accountSeq: 741, accountNo: '99887766554', accountType: 'BROKERAGE' }] },
-};
-async function select(f, scopes = ['orders', 'conditional-orders'], accountSeq = 741) {
-  const path = join(f.directory, 'selection-input.json');
-  writeFileSync(path, JSON.stringify({ alias: 'primary', accountSeq, scopes }), { mode: 0o600 });
-  return runCli(f, [], ['account-select', path]);
+function select(f, scopes = ['orders', 'conditional-orders'], accountSeq = 741) {
+  return selectAccount(f, accountSeq, scopes);
 }
 const order = {
   orderId: 'order-one',

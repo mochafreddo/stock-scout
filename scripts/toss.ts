@@ -274,7 +274,7 @@ try {
           ? orderResult(value, order)
           : undefined;
       if (result) {
-        if (!('page' in result) || !result.page) return result;
+        if (!result.page) return result;
         const cursor = result.page.nextCursor;
         if (typeof cursor !== 'string') return result;
         if (client.accountIdentifiers.has(cursor)) throw new TossError('SENSITIVE_OUTPUT');

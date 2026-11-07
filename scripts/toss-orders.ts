@@ -90,17 +90,17 @@ function parseOrder(value: unknown, conditional: boolean) {
       },
       { expireDate: validDate },
     );
-    result.first = condition(value.first);
-    if ('second' in value) result.second = value.second === null ? null : condition(value.second);
+    const first = condition(value.first);
+    const second =
+      'second' in value ? (value.second === null ? null : condition(value.second)) : undefined;
     if (
-      (value.type === 'SINGLE' && value.second != null) ||
-      ((value.type === 'OCO' || value.type === 'OTO') && !record(result.second)) ||
+      (value.type === 'SINGLE' && second != null) ||
       ((value.type === 'OCO' || value.type === 'OTO') &&
-        record(result.second) &&
-        record(result.first) &&
-        result.second.type !== result.first.type)
+        (second == null || second.type !== first.type))
     )
       throw new TossError('RESPONSE_INVALID');
+    result.first = first;
+    if ('second' in value) result.second = second;
     return result;
   }
   return {
@@ -148,40 +148,37 @@ export function orderResult(value: unknown, request: ReturnType<typeof orderQuer
     (paginated && value[key].length > Number(query.get('limit')))
   )
     throw new TossError('RESPONSE_INVALID');
+  const groups = conditional
+    ? { OPEN: ['WATCHING', 'PAUSED', 'ORDERING', 'ORDERED'], CLOSED: ['COMPLETED', 'EXPIRED'] }
+    : {
+        OPEN: ['PENDING', 'PARTIAL_FILLED', 'PENDING_CANCEL', 'PENDING_REPLACE'],
+        CLOSED: [
+          'FILLED',
+          'CANCELED',
+          'REJECTED',
+          'REPLACED',
+          'CANCEL_REJECTED',
+          'REPLACE_REJECTED',
+          'PARTIAL_FILLED',
+        ],
+      };
+  const knownStatuses = new Set(Object.values(groups).flat());
+  const requestedStatuses = groups[query.get('status') === 'OPEN' ? 'OPEN' : 'CLOSED'];
+  const symbol = query.get('symbol');
+  const from = query.get('from');
+  const to = query.get('to');
   const result = items(value[key], (row) => {
     try {
       const parsed = parseOrder(row, conditional);
-      const groups = conditional
-        ? { OPEN: ['WATCHING', 'PAUSED', 'ORDERING', 'ORDERED'], CLOSED: ['COMPLETED', 'EXPIRED'] }
-        : {
-            OPEN: ['PENDING', 'PARTIAL_FILLED', 'PENDING_CANCEL', 'PENDING_REPLACE'],
-            CLOSED: [
-              'FILLED',
-              'CANCELED',
-              'REJECTED',
-              'REPLACED',
-              'CANCEL_REJECTED',
-              'REPLACE_REJECTED',
-              'PARTIAL_FILLED',
-            ],
-          };
       const status = String(parsed.status);
       if (conditional && (status === 'HOLDING' || status === 'CANCELED')) return;
-      if (
-        Object.values(groups).flat().includes(status) &&
-        !groups[query.get('status') === 'OPEN' ? 'OPEN' : 'CLOSED'].includes(status)
-      )
-        return;
-      if (query.has('symbol') && parsed.symbol !== query.get('symbol')) return;
+      if (knownStatuses.has(status) && !requestedStatuses.includes(status)) return;
+      if (symbol !== null && parsed.symbol !== symbol) return;
       if (!conditional) {
         const date = new Date(Date.parse(String(parsed.orderedAt)) + 9 * 3600000)
           .toISOString()
           .slice(0, 10);
-        if (
-          (query.has('from') && date < String(query.get('from'))) ||
-          (query.has('to') && date > String(query.get('to')))
-        )
-          return;
+        if ((from !== null && date < from) || (to !== null && date > to)) return;
       }
       return parsed;
     } catch {

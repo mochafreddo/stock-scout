@@ -81,3 +81,13 @@ export function runAccountCli(f, steps, args) {
     TEST_CLOCK_START: String(Date.parse('2026-11-06T15:00:00Z') + accountExecution++ * 60000),
   });
 }
+
+export const accounts = {
+  path: '/api/v1/accounts',
+  body: { result: [{ accountSeq: 741, accountNo: '99887766554', accountType: 'BROKERAGE' }] },
+};
+export function selectAccount(f, accountSeq, scopes) {
+  const path = join(f.directory, 'selection-input.json');
+  writeFileSync(path, JSON.stringify({ alias: 'primary', accountSeq, scopes }), { mode: 0o600 });
+  return runAccountCli(f, [], ['account-select', path]);
+}

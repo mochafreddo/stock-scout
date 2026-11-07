@@ -1,14 +1,9 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { test } from 'node:test';
-import { fixture, runAccountCli as runCli } from './toss-cli-helper.mjs';
+import { accounts, fixture, runAccountCli as runCli, selectAccount } from './toss-cli-helper.mjs';
 
 const period = ['2026-09-01', '2026-10-31'];
-const accounts = {
-  path: '/api/v1/accounts',
-  body: { result: [{ accountSeq: 741, accountNo: '99887766554', accountType: 'BROKERAGE' }] },
-};
+
 const row = {
   transactionType: 'BUY',
   marketCountry: 'US',
@@ -32,10 +27,8 @@ const page = (transactions = [row], hasNext = false, nextCursor = null) => ({
   path: '/api/v1/transactions',
   body: { result: { transactions, hasNext, nextCursor } },
 });
-async function select(f, accountSeq = 741, scopes = ['transactions']) {
-  const path = join(f.directory, 'selection-input.json');
-  writeFileSync(path, JSON.stringify({ alias: 'primary', accountSeq, scopes }), { mode: 0o600 });
-  return runCli(f, [], ['account-select', path]);
+function select(f, accountSeq = 741, scopes = ['transactions']) {
+  return selectAccount(f, accountSeq, scopes);
 }
 
 test('transactions preserve settlement meaning, precision and duplicate rows on selected account', async () => {
@@ -367,7 +360,6 @@ test('transaction continuation retains the previous public context format and eq
   const f = fixture();
   try {
     await select(f);
-    // Characterizes the context emitted before order queries were introduced.
     const context = '292cbb842507e8289c40ba6c6ca9ed7a6efb271a0266d22ccd923146430f2910';
     for (const filter of [[], ['transactionTypes=']]) {
       const r = await runCli(
