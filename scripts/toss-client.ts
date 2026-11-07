@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -49,7 +49,9 @@ function accountSelection(value: unknown): AccountSelection {
     !('scopes' in value) ||
     !Array.isArray(value.scopes) ||
     !value.scopes.length ||
-    !value.scopes.every((scope) => scope === 'holdings' || scope === 'buying-power') ||
+    !value.scopes.every(
+      (scope) => scope === 'holdings' || scope === 'buying-power' || scope === 'transactions',
+    ) ||
     new Set(value.scopes).size !== value.scopes.length
   )
     throw new TossError('ACCOUNT_SELECTION_REQUIRED');
@@ -226,6 +228,20 @@ export class TossClient {
     if (!selected.scopes.includes(scope)) throw new TossError('ACCOUNT_SCOPE_DENIED');
     this.accountIdentifiers.add(selected.accountSeq);
     return selected;
+  }
+  accountCursorContext(accountSeq: string, query: URLSearchParams, cursor: string) {
+    return createHmac('sha256', this.clientSecret)
+      .update(
+        JSON.stringify([
+          this.clientId,
+          accountSeq,
+          query.get('from'),
+          query.get('to'),
+          query.get('transactionTypes') || '',
+          cursor,
+        ]),
+      )
+      .digest('hex');
   }
   private remaining() {
     return Math.min(

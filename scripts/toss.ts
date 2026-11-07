@@ -5,6 +5,7 @@ import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './to
 import { orderbookResult, tradesResult } from './toss-market.ts';
 import { constraintResult, sessionResult, validDate } from './toss-sessions.ts';
 import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
+import { transactionQuery, transactionResult } from './toss-transactions.ts';
 import { decimal, symbolPattern, validTime } from './toss-values.ts';
 
 function containsSecret(json: string, secrets?: Set<string>) {
@@ -80,6 +81,7 @@ const endpoints: Record<string, string> = {
   'account-select': 'local:account-selection',
   'buying-power': '/api/v1/buying-power',
   holdings: '/api/v1/holdings',
+  transactions: '/api/v1/transactions',
 };
 const endpoint = Object.hasOwn(endpoints, command) ? endpoints[command] : endpoints.prices;
 const source = {
@@ -136,6 +138,13 @@ try {
               name: 'account-select',
               usage: 'node scripts/toss.ts account-select PROTECTED_JSON_FILE',
             },
+            {
+              name: 'transactions',
+              usage:
+                'node scripts/toss.ts transactions FROM TO [limit=COUNT] [transactionTypes=TYPE,...] [cursor=CURSOR context=CONTEXT]',
+              defaultCount: 20,
+              maxCount: 100,
+            },
             { name: 'holdings', usage: 'node scripts/toss.ts holdings [SYMBOL]' },
             { name: 'buying-power', usage: 'node scripts/toss.ts buying-power CURRENCY' },
             { name: 'sessions', usage: 'node scripts/toss.ts sessions DATE' },
@@ -156,27 +165,49 @@ try {
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
       return { data: [await client.selectAccount(symbols)], omissions: [] };
     }
-    if (command === 'buying-power' || command === 'holdings') {
+    if (command === 'buying-power' || command === 'holdings' || command === 'transactions') {
+      const transaction = command === 'transactions' ? transactionQuery(symbols, rest) : undefined;
       if (
-        rest.length ||
-        (command === 'buying-power'
-          ? !symbols || !/^[A-Z]{3}$/.test(symbols)
-          : symbols !== undefined && !symbolPattern.test(symbols))
+        !transaction &&
+        (rest.length ||
+          (command === 'buying-power'
+            ? !symbols || !/^[A-Z]{3}$/.test(symbols)
+            : symbols !== undefined && !symbolPattern.test(symbols)))
       )
         throw new TossError('INPUT_INVALID');
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
       const account = client.selectedAccount(command);
+      if (
+        transaction?.context !== undefined &&
+        transaction.context !==
+          client.accountCursorContext(
+            account.accountSeq,
+            transaction.query,
+            transaction.query.get('cursor') ?? '',
+          )
+      )
+        throw new TossError('INPUT_INVALID');
       Object.assign(source, {
         accountAlias: account.alias,
         snapshot: 'unknown',
-        ...(command === 'buying-power'
-          ? { currency: symbols, scope: 'cash_based_excluding_margin' }
-          : {
-              scope: 'KR_US_stocks_excluding_options_bonds',
-              quantityUnit: 'securities',
-              priceUnit: 'currency_per_security',
-              ...(symbols ? { symbol: symbols } : {}),
-            }),
+        ...(transaction
+          ? {
+              from: transaction.query.get('from'),
+              to: transaction.query.get('to'),
+              transactionTypes: transaction.query.get('transactionTypes'),
+              limit: Number(transaction.query.get('limit')),
+              dateTimeZone: 'Asia/Seoul',
+              dateMeaning: 'settlementDate',
+              scope: 'KR_US_transactions_including_options_bonds',
+            }
+          : command === 'buying-power'
+            ? { currency: symbols, scope: 'cash_based_excluding_margin' }
+            : {
+                scope: 'KR_US_stocks_excluding_options_bonds',
+                quantityUnit: 'securities',
+                priceUnit: 'currency_per_security',
+                ...(symbols ? { symbol: symbols } : {}),
+              }),
       });
       const accounts = payload(await client.get('/api/v1/accounts'));
       if (
@@ -198,9 +229,30 @@ try {
       const matches = accounts.filter((row) => row.accountSeq === account.accountSeq);
       if (!matches.length) throw new TossError('ACCOUNT_SELECTION_REQUIRED');
       if (matches.length !== 1) throw new TossError('RESPONSE_INVALID');
-      const query = new URLSearchParams();
-      if (symbols) query.set(command === 'buying-power' ? 'currency' : 'symbol', symbols);
+      const query = transaction?.query ?? new URLSearchParams();
+      if (!transaction && symbols)
+        query.set(command === 'buying-power' ? 'currency' : 'symbol', symbols);
       const value = payload(await client.get(`${endpoint}?${query}`, account.accountSeq));
+      if (transaction) {
+        const result = transactionResult(value, query);
+        if (client.accountIdentifiers.has(String(result.page.nextCursor)))
+          throw new TossError('SENSITIVE_OUTPUT');
+        return {
+          ...result,
+          page: {
+            ...result.page,
+            ...(typeof result.page.nextCursor === 'string'
+              ? {
+                  context: client.accountCursorContext(
+                    account.accountSeq,
+                    query,
+                    result.page.nextCursor,
+                  ),
+                }
+              : {}),
+          },
+        };
+      }
       return command === 'holdings'
         ? holdingsResult(value, symbols)
         : buyingPowerResult(value, symbols);
