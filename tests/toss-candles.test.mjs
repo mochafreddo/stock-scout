@@ -129,6 +129,82 @@ test('candles reject response order and upper-bound violations instead of silent
   }
 });
 
+test('candles enforce inclusive bounds beyond millisecond precision', async (t) => {
+  for (const interval of ['1d', '1m']) {
+    const r = await lookup(
+      t,
+      { candles: [{ ...candle, timestamp: '2026-11-06T15:00:00.1235Z' }], nextBefore: null },
+      ['AAPL', interval, 'before=2026-11-06T15:00:00.1234Z'],
+    );
+    assert.equal(r.status, 1, r.stdout);
+    assert.equal(r.out.error.code, 'RESPONSE_INVALID');
+    assert.deepEqual(r.out.data, []);
+    assert.equal(r.stderr.trim(), 'RESPONSE_INVALID');
+  }
+});
+
+test('candles reject ascending submillisecond timestamps', async (t) => {
+  for (const interval of ['1d', '1m']) {
+    const r = await lookup(
+      t,
+      {
+        candles: [
+          { ...candle, timestamp: '2026-11-06T10:00:00.12340000000000000001-05:00' },
+          { ...candle, timestamp: '2026-11-07T00:00:00.12340000000000000002+09:00' },
+        ],
+        nextBefore: null,
+      },
+      ['AAPL', interval],
+    );
+    assert.equal(r.status, 1, r.stdout);
+    assert.equal(r.out.error.code, 'RESPONSE_INVALID');
+    assert.deepEqual(r.out.data, []);
+    assert.equal(r.stderr.trim(), 'RESPONSE_INVALID');
+  }
+});
+
+test('candles preserve exact boundaries across offsets and fractional precision', async (t) => {
+  for (const interval of ['1d', '1m']) {
+    for (const [before, timestamps] of [
+      [
+        '2026-11-06T15:00:00.1234Z',
+        [
+          '2026-11-07T00:00:00.123400+09:00',
+          '2026-11-06T10:00:00.12339999999999999999-05:00',
+          '2026-11-06T15:00:00.1Z',
+        ],
+      ],
+      [
+        '2026-11-06T15:00:00Z',
+        [
+          '2026-11-06T15:00:00.0000Z',
+          '2026-11-06T15:00:00Z',
+          '2026-11-06T14:59:59.99999999999999999999Z',
+        ],
+      ],
+      ['1969-12-31T23:59:59.1234Z', ['1969-12-31T23:59:59.1234Z', '1969-12-31T23:59:59.1233Z']],
+    ]) {
+      const r = await lookup(
+        t,
+        {
+          candles: timestamps.map((timestamp) => ({ ...candle, timestamp })),
+          nextBefore: before,
+        },
+        ['AAPL', interval, `before=${before}`],
+      );
+      assert.equal(r.status, 2, r.stdout);
+      assert.equal(r.stderr, '');
+      assert.deepEqual(
+        r.out.data.map((row) => row.timestamp),
+        timestamps,
+      );
+      assert.deepEqual(r.out.page, { nextBefore: before });
+      assert.deepEqual(r.out.omissions, [{ reason: 'next_page' }]);
+      assert.equal(new URLSearchParams(r.requests.at(-1).query).get('before'), before);
+    }
+  }
+});
+
 test('short and empty last pages succeed while missing pagination is partial', async (t) => {
   for (const candles of [[], [candle]]) {
     const r = await lookup(t, { candles, nextBefore: null });
