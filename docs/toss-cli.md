@@ -1,6 +1,6 @@
 # 토스 미국 종목 조회 JSON CLI
 
-미국 시장 순위와 거래 가능 종목 목록을 조회하고, 토스 식별자로 종목 정보·현재가·호가·최근 체결을 확인하는 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
+미국 시장 순위와 거래 가능 종목 목록을 조회하고, 토스 식별자로 종목 정보·현재가·호가·최근 체결·일봉·분봉을 확인하는 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
 
 ## 명령 발견과 실행
 
@@ -64,6 +64,33 @@ node scripts/toss.ts trades BRK.B 10
 `source`는 공급자·엔드포인트·요청 심볼·단위와 미확인 최신성·세션·동일 시점 스냅샷을 표시합니다. 체결에는 요청 `count`와 `scope="provider_current_day_recent_trades"`도 있습니다. 당일의 날짜 경계·시간대, 세션별 포함 범위·지연·실시간성은 이 REST 스키마만으로 확인되지 않습니다. 호가의 생략되거나 null인 시각을 `retrievedAt`으로 채우지 않으며, 체결 시각이 없으면 해당 항목을 정상 자료로 사용하지 않습니다.
 
 `node scripts/toss.ts trades AAPL cursor=X`나 `node scripts/toss.ts orderbook AAPL 10`은 HTTP 전에 `INPUT_INVALID`로 끝납니다. 공급자의 미지원 응답은 `UNSUPPORTED`, 권한·인증·호출 제한은 공통 오류 코드로 구분하세요. 체결 조회는 계좌의 개인 거래내역이 아닙니다. REST 한 번의 조회를 실시간 구독이나 전체 당일 체결 이력으로 해석하지 마세요. 주문 변경·계좌 조회·내장 판단 모델은 이 두 명령에 포함하지 않습니다.
+
+## 일봉과 분봉
+
+```sh
+node scripts/toss.ts candles AAPL 1d
+node scripts/toss.ts candles AAPL 1m count=200 adjusted=false
+node scripts/toss.ts candles AAPL 1m count=100 adjusted=true before=2026-11-06T09:31:00.123+09:00
+```
+
+`candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP]`는 봉 한 페이지를 조회합니다. `INTERVAL`은 일봉 `1d` 또는 1분봉 `1m`이며 두 주기 모두 같은 선택 인수를 지원합니다. 개수는 1~200, 기본값은 100이고 수정주가 요청은 기본 `true`입니다. 선택 인수 순서는 자유롭지만 같은 인수의 반복은 거부합니다. `before`는 오프셋을 포함한 유효한 ISO 8601 시각이며 해당 시각을 포함하는 상한입니다. 생략하면 최신 봉부터 조회합니다. 공급자는 시작일·종료일·다른 봉 주기 인수를 제공하지 않습니다. `from=...`, `to=...`, `cursor=...`나 주봉 요청을 임의로 변환하지 않습니다.
+
+2026-11-07 KST에 확인한 [공식 REST OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)의 엔드포인트는 `GET /api/v1/candles`이며 호출 제한 그룹은 `MARKET_DATA_CHART`입니다. [공식 FAQ](https://openapi.tossinvest.com/openapi-docs/faq.md)와 함께 다음 의미를 적용합니다. 표의 미국 세션 설명은 미국 종목에 해당하며 심볼의 시장·유형을 이 명령에서 별도로 확인하지 않습니다.
+
+| 자료 | 의미와 출력 |
+| --- | --- |
+| 가격·거래량 | `timestamp`, `openPrice`, `highPrice`, `lowPrice`, `closePrice`, `volume`, `currency`는 필수이며 null을 허용하지 않습니다. 가격·거래량은 최대 30자 소수 문자열을 그대로 보존합니다. `"0"`은 유효하며 누락·null·숫자 자료형을 0으로 채우지 않습니다. 통화는 비어 있지 않은 확장 코드도 보존합니다. `source.priceUnit`은 통화별 증권 단위 가격, `volumeUnit`은 증권 수량입니다. |
+| 일봉 시각 | 해당 거래일의 현지 자정입니다. FAQ의 미국 예시는 현지 자정을 한국 시각으로 표시하므로, 문자열의 날짜만 잘라 미국 거래일로 쓰지 마세요. 미국 거래일 구간은 뉴욕 시각 전일 20:00부터 당일 20:00까지입니다. 조회 시각·정규장 종료 시각과 구분하세요. |
+| 미국 일봉 세션 | OHLC는 정규장 기준이며 프리·애프터·데이마켓 체결을 제외합니다. 거래량은 종합 거래량으로 시간외 체결이 포함될 수 있습니다. `source.usSessionSemantics`에서 두 범위를 구분합니다. |
+| 분봉 시각·원천 | `timestamp`는 봉 종료 경계이며 `[timestamp - 1분, timestamp)`를 집계합니다. 미국 분봉은 일부 거래소 체결을 사용하고 거래가 없는 분의 봉을 만들지 않습니다. 구체적 원천·세션은 확정하지 않습니다. 일봉의 종합 거래량을 분봉 합계로 재구성하지 마세요. 미국 분봉은 2021-12-01 이후를 제공하며 일봉에는 이 기간 제한이 없습니다. |
+| 수정주가 | `source.adjusted`에 요청 선택값을 표시합니다. 미국 수정주가는 가격과 거래량을 함께 조정하며 기준가와 직전 정규장 종가의 차이가 5%를 초과할 때 적용됩니다. 기업행위 종류를 구분하지 않아 모든 배당·분배락의 반영을 보장하지 않습니다. 제공 시작 이전 구간은 `adjusted=false`여도 이미 조정된 자료일 수 있으므로 `source.originalPricesGuaranteed=false`를 표시합니다. |
+| 진행·완료 | 각 봉의 `inProgress`·`completion`은 `unknown`입니다. 응답에는 진행·완료 플래그와 공급자 현재 시각이 없고 이 명령은 일정을 추가 조회하지 않습니다. 로컬 시계보다 오래된 봉도 완료나 최종 확정으로 표시하지 않습니다. 현재 분의 봉도 포함될 수 있으며 미국 분봉은 늦게 보고된 체결로 과거 값이 바뀔 수 있습니다. `retrievedAt`은 조회 시각이며 자료 갱신 시각이 아닙니다. |
+
+`data`는 공급자 최신순과 같은 시각의 항목을 그대로 보존합니다. 20개 완료 세션 관문이나 장중 실행 거부를 적용하지 않습니다. 잘못된 필수 필드를 가진 항목은 `invalid_item`으로 제외하고, 유효 봉이 남으면 부분 결과를 반환합니다. 받은 항목이 모두 잘못됐거나 필수 배열·페이지 경계가 잘못되면 `RESPONSE_INVALID`입니다. 요청보다 많은 봉, 최신순 위반, 요청 `before`를 넘는 봉도 형식 오류입니다. 알려지지 않은 응답 필드는 출력하지 않습니다.
+
+`page.nextBefore`는 공급자의 다음 경계를 그대로 반환합니다. 값이 있으면 빈 페이지라도 `omissions=[{"reason":"next_page"}]`·`partial`·종료 코드 2입니다. 에이전트는 같은 심볼·주기·수정 선택으로 그 값을 다음 `before`에 그대로 넣으세요. 위 마지막 예시처럼 `+09:00`도 입력할 수 있으며 CLI가 `+`를 `%2B`로 인코딩합니다. 1밀리초를 빼거나 마지막 봉에서 경계를 새로 계산하지 마세요. 페이지 사이에 같은 봉이 나타나도 CLI는 임의로 제거하지 않습니다.
+
+`nextBefore=null`이면 마지막 페이지이며, 요청 개수보다 적거나 비어 있어도 다른 누락이 없으면 성공입니다. 필드가 생략되면 `page={}`·`pagination_unknown`·종료 코드 2로 끝나며 마지막 페이지로 추정하지 않습니다. 추가 자동 조회는 하지 않습니다. 예를 들어 합성 응답이 `{"candles":[],"nextBefore":"2026-11-06T09:31:00.123+09:00"}`이면 빈 `data`와 그 경계를 반환하고, 에이전트가 같은 인수에 `before=2026-11-06T09:31:00.123+09:00`을 더해 후속 페이지를 요청합니다.
 
 ## 종목 식별과 선택
 
@@ -143,7 +170,7 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 | 상태·종료 코드 | 의미 |
 | --- | --- |
 | `success`·0 | 유효한 응답입니다. `prices`의 정상 빈 배열은 성공, `stock`의 정상 빈 배열은 `NOT_FOUND`입니다. |
-| `partial`·2 | 유효 자료가 남지만 잘못된 행, 요청 종목 누락, 요청보다 짧은 순위 또는 종목 유형 미확인이 있습니다. `omissions`의 `reason`을 확인하세요. 특정 행이나 심볼에 해당하면 0부터 시작하는 `index` 또는 요청 `symbol`도 반환합니다. |
+| `partial`·2 | 유효 자료가 남지만 잘못된 행, 요청 종목 누락, 요청보다 짧은 순위, 종목 유형 미확인, 봉의 후속 페이지 또는 페이지 정보 미확인이 있습니다. `omissions`의 `reason`을 확인하세요. 특정 행이나 심볼에 해당하면 0부터 시작하는 `index` 또는 요청 `symbol`도 반환합니다. |
 | `error`·1 | 입력·조회 실패 또는 유효 행이 없는 잘못된 응답입니다. `data`는 빈 배열이며 `error.code`로 원인을 구분합니다. |
 
 오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다.
@@ -161,12 +188,12 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 ## 합성 검사와 후속 확장
 
 ```sh
-node --test tests/toss.test.mjs tests/toss-stock.test.mjs tests/toss-discovery.test.mjs tests/toss-market.test.mjs
+node --test tests/toss.test.mjs tests/toss-stock.test.mjs tests/toss-discovery.test.mjs tests/toss-market.test.mjs tests/toss-candles.test.mjs
 npm run typecheck
 ```
 
 공개 검증 경계는 실제 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP입니다. `tests/toss-cli-helper.mjs`의 `fixture`와 `runCli`는 보호된 합성 설정 및 하위 프로세스를 만들며, `tests/toss-http-mock.mjs`는 네트워크·시계만 대체합니다. 후속 티켓은 이 도우미에 HTTP 시나리오를 추가하고 명령별 소비자 출력을 검사하세요. 서로 독립적인 인증·시계 도우미를 다시 만들지 마세요. 실제 프로세스 경합 검사는 실제 시계를 사용합니다.
 
-`scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을, `scripts/toss-market.ts`가 호가·체결 응답 검증을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
+`scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을, `scripts/toss-market.ts`가 호가·체결 응답 검증을, `scripts/toss-candles.ts`가 봉 인수·응답·페이지 검증을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
 
 이번 검증은 합성 자료에 한정합니다. 실제 토스 조회, 실제 자격 증명 설정, 실제 자료 전달 허용, 공급자의 조회 전용 권한, Codex·Dot 각각의 연결과 전체 전환 완료는 별도 관문입니다. 기존 KIS·내장 모델 테스트는 기존 경로의 회귀 확인이며 새 토스 호환성의 근거가 아닙니다.

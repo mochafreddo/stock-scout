@@ -1,3 +1,4 @@
+import { candleQuery, candleResult } from './toss-candles.ts';
 import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
@@ -71,6 +72,7 @@ const endpoints: Record<string, string> = {
   tradable: '/api/v1/stocks/all',
   orderbook: '/api/v1/orderbook',
   trades: '/api/v1/trades',
+  candles: '/api/v1/candles',
 };
 const endpoint = Object.hasOwn(endpoints, command) ? endpoints[command] : endpoints.prices;
 const source = {
@@ -110,6 +112,14 @@ try {
             { name: 'stock', usage: 'node scripts/toss.ts stock SYMBOL [MARKET [ISIN]]' },
             { name: 'orderbook', usage: 'node scripts/toss.ts orderbook SYMBOL' },
             {
+              name: 'candles',
+              usage:
+                'node scripts/toss.ts candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP]',
+              intervals: ['1d', '1m'],
+              defaultCount: 100,
+              maxCount: 200,
+            },
+            {
               name: 'trades',
               usage: 'node scripts/toss.ts trades SYMBOL [COUNT]',
               defaultCount: 50,
@@ -126,6 +136,26 @@ try {
     return payload(await client.get(`${source.endpoint}?${query}`));
   }
   async function lookup() {
+    if (command === 'candles') {
+      const query = candleQuery(symbols, rest);
+      const daily = query.get('interval') === '1d';
+      Object.assign(source, {
+        symbol: symbols,
+        interval: query.get('interval'),
+        count: Number(query.get('count')),
+        adjusted: query.get('adjusted') === 'true',
+        originalPricesGuaranteed: false,
+        ...(query.has('before') ? { before: query.get('before') } : {}),
+        priceUnit: 'currency_per_security',
+        volumeUnit: 'securities',
+        timestampMeaning: daily ? 'trade_date_local_midnight' : 'minute_end_exclusive',
+        usSessionSemantics: {
+          ohlc: daily ? 'regular' : 'provider_trades_session_unknown',
+          volume: daily ? 'consolidated_including_extended_hours' : 'selected_US_exchanges',
+        },
+      });
+      return candleResult(await read(query), query);
+    }
     if (command === 'orderbook' || command === 'trades') {
       const count = rest[0] ?? '50';
       if (
@@ -189,6 +219,7 @@ try {
     status,
     data,
     omissions,
+    ...('page' in result ? { page: result.page } : {}),
     source,
     retrievedAt: new Date().toISOString(),
   });
