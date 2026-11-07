@@ -110,6 +110,106 @@ test('constraints distinguishes documented API rules from unprovided symbol elig
   );
 });
 
+test('sessions preserves positive submillisecond intervals across offsets and fractional precision', async (t) => {
+  for (const [startTime, endTime] of [
+    ['2026-03-25T22:30:00.1234+09:00', '2026-03-25T22:30:00.1235+09:00'],
+    ['2026-03-25T09:30:00.12340000000000000001-04:00', '2026-03-25T13:30:00.12340000000000000002Z'],
+    ['2026-03-25T13:30:00Z', '2026-03-25T22:30:00.00000000000000000001+09:00'],
+  ]) {
+    const today = Object.fromEntries([
+      ['date', day.date],
+      ...['dayMarket', 'preMarket', 'regularMarket', 'afterMarket'].map((name) => [
+        name,
+        { startTime, endTime },
+      ]),
+    ]);
+    const value = { ...calendar, today };
+    const r = await lookup(t, value);
+    assert.equal(r.status, 0, r.stdout);
+    assert.equal(r.stderr, '');
+    assert.deepEqual(r.out.data, [value]);
+    assert.deepEqual(r.out.omissions, []);
+  }
+});
+
+test('fractional acceptance cutoff preserves provider submillisecond digits when subtracting an hour', async (t) => {
+  for (const [endTime, expected] of [
+    ['2026-03-26T05:00:00.1234+09:00', '2026-03-25T19:00:00.1234Z'],
+    ['2026-03-25T20:00:00.00000000000000000001Z', '2026-03-25T19:00:00.00000000000000000001Z'],
+    ['2026-03-25T16:00:00.123400-04:00', '2026-03-25T19:00:00.123400Z'],
+    ['2026-03-26T05:00:00.1+09:00', '2026-03-25T19:00:00.100Z'],
+    ['2026-03-26T05:00:00.12+09:00', '2026-03-25T19:00:00.120Z'],
+    ['2026-03-26T00:30:00.99999999999999999999Z', '2026-03-25T23:30:00.99999999999999999999Z'],
+  ]) {
+    const regularMarket = { startTime: '2026-03-25T00:00:00-04:00', endTime };
+    const r = await lookup(t, { ...calendar, today: { ...day, regularMarket } }, [
+      'constraints',
+      'AAPL',
+      day.date,
+    ]);
+    assert.equal(r.status, 2, r.stdout);
+    assert.equal(r.stderr, '');
+    assert.deepEqual(r.out.data[0].fractional.acceptanceWindow, {
+      status: 'documented_schedule',
+      startTime: regularMarket.startTime,
+      endTime: expected,
+      endBoundary: 'unknown',
+    });
+    assert.deepEqual(r.out.data[0].calendar.today.regularMarket, regularMarket);
+  }
+});
+
+test('sessions rejects equal and reversed submillisecond instants across offsets', async (t) => {
+  for (const [startTime, endTime] of [
+    ['2026-03-25T22:30:00.1235+09:00', '2026-03-25T13:30:00.1234Z'],
+    ['2026-03-25T09:30:00.1234-04:00', '2026-03-25T22:30:00.123400+09:00'],
+    ['2026-03-25T13:30:00.0000Z', '2026-03-25T22:30:00+09:00'],
+    ['2026-03-25T13:30:00.12340000000000000002Z', '2026-03-25T13:30:00.12340000000000000001Z'],
+  ]) {
+    const r = await lookup(t, {
+      ...calendar,
+      today: { ...day, regularMarket: { startTime, endTime } },
+    });
+    assert.equal(r.status, 2, r.stdout);
+    assert.equal(r.stderr, '');
+    assert.equal('regularMarket' in r.out.data[0].today, false);
+    assert.deepEqual(r.out.omissions, [
+      { field: 'today.regularMarket', reason: 'invalid_session' },
+    ]);
+  }
+});
+
+test('fractional acceptance requires a strictly positive interval at submillisecond boundaries', async (t) => {
+  for (const [endTime, expected] of [
+    [
+      '2026-03-25T14:30:00.12340000000000000002Z',
+      {
+        status: 'documented_schedule',
+        startTime: '2026-03-25T22:30:00.12340000000000000001+09:00',
+        endTime: '2026-03-25T13:30:00.12340000000000000002Z',
+        endBoundary: 'unknown',
+      },
+    ],
+    ['2026-03-25T10:30:00.1234000000000000000100-04:00', { status: 'unknown' }],
+    ['2026-03-25T23:30:00.12340000000000000000+09:00', { status: 'unknown' }],
+    ['2026-03-25T13:45:00Z', { status: 'unknown' }],
+  ]) {
+    const regularMarket = {
+      startTime: '2026-03-25T22:30:00.12340000000000000001+09:00',
+      endTime,
+    };
+    const r = await lookup(t, { ...calendar, today: { ...day, regularMarket } }, [
+      'constraints',
+      'AAPL',
+      day.date,
+    ]);
+    assert.equal(r.status, 2, r.stdout);
+    assert.equal(r.stderr, '');
+    assert.deepEqual(r.out.data[0].calendar.today.regularMarket, regularMarket);
+    assert.deepEqual(r.out.data[0].fractional.acceptanceWindow, expected);
+  }
+});
+
 test('holidays, short sessions, standard time and local-clock changes use only provider sessions', async (t) => {
   for (const [today, expected] of [
     [closed('2026-07-03'), { status: 'closed' }],

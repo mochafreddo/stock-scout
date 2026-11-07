@@ -1,5 +1,5 @@
 import { TossError } from './toss-client.ts';
-import { record, validTime } from './toss-values.ts';
+import { laterThan, record, validTime } from './toss-values.ts';
 
 const sessions = ['dayMarket', 'preMarket', 'regularMarket', 'afterMarket'] as const;
 type MarketDay = { date: string } & Partial<
@@ -42,7 +42,7 @@ export function sessionResult(value: unknown, date: string) {
         typeof session.endTime === 'string' &&
         validTime(session.startTime) &&
         validTime(session.endTime) &&
-        Date.parse(session.startTime) < Date.parse(session.endTime) &&
+        laterThan(session.endTime, session.startTime) &&
         usDate.format(new Date(session.startTime)) >=
           (name === 'dayMarket' ? previousDate : day.date) &&
         usDate.format(new Date(session.startTime)) <= day.date &&
@@ -68,12 +68,15 @@ export function constraintResult(value: unknown, symbol: string, date: string) {
   let acceptanceWindow: Record<string, unknown> = { status: 'unknown' };
   if (regular === null) acceptanceWindow = { status: 'closed' };
   else if (regular !== undefined) {
-    const end = Date.parse(regular.endTime) - 3_600_000;
-    if (end > Date.parse(regular.startTime))
+    const fraction = (/\.\d+/.exec(regular.endTime)?.[0] ?? '.000').padEnd(4, '0');
+    const end = new Date(Date.parse(regular.endTime.replace(/\.\d+/, '')) - 3_600_000)
+      .toISOString()
+      .replace('.000', fraction);
+    if (laterThan(end, regular.startTime))
       acceptanceWindow = {
         status: 'documented_schedule',
         startTime: regular.startTime,
-        endTime: new Date(end).toISOString(),
+        endTime: end,
         endBoundary: 'unknown',
       };
   }

@@ -1,16 +1,5 @@
 import { TossError } from './toss-client.ts';
-import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
-
-function laterThan(left: string, right: string) {
-  const wholeSecondMillis = (value: string) => Date.parse(value.replace(/\.\d+/, ''));
-  const difference = wholeSecondMillis(left) - wholeSecondMillis(right);
-  if (difference !== 0) return difference > 0;
-  const fraction = (value: string) => /\.(\d+)/.exec(value)?.[1] ?? '';
-  const a = fraction(left);
-  const b = fraction(right);
-  const length = Math.max(a.length, b.length);
-  return a.padEnd(length, '0') > b.padEnd(length, '0');
-}
+import { decimal, items, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
 
 export function candleQuery(symbol: string | undefined, args: string[]) {
   const [interval] = args;
