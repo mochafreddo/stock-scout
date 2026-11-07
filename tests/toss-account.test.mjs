@@ -207,7 +207,7 @@ test('account inputs reject cursor reuse, unsupported filters and malformed sele
       const result = await selection(f, seq);
       assert.equal(JSON.parse(result.stdout).error.code, 'ACCOUNT_SELECTION_REQUIRED');
     }
-    for (const scopes of [[], ['orders'], ['holdings', 'holdings']]) {
+    for (const scopes of [[], ['submit-order'], ['holdings', 'holdings']]) {
       const result = await selection(f, 741, scopes);
       assert.equal(JSON.parse(result.stdout).error.code, 'ACCOUNT_SELECTION_REQUIRED');
     }

@@ -34,8 +34,8 @@ export function validTime(value: unknown) {
     month >= 1 && month <= 12 && day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate()
   );
 }
-export function decimal(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= 30 && /^-?\d+(?:\.\d+)?$/.test(value);
+export function decimal(value: unknown, maxLength = 30): value is string {
+  return typeof value === 'string' && value.length <= maxLength && /^-?\d+(?:\.\d+)?$/.test(value);
 }
 
 export function record(value: unknown): value is Record<string, unknown> {

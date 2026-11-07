@@ -2,14 +2,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { runCli as cli, fixture } from './toss-cli-helper.mjs';
-
-let execution = 0;
-function runCli(f, steps, args) {
-  return cli(f, steps, args, {
-    TEST_CLOCK_START: String(Date.parse('2026-11-06T15:00:00Z') + execution++ * 60000),
-  });
-}
+import { fixture, runAccountCli as runCli } from './toss-cli-helper.mjs';
 
 const period = ['2026-09-01', '2026-10-31'];
 const accounts = {
@@ -364,6 +357,25 @@ test('transaction type filters and inclusive settlement boundaries preserve vali
       );
       assert.equal(unfiltered.status, 0, unfiltered.stdout);
       assert.deepEqual(JSON.parse(unfiltered.stdout).data, [row, sold]);
+    }
+  } finally {
+    f.close();
+  }
+});
+
+test('transaction continuation retains the previous public context format and equivalent all-type filters', async () => {
+  const f = fixture();
+  try {
+    await select(f);
+    // Characterizes the context emitted before order queries were introduced.
+    const context = '292cbb842507e8289c40ba6c6ca9ed7a6efb271a0266d22ccd923146430f2910';
+    for (const filter of [[], ['transactionTypes=']]) {
+      const r = await runCli(
+        f,
+        [accounts, page([])],
+        ['transactions', ...period, ...filter, 'cursor=legacy-next', `context=${context}`],
+      );
+      assert.equal(r.status, 0, r.stdout);
     }
   } finally {
     f.close();

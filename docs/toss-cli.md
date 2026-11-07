@@ -33,7 +33,7 @@ node scripts/toss.ts buying-power KRW
 {"alias":"primary","accountSeq":741,"scopes":["holdings","buying-power"]}
 ```
 
-`alias`는 소문자 영문으로 시작하는 소문자·하이픈 1~40자입니다. 계좌번호나 키를 별칭으로 쓰지 마세요. `accountSeq`는 공식 계좌 목록의 int64 식별자(`-9223372036854775808`~`9223372036854775807`)이며 임의 순번이 아닙니다. JSON 정수 또는 같은 숫자의 문자열을 받으며, 큰 식별자는 문자열로 준비하세요. HTTP 헤더까지 숫자 자릿수를 그대로 보존합니다. `scopes`에는 `holdings`·`buying-power`·`transactions` 중 허용할 조회만 중복 없이 넣습니다. 적어도 하나가 필요합니다. `account-select`는 HTTP 없이 선택을 저장하며 계좌 존재 확인은 다음 조회에서 수행합니다. 별칭·계좌·범위를 바꾸려면 선택 파일을 명시적으로 수정한 뒤 같은 명령을 다시 실행하세요. 기존 선택 하나를 원자적으로 교체합니다.
+`alias`는 소문자 영문으로 시작하는 소문자·하이픈 1~40자입니다. 계좌번호나 키를 별칭으로 쓰지 마세요. `accountSeq`는 공식 계좌 목록의 int64 식별자(`-9223372036854775808`~`9223372036854775807`)이며 임의 순번이 아닙니다. JSON 정수 또는 같은 숫자의 문자열을 받으며, 큰 식별자는 문자열로 준비하세요. HTTP 헤더까지 숫자 자릿수를 그대로 보존합니다. `scopes`에는 `holdings`·`buying-power`·`transactions`·`orders`·`conditional-orders` 중 허용할 조회만 중복 없이 넣습니다. 적어도 하나가 필요합니다. `account-select`는 HTTP 없이 선택을 저장하며 계좌 존재 확인은 다음 조회에서 수행합니다. 별칭·계좌·범위를 바꾸려면 선택 파일을 명시적으로 수정한 뒤 같은 명령을 다시 실행하세요. 기존 선택 하나를 원자적으로 교체합니다.
 
 선택 정보는 기존 `TOSS_STATE_DIR`의 보호된 `account.json`에 계좌 식별자·별칭·허용 범위·클라이언트 지문으로 저장됩니다. 실제 인증 설정이나 보관 위치를 새로 승인하는 명령은 아닙니다. 입력 파일과 `account.json`은 에이전트에 전달하지 마세요. 실제 계좌 연결은 공급자 조회 전용 권한·접근 승인·자료 전달 허용이 확인된 뒤 별도로 수행합니다.
 
@@ -90,6 +90,44 @@ node scripts/toss.ts transactions 2026-09-01 2026-10-31 transactionTypes=BUY,SEL
 공급자의 `amount`·`netAmount`를 그대로 사용하세요. 예를 들어 수량 `0.123456789012345678`, 단가 null, 거래금액 `23.450000`, 수수료 `0.01`, 세금 `0`, 정산 금액 `23.469999`인 합성 내역의 정산 금액을 재계산하지 않습니다. 반올림·상품별 정산 규칙 때문에 단가×수량이나 거래금액±비용과 다를 수 있습니다. 증권 입출고의 금액·정산 금액은 null일 수 있습니다. 환전은 통화별 두 거래로 나오며, 취소·원거래 표시 규칙 때문에 합계를 실제 잔액 변화로 취급할 수 없습니다.
 
 기본은 한 페이지입니다. `page.hasNext=true`이면 0건이어도 `partial`·종료 코드 2와 `next_page` 사유 및 다음 커서·context를 반환합니다. `hasNext=false`·`nextCursor=null`인 정상 빈 결과는 success·0입니다. 필수 페이지 필드 누락·불일치는 오류이며, 잘못된 행은 인덱스와 사유를 남깁니다. 유효 행이 남으면 partial·2, 받은 행이 모두 잘못됐으면 `RESPONSE_INVALID`·1입니다.
+
+## 일반·조건 주문의 현재 상태
+
+```sh
+node scripts/toss.ts orders OPEN
+node scripts/toss.ts orders CLOSED symbol=AAPL from=2026-10-01 to=2026-11-07
+node scripts/toss.ts conditional-orders OPEN symbol=AAPL
+node scripts/toss.ts conditional-orders CLOSED limit=20
+node scripts/toss.ts orders CLOSED cursor=PROVIDER_CURSOR context=PREVIOUS_PAGE_CONTEXT
+```
+
+기본 계좌의 허용 범위에 `orders` 또는 `conditional-orders`를 명시적으로 추가하세요. 계좌 선택·별칭·가림·기본 비저장·공통 인증·실행 한도는 다른 계좌 조회와 같습니다. 주문 제출·정정·취소 명령이나 HTTP 경로는 제공하지 않습니다. 실제 조회와 금융자료 전달은 별도 접근 조건을 충족한 뒤 수행하세요.
+
+2026-11-07 KST에 확인한 [공식 OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)의 `GET /api/v1/orders`·`GET /api/v1/conditional-orders`를 사용합니다. 아래 목록 조회로 기존 주문의 현재 상태를 확인하며 단건 상세 명령은 추가하지 않습니다.
+
+| 입력·범위 | 계약 |
+| --- | --- |
+| `orders OPEN` | 국내·미국의 진행 중 일반 주문을 전량 반환합니다. 지정가·시장가·장마감지정가 등 Open API가 지원하는 호가 유형으로 접수된 주문만 조회됩니다. 장전·장후 시간외 종가 등 API 미지원 유형은 목록에 나타나지 않습니다. 앱의 모든 주문 목록으로 해석하지 마세요. |
+| `orders CLOSED` | 종료된 일반 주문 한 페이지입니다. 기본 20개, `limit=1`~`100`을 허용합니다. |
+| `conditional-orders OPEN\|CLOSED` | 국내·미국의 조건 주문 한 페이지입니다. API뿐 아니라 앱 등 다른 채널에서 등록한 SINGLE·OCO·OTO 등 모든 타입을 포함하며 타입 필터는 없습니다. 두 상태 모두 기본 20개, 최대 100개입니다. |
+| `symbol=...` | 두 명령의 선택 필터입니다. 영문 대소문자·숫자·점·하이픈을 허용합니다. |
+| `from=...`, `to=...` | 일반 주문만 지원하는 선택 날짜입니다. KST 주문 생성 시각 `orderedAt` 기준 양 끝 포함이며 결제일 필터가 아닙니다. 각각 생략할 수 있고 둘 다 생략하면 전체 기간입니다. `YYYY-MM-DD`와 시작일 ≤ 종료일을 검사합니다. 조건 주문에 날짜 필터를 추측해 추가하지 않습니다. |
+| `cursor=... context=...` | 일반 종료 주문과 모든 조건 주문에서 이전 출력의 `page.nextCursor`·`page.context`를 함께 복사하세요. 공급자 커서를 변형하지 않고 전송하며 context는 HTTP에 보내지 않습니다. 조건 주문 커서는 영문·숫자·밑줄·하이픈 형식입니다. 계좌·명령·상태·심볼·기간 변경 시 둘 다 빼고 첫 페이지부터 조회하세요. limit만 바꿀 수 있습니다. 일반 `OPEN`의 limit·cursor·context는 무시하지 않고 입력 오류로 거부합니다. |
+
+`OPEN`·`CLOSED`는 조회 그룹이며 항목의 세부 `status`와 다릅니다. 일반 OPEN 그룹은 PENDING·PARTIAL_FILLED·PENDING_CANCEL·PENDING_REPLACE, CLOSED 그룹은 FILLED·CANCELED·REJECTED·REPLACED·CANCEL_REJECTED·REPLACE_REJECTED·PARTIAL_FILLED를 포함합니다. PARTIAL_FILLED는 두 그룹에 나타날 수 있습니다. 조건 OPEN은 WATCHING·PAUSED·ORDERING·ORDERED, CLOSED는 COMPLETED·EXPIRED입니다. 조건별 `first.status`·`second.status`에는 HOLDING·CANCELED도 있습니다. 알려진 상태가 요청 그룹과 어긋난 항목은 제외합니다. 미래 응답 코드는 문자열 그대로 보존하며 알려진 상태로 추정하지 않습니다.
+
+| 응답 필드 | 필수·nullable·의미 |
+| --- | --- |
+| 일반 주문 | `orderId`, `symbol`, `side`, `orderType`, `timeInForce`, `status`, `quantity`, `currency`, `orderedAt`, `execution`이 필수입니다. `price`·`orderAmount`·`canceledAt`은 선택 nullable입니다. `orderedAt`은 주문 생성 시각, `canceledAt`은 취소 시각입니다. `orderType`·`timeInForce`를 함께 해석하세요. |
+| 일반 `execution` | `filledQuantity`가 필수 소수 문자열이고 `averageFilledPrice`·`filledAmount`·`commission`·`tax`·`filledAt`·`settlementDate`는 모두 필수 nullable입니다. `filledAt`은 최종 체결 시각, `settlementDate`는 KST 결제 예정일이며 거래내역의 `settled`를 대신하지 않습니다. |
+| 조건 주문 | `conditionalOrderId`, `type`, `status`, `symbol`, `market`, `quantity`, `orderType`, `first`, `createdAt`이 필수입니다. `createdAt`은 등록 시각입니다. `expireDate`는 선택 날짜이며 null을 허용하지 않습니다. `second`는 선택 nullable 조건입니다. SINGLE은 첫 조건, OCO·OTO는 두 조건을 제공하며 두 조건의 타입은 같습니다. |
+| 조건 `first`·`second` | 객체가 있으면 `type`·`status`·`orderSide`가 필수입니다. `triggerPrice`·`targetProfitRate`·`orderPrice`·`triggeredOrderId`는 선택 nullable입니다. `targetProfitRate`는 퍼센트 단위이며 `10.5`는 +10.5%입니다. `triggeredOrderId`는 조건으로 생성된 일반 주문 식별자입니다. |
+
+금액·가격·수량은 소수 문자열로 보존하며 null·0·누락을 구분합니다. 일반 주문의 소수 필드는 최대 30자이며 조건 주문 소수 필드에는 공식 스키마에 없는 길이 제한을 추가하지 않습니다. 일반 주문 가격과 체결 금액·수수료·세금은 `currency` 통화, `orderAmount`는 금액 기반 미국 시장가 매수 주문의 USD 금액입니다. 조건 주문 응답에는 통화 필드가 없으므로 `market`을 보존하고 통화를 만들어 넣지 않습니다. 수량은 주 단위이며 원자료의 금액을 수량×가격으로 재계산하지 않습니다. 조회 시각은 `retrievedAt`, 원천은 `source.endpoint`, 자료 갱신 시각과 동일 시점 스냅샷은 미확인입니다.
+
+일반 OPEN은 임의 페이지나 개수 자르기 없이 반환합니다. 나머지는 기본 한 페이지이며 공급자가 다음 페이지를 표시하면 빈 배열이어도 `partial`·종료 코드 2와 페이지 정보를 반환합니다. 조건 주문의 `nextCursor`는 공식 스키마에서 선택 필드입니다. 다음 페이지가 있는데 커서가 없거나 null이면 `missing_next_cursor`로 표시하며 완료로 해석하지 마세요. 일반 주문의 `orders`·`hasNext`·`nextCursor`, 조건 주문의 `conditionalOrders`·`hasNext`는 필수입니다. 잘못된 페이지 형식은 오류입니다.
+
+정상 빈 결과는 성공입니다. 잘못된 항목은 인덱스와 `invalid_item`으로 제외하고 유효 항목이 남으면 부분 결과, 전부 잘못됐으면 `RESPONSE_INVALID`입니다. 계좌·인증·권한·미지원·한도 오류는 공통 오류 계약을 따르며 빈 주문 목록으로 바꾸지 않습니다. 미지원 일반 주문 유형은 조회 범위의 한계이며 주문이 없다는 증거가 아닙니다. 출력은 정의된 필드만 포함하고 계좌번호·공급자 계좌 식별자·키·토큰을 가립니다.
 
 ## 미국 시장 순위와 거래 가능 종목
 
@@ -308,12 +346,12 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 ## 합성 검사와 후속 확장
 
 ```sh
-node --test tests/toss.test.mjs tests/toss-stock.test.mjs tests/toss-discovery.test.mjs tests/toss-market.test.mjs tests/toss-candles.test.mjs tests/toss-sessions.test.mjs tests/toss-account.test.mjs
+node --test tests/toss.test.mjs tests/toss-stock.test.mjs tests/toss-discovery.test.mjs tests/toss-market.test.mjs tests/toss-candles.test.mjs tests/toss-sessions.test.mjs tests/toss-account.test.mjs tests/toss-transactions.test.mjs tests/toss-orders.test.mjs
 npm run typecheck
 ```
 
 공개 검증 경계는 실제 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP입니다. `tests/toss-cli-helper.mjs`의 `fixture`와 `runCli`는 보호된 합성 설정 및 하위 프로세스를 만들며, `tests/toss-http-mock.mjs`는 네트워크·시계만 대체합니다. 후속 티켓은 이 도우미에 HTTP 시나리오를 추가하고 명령별 소비자 출력을 검사하세요. 서로 독립적인 인증·시계 도우미를 다시 만들지 마세요. 실제 프로세스 경합 검사는 실제 시계를 사용합니다.
 
-`scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을, `scripts/toss-market.ts`가 호가·체결 응답 검증을, `scripts/toss-candles.ts`가 봉 인수·응답·페이지 검증을 맡습니다. `scripts/toss-account.ts`가 보유·매수 가능 금액의 응답 검증을 맡고, `scripts/toss-sessions.ts`가 미국 세션 검증과 문서상 거래 제약을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
+`scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을, `scripts/toss-market.ts`가 호가·체결 응답 검증을, `scripts/toss-candles.ts`가 봉 인수·응답·페이지 검증을 맡습니다. `scripts/toss-orders.ts`가 일반·조건 주문 인수·현재 상태·페이지 검증을 맡고, `scripts/toss-transactions.ts`가 기간별 거래내역 검증을 맡습니다. `scripts/toss-account.ts`가 보유·매수 가능 금액의 응답 검증을 맡고, `scripts/toss-sessions.ts`가 미국 세션 검증과 문서상 거래 제약을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
 
 이번 검증은 합성 자료에 한정합니다. 실제 토스 조회, 실제 자격 증명 설정, 실제 자료 전달 허용, 공급자의 조회 전용 권한, Codex·Dot 각각의 연결과 전체 전환 완료는 별도 관문입니다. 기존 KIS·내장 모델 테스트는 기존 경로의 회귀 확인이며 새 토스 호환성의 근거가 아닙니다.

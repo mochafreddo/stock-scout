@@ -74,3 +74,10 @@ export const price = {
   currency: 'USD',
   timestamp: '2026-11-06T10:30:00-05:00',
 };
+
+let accountExecution = 0;
+export function runAccountCli(f, steps, args) {
+  return runCli(f, steps, args, {
+    TEST_CLOCK_START: String(Date.parse('2026-11-06T15:00:00Z') + accountExecution++ * 60000),
+  });
+}

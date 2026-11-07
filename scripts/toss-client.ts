@@ -49,8 +49,8 @@ function accountSelection(value: unknown): AccountSelection {
     !('scopes' in value) ||
     !Array.isArray(value.scopes) ||
     !value.scopes.length ||
-    !value.scopes.every(
-      (scope) => scope === 'holdings' || scope === 'buying-power' || scope === 'transactions',
+    !value.scopes.every((scope) =>
+      ['holdings', 'buying-power', 'transactions', 'orders', 'conditional-orders'].includes(scope),
     ) ||
     new Set(value.scopes).size !== value.scopes.length
   )
@@ -229,17 +229,30 @@ export class TossClient {
     this.accountIdentifiers.add(selected.accountSeq);
     return selected;
   }
-  accountCursorContext(accountSeq: string, query: URLSearchParams, cursor: string) {
+  accountCursorContext(
+    accountSeq: string,
+    query: URLSearchParams,
+    cursor: string,
+    endpoint: string,
+  ) {
+    const filters = new URLSearchParams(query);
+    filters.delete('cursor');
+    filters.delete('limit');
+    filters.sort();
     return createHmac('sha256', this.clientSecret)
       .update(
-        JSON.stringify([
-          this.clientId,
-          accountSeq,
-          query.get('from'),
-          query.get('to'),
-          query.get('transactionTypes') || '',
-          cursor,
-        ]),
+        JSON.stringify(
+          endpoint === '/api/v1/transactions'
+            ? [
+                this.clientId,
+                accountSeq,
+                query.get('from'),
+                query.get('to'),
+                query.get('transactionTypes') || '',
+                cursor,
+              ]
+            : [this.clientId, accountSeq, endpoint, filters.toString(), cursor],
+        ),
       )
       .digest('hex');
   }
