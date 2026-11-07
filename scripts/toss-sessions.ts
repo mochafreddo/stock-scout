@@ -2,18 +2,17 @@ import { TossError } from './toss-client.ts';
 import { record, validTime } from './toss-values.ts';
 
 const sessions = ['dayMarket', 'preMarket', 'regularMarket', 'afterMarket'] as const;
+type MarketDay = { date: string } & Partial<
+  Record<(typeof sessions)[number], { startTime: string; endTime: string } | null>
+>;
 const usDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
 export function validDate(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-    validTime(`${value}T00:00:00Z`)
-  );
+  return typeof value === 'string' && validTime(`${value}T00:00:00Z`);
 }
 
 export function sessionResult(value: unknown, date: string) {
   if (!record(value)) throw new TossError('RESPONSE_INVALID');
-  const data: Record<string, unknown> = {};
+  const data: Record<string, MarketDay> = {};
   const omissions: { field: string; reason: string }[] = [];
   for (const role of ['today', 'previousBusinessDay', 'nextBusinessDay']) {
     const day = value[role];
@@ -30,7 +29,7 @@ export function sessionResult(value: unknown, date: string) {
       omissions.push({ field: role, reason: 'invalid_day' });
       continue;
     }
-    const parsed: Record<string, unknown> = { date: day.date };
+    const parsed: MarketDay = { date: day.date };
     const previousDate = new Date(Date.parse(`${day.date}T00:00:00Z`) - 86_400_000)
       .toISOString()
       .slice(0, 10);
@@ -65,15 +64,10 @@ export function sessionResult(value: unknown, date: string) {
 
 export function constraintResult(value: unknown, symbol: string, date: string) {
   const calendar = sessionResult(value, date);
-  const today = calendar.data[0].today;
-  const regular = record(today) ? today.regularMarket : undefined;
+  const regular = calendar.data[0].today.regularMarket;
   let acceptanceWindow: Record<string, unknown> = { status: 'unknown' };
   if (regular === null) acceptanceWindow = { status: 'closed' };
-  else if (
-    record(regular) &&
-    typeof regular.startTime === 'string' &&
-    typeof regular.endTime === 'string'
-  ) {
+  else if (regular !== undefined) {
     const end = Date.parse(regular.endTime) - 3_600_000;
     if (end > Date.parse(regular.startTime))
       acceptanceWindow = {

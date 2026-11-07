@@ -21,7 +21,7 @@ const calendar = {
   previousBusinessDay: closed('2026-03-24'),
   nextBusinessDay: closed('2026-03-26'),
 };
-async function lookup(t, result = calendar, args = ['sessions', day.date], extra = {}, steps) {
+async function lookup(t, result = calendar, args = ['sessions', day.date], extra, steps) {
   const f = fixture();
   t.after(f.close);
   const r = await runCli(
@@ -116,7 +116,6 @@ test('holidays, short sessions, standard time and local-clock changes use only p
     [
       {
         ...closed('2026-11-27'),
-        date: '2026-11-27',
         regularMarket: {
           startTime: '2026-11-27T23:30:00+09:00',
           endTime: '2026-11-28T03:00:00+09:00',
