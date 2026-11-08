@@ -4,7 +4,7 @@
 
 ## 토스 조회 도구 전환
 
-새 제품은 외부 AI 에이전트가 필요한 자료를 조회하는 로컬 JSON CLI입니다. [미국 순위·거래 가능 종목·종목 정보·가격 조회 안내](docs/toss-cli.md)에서 `node scripts/toss.ts --help`로 명령을 발견할 수 있습니다. 구현 범위는 [현재가 #285](https://github.com/mochafreddo/stock-scout/issues/285), [종목 정보 #286](https://github.com/mochafreddo/stock-scout/issues/286), [순위와 거래 가능 종목 목록 #287](https://github.com/mochafreddo/stock-scout/issues/287), [호가와 최근 체결 #288](https://github.com/mochafreddo/stock-scout/issues/288)입니다. 새 요구사항은 [#278의 통합 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)를 따릅니다. 실제 토스 조회·자료 전달 허용·Codex 및 Dot 연결은 미검증이며, 아래 기존 KIS 제품은 전환 검증 전까지 유지합니다.
+새 제품은 외부 AI 에이전트가 필요한 자료를 조회하는 로컬 JSON CLI입니다. [미국 순위·거래 가능 종목·종목 정보·가격 조회 안내](docs/toss-cli.md)에서 `node scripts/toss.ts --help`로 명령을 발견할 수 있습니다. 초기 구현 이슈는 [현재가 #285](https://github.com/mochafreddo/stock-scout/issues/285), [종목 정보 #286](https://github.com/mochafreddo/stock-scout/issues/286), [순위와 거래 가능 종목 목록 #287](https://github.com/mochafreddo/stock-scout/issues/287), [호가와 최근 체결 #288](https://github.com/mochafreddo/stock-scout/issues/288)입니다. 새 요구사항은 [#278의 통합 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)를 따릅니다. Codex와 dots의 최소 합성 CLI 연결 결과는 [환경별 검증 기록](docs/toss-agent-validation.md)에서 확인할 수 있습니다. 실제 토스 자료를 사용하는 전체 도구 모음의 에이전트 연결은 별도 검증 대상이며, 아래 기존 KIS 제품은 전환 검증 전까지 유지합니다.
 
 ## 시작하기
 
