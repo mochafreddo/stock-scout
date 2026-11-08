@@ -4,6 +4,8 @@
 
 ## 명령 발견과 실행
 
+Codex와 dots에서 합성 자료로 연결을 확인하려면 [에이전트 사용 지침](toss-agent-usage.md)을 읽고 같은 CLI 경로를 사용하세요. 정상·부분 결과·오류의 [환경별 검증 기록](toss-agent-validation.md)은 실제 토스 조회와 구분합니다.
+
 저장소 루트에서 실행하세요. Node 환경 준비는 [시작 안내](getting-started.md)를 따르세요.
 
 ```sh
