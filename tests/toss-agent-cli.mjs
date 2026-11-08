@@ -24,6 +24,7 @@ try {
     isCommonShare: true,
     isinCode: '',
   };
+  const boundary = '2026-11-06T09:31:00.123+09:00';
   const responses = {
     prices: {
       path: '/api/v1/prices',
@@ -46,29 +47,27 @@ try {
       },
     },
     tradable: { path: '/api/v1/stocks/all', result: [listed] },
+    candles: {
+      path: '/api/v1/candles',
+      result: args.includes(`before=${boundary}`)
+        ? {
+            candles: [
+              {
+                timestamp: boundary,
+                openPrice: '10',
+                highPrice: '11',
+                lowPrice: '9',
+                closePrice: '10.0100',
+                volume: '0',
+                currency: 'USD',
+              },
+            ],
+            nextBefore: null,
+          }
+        : { candles: [], nextBefore: boundary },
+    },
   };
-  const response = responses[args[0]];
-  const boundary = '2026-11-06T09:31:00.123+09:00';
-  const candleResponse = {
-    path: '/api/v1/candles',
-    result: args.includes(`before=${boundary}`)
-      ? {
-          candles: [
-            {
-              timestamp: boundary,
-              openPrice: '10',
-              highPrice: '11',
-              lowPrice: '9',
-              closePrice: '10.0100',
-              volume: '0',
-              currency: 'USD',
-            },
-          ],
-          nextBefore: null,
-        }
-      : { candles: [], nextBefore: boundary },
-  };
-  const selected = args[0] === 'candles' ? candleResponse : response;
+  const selected = responses[args[0]];
   const result = await runCli(
     f,
     selected
@@ -86,8 +85,10 @@ try {
       : [],
     args,
   );
-  if (args[0] === 'candles' && result.status !== 1) {
-    const query = new URLSearchParams(result.requests.at(-1)?.query);
+  if (args[0] === 'candles' && (result.status === 0 || result.status === 2)) {
+    const request = result.requests.at(-1);
+    assert.equal(request.path, '/api/v1/candles');
+    const query = new URLSearchParams(request.query);
     assert.equal(
       query.get('before'),
       args.find((arg) => arg.startsWith('before='))?.slice(7) ?? null,
