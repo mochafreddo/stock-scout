@@ -275,9 +275,21 @@ test('account HTTP errors stay errors and recovery retains selected account head
       );
       assert.equal(result.status, 1, result.stdout);
       assert.equal(JSON.parse(result.stdout).error.code, expected);
+      assert.equal(JSON.parse(result.stdout).source.accountAlias, 'primary');
+      assert.equal(JSON.parse(result.stdout).source.currency, 'USD');
+      assert.equal(JSON.parse(result.stdout).source.scope, 'cash_based_excluding_margin');
       assert.match(result.stderr, new RegExp(expected));
       assert.doesNotMatch(result.stdout + result.stderr, /99887766554|accountSeq/);
     }
+    const unavailable = await runCli(
+      f,
+      [{ ...accounts, status: 403, body: { error: { code: 'ip-not-allowed' } } }],
+      ['buying-power', 'USD'],
+    );
+    assert.equal(JSON.parse(unavailable.stdout).error.code, 'PERMISSION_DENIED');
+    assert.equal(JSON.parse(unavailable.stdout).source.accountAlias, 'primary');
+    assert.equal(JSON.parse(unavailable.stdout).source.currency, 'USD');
+    assert.equal(JSON.parse(unavailable.stdout).source.scope, 'cash_based_excluding_margin');
     writeFileSync(f.trace, '');
     const result = await runCli(
       f,

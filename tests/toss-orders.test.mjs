@@ -168,10 +168,13 @@ test('order pages keep empty-page cursors and bind continuation to endpoint, acc
         const changed = await runCli(f, [], [...args, ...continuation]);
         assert.equal(changed.status, 1, changed.stdout);
         assert.equal(JSON.parse(changed.stdout).error.code, 'INPUT_INVALID');
+        assert.deepEqual(changed.requests, next.requests);
+        assert.equal('accountAlias' in JSON.parse(changed.stdout).source, false);
       }
       await select(f, ['orders', 'conditional-orders'], 742);
       const changed = await runCli(f, [], [command, 'CLOSED', 'symbol=AAPL', ...continuation]);
       assert.equal(JSON.parse(changed.stdout).error.code, 'INPUT_INVALID');
+      assert.deepEqual(changed.requests, next.requests);
     } finally {
       f.close();
     }

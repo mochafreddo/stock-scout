@@ -1,6 +1,6 @@
 import { buyingPowerResult, holdingsResult } from './toss-account.ts';
 import { candleQuery, candleResult } from './toss-candles.ts';
-import { TossClient, TossError } from './toss-client.ts';
+import { payload, TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
 import { orderQuery, orderResult } from './toss-orders.ts';
@@ -8,12 +8,6 @@ import { constraintResult, sessionResult, validDate } from './toss-sessions.ts';
 import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
 import { transactionQuery, transactionResult } from './toss-transactions.ts';
 import { decimal, symbolPattern, validTime } from './toss-values.ts';
-
-function containsSecret(json: string, secrets?: Set<string>) {
-  for (const secret of secrets ?? [])
-    if (json.includes(JSON.stringify(secret).slice(1, -1))) return true;
-  return false;
-}
 
 function priceResult(rows: unknown[], symbols: string) {
   const requested = new Set(symbols.split(','));
@@ -57,11 +51,6 @@ function priceResult(rows: unknown[], symbols: string) {
       if (!data.some((row) => row.symbol === symbol))
         omissions.push({ symbol, reason: 'missing_item' });
   return { data, omissions };
-}
-function payload(body: unknown) {
-  if (!body || typeof body !== 'object' || !('result' in body) || 'error' in body)
-    throw new TossError('RESPONSE_INVALID');
-  return body.result;
 }
 const interruption = new AbortController();
 const interrupt = () => interruption.abort();
@@ -200,95 +189,53 @@ try {
       )
         throw new TossError('INPUT_INVALID');
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
-      const account = client.selectedAccount(command);
-      if (
-        paged?.context !== undefined &&
-        paged.context !==
-          client.accountCursorContext(
-            account.accountSeq,
-            paged.query,
-            paged.query.get('cursor') ?? '',
-            endpoint,
-          )
-      )
-        throw new TossError('INPUT_INVALID');
-      Object.assign(source, {
-        accountAlias: account.alias,
-        snapshot: 'unknown',
-        ...(order
-          ? {
-              ...Object.fromEntries([...order.query].filter(([key]) => key !== 'cursor')),
-              scope: order.conditional
-                ? 'KR_US_all_channels_conditional_orders'
-                : 'KR_US_API_supported_order_types_only',
-              dateTimeZone: 'Asia/Seoul',
-              dateMeaning: order.conditional ? 'createdAt' : 'orderedAt',
-              quantityUnit: 'securities',
-              priceUnit: 'currency_per_security',
-            }
-          : transaction
-            ? {
-                from: transaction.from,
-                to: transaction.to,
-                transactionTypes: transaction.query.get('transactionTypes'),
-                limit: Number(transaction.query.get('limit')),
-                dateTimeZone: 'Asia/Seoul',
-                dateMeaning: 'settlementDate',
-                scope: 'KR_US_transactions_including_options_bonds',
-              }
-            : command === 'buying-power'
-              ? { currency: symbols, scope: 'cash_based_excluding_margin' }
-              : {
-                  scope: 'KR_US_stocks_excluding_options_bonds',
-                  quantityUnit: 'securities',
-                  priceUnit: 'currency_per_security',
-                  ...(symbols ? { symbol: symbols } : {}),
-                }),
-      });
-      const accounts = payload(await client.get('/api/v1/accounts'));
-      if (
-        !Array.isArray(accounts) ||
-        accounts.some(
-          (row) =>
-            typeof row?.accountSeq !== 'string' ||
-            typeof row.accountNo !== 'string' ||
-            !row.accountNo ||
-            typeof row.accountType !== 'string' ||
-            !row.accountType,
-        )
-      )
-        throw new TossError('RESPONSE_INVALID');
-      for (const row of accounts) {
-        client.secrets.add(row.accountNo);
-        client.accountIdentifiers.add(row.accountSeq);
-      }
-      const matches = accounts.filter((row) => row.accountSeq === account.accountSeq);
-      if (!matches.length) throw new TossError('ACCOUNT_SELECTION_REQUIRED');
-      if (matches.length !== 1) throw new TossError('RESPONSE_INVALID');
       const query = paged?.query ?? new URLSearchParams();
       if (!paged && symbols) query.set(command === 'buying-power' ? 'currency' : 'symbol', symbols);
-      const value = payload(await client.get(`${endpoint}?${query}`, account.accountSeq));
-      const result = transaction
-        ? transactionResult(value, transaction)
-        : order
-          ? orderResult(value, order)
-          : undefined;
-      if (result) {
-        if (!result.page) return result;
-        const cursor = result.page.nextCursor;
-        if (typeof cursor !== 'string') return result;
-        if (client.accountIdentifiers.has(cursor)) throw new TossError('SENSITIVE_OUTPUT');
-        return {
-          ...result,
-          page: {
-            ...result.page,
-            context: client.accountCursorContext(account.accountSeq, query, cursor, endpoint),
-          },
-        };
-      }
-      return command === 'holdings'
-        ? holdingsResult(value, symbols)
-        : buyingPowerResult(value, symbols);
+      return client.queryAccount(
+        { scope: command, endpoint, query, context: paged?.context },
+        (value) =>
+          transaction
+            ? transactionResult(value, transaction)
+            : order
+              ? orderResult(value, order)
+              : command === 'holdings'
+                ? holdingsResult(value, symbols)
+                : buyingPowerResult(value, symbols),
+        (alias) =>
+          Object.assign(source, {
+            accountAlias: alias,
+            snapshot: 'unknown',
+            ...(order
+              ? {
+                  ...Object.fromEntries([...order.query].filter(([key]) => key !== 'cursor')),
+                  scope: order.conditional
+                    ? 'KR_US_all_channels_conditional_orders'
+                    : 'KR_US_API_supported_order_types_only',
+                  dateTimeZone: 'Asia/Seoul',
+                  dateMeaning: order.conditional ? 'createdAt' : 'orderedAt',
+                  quantityUnit: 'securities',
+                  priceUnit: 'currency_per_security',
+                }
+              : transaction
+                ? {
+                    from: transaction.from,
+                    to: transaction.to,
+                    transactionTypes: transaction.query.get('transactionTypes'),
+                    limit: Number(transaction.query.get('limit')),
+                    dateTimeZone: 'Asia/Seoul',
+                    dateMeaning: 'settlementDate',
+                    scope: 'KR_US_transactions_including_options_bonds',
+                  }
+                : command === 'buying-power'
+                  ? { currency: symbols, scope: 'cash_based_excluding_margin' }
+                  : {
+                      scope: 'KR_US_stocks_excluding_options_bonds',
+                      quantityUnit: 'securities',
+                      priceUnit: 'currency_per_security',
+                      ...(symbols ? { symbol: symbols } : {}),
+                    }),
+          }),
+      );
     }
     if (command === 'sessions' || command === 'constraints') {
       const date = command === 'sessions' ? symbols : rest[0];
@@ -404,7 +351,7 @@ try {
     source,
     retrievedAt: new Date().toISOString(),
   });
-  if (containsSecret(output, client?.secrets)) throw new TossError('SENSITIVE_OUTPUT');
+  if (client?.containsSecret(output)) throw new TossError('SENSITIVE_OUTPUT');
   console.log(output);
   process.exitCode = status === 'partial' ? 2 : 0;
 } catch (error) {
@@ -416,17 +363,14 @@ try {
       ? { providerCode: error.providerCode, requestId: error.requestId }
       : {}),
   };
-  if (containsSecret(JSON.stringify(detail), client?.accountIdentifiers)) detail = { code };
-  if (containsSecret(JSON.stringify(detail), client?.secrets))
-    detail = { code: 'SENSITIVE_OUTPUT' };
+  if (client?.containsAccountIdentifier(JSON.stringify(detail))) detail = { code };
+  if (client?.containsSecret(JSON.stringify(detail))) detail = { code: 'SENSITIVE_OUTPUT' };
   console.log(
     JSON.stringify({
       version: 1,
       status: 'error',
       data: [],
-      source: containsSecret(JSON.stringify(source), client?.secrets)
-        ? { provider: 'tossinvest' }
-        : source,
+      source: client?.containsSecret(JSON.stringify(source)) ? { provider: 'tossinvest' } : source,
       retrievedAt: new Date().toISOString(),
       error: detail,
     }),

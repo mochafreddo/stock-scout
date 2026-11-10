@@ -29,6 +29,15 @@ export class TossError extends Error {
   }
 }
 type AccountSelection = { alias: string; accountSeq: string; scopes: string[] };
+function contains(json: string, values: Set<string>) {
+  for (const value of values) if (json.includes(JSON.stringify(value).slice(1, -1))) return true;
+  return false;
+}
+export function payload(body: unknown) {
+  if (!body || typeof body !== 'object' || !('result' in body) || 'error' in body)
+    throw new TossError('RESPONSE_INVALID');
+  return body.result;
+}
 function accountId(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -161,8 +170,8 @@ function failure(response: Response, body: unknown) {
 }
 
 export class TossClient {
-  readonly secrets = new Set<string>();
-  readonly accountIdentifiers = new Set<string>();
+  private readonly secrets = new Set<string>();
+  private readonly accountIdentifiers = new Set<string>();
   private readonly directory: string;
   private readonly clientId: string;
   private readonly clientSecret: string;
@@ -215,7 +224,59 @@ export class TossClient {
     });
     return { alias: selected.alias, scopes: selected.scopes };
   }
-  selectedAccount(scope: string) {
+  containsSecret(json: string) {
+    return contains(json, this.secrets);
+  }
+  containsAccountIdentifier(json: string) {
+    return contains(json, this.accountIdentifiers);
+  }
+  async queryAccount<T extends { data: unknown[]; page?: { nextCursor?: unknown } }>(
+    request: { scope: string; endpoint: string; query: URLSearchParams; context?: string },
+    parse: (value: unknown) => T,
+    onSelected: (alias: string) => void,
+  ) {
+    const { scope, endpoint, query, context } = request;
+    const account = this.selectedAccount(scope);
+    if (
+      context !== undefined &&
+      context !==
+        this.accountCursorContext(account.accountSeq, query, query.get('cursor') ?? '', endpoint)
+    )
+      throw new TossError('INPUT_INVALID');
+    onSelected(account.alias);
+    const accounts = payload(await this.get('/api/v1/accounts'));
+    if (
+      !Array.isArray(accounts) ||
+      accounts.some(
+        (row) =>
+          typeof row?.accountSeq !== 'string' ||
+          typeof row.accountNo !== 'string' ||
+          !row.accountNo ||
+          typeof row.accountType !== 'string' ||
+          !row.accountType,
+      )
+    )
+      throw new TossError('RESPONSE_INVALID');
+    for (const row of accounts) {
+      this.secrets.add(row.accountNo);
+      this.accountIdentifiers.add(row.accountSeq);
+    }
+    const matches = accounts.filter((row) => row.accountSeq === account.accountSeq);
+    if (!matches.length) throw new TossError('ACCOUNT_SELECTION_REQUIRED');
+    if (matches.length !== 1) throw new TossError('RESPONSE_INVALID');
+    const result = parse(payload(await this.request(`${endpoint}?${query}`, account.accountSeq)));
+    const cursor = result.page?.nextCursor;
+    if (typeof cursor !== 'string') return result;
+    if (this.accountIdentifiers.has(cursor)) throw new TossError('SENSITIVE_OUTPUT');
+    return {
+      ...result,
+      page: {
+        ...result.page,
+        context: this.accountCursorContext(account.accountSeq, query, cursor, endpoint),
+      },
+    };
+  }
+  private selectedAccount(scope: string) {
     let selected: AccountSelection;
     try {
       const value = read(join(this.directory, 'account.json'));
@@ -229,7 +290,7 @@ export class TossClient {
     this.accountIdentifiers.add(selected.accountSeq);
     return selected;
   }
-  accountCursorContext(
+  private accountCursorContext(
     accountSeq: string,
     query: URLSearchParams,
     cursor: string,
@@ -529,7 +590,10 @@ export class TossClient {
       return token;
     });
   }
-  async get(path: string, account?: string) {
+  get(path: string) {
+    return this.request(path);
+  }
+  private async request(path: string, account?: string) {
     if (!path.startsWith('/api/v1/') || /[\r\n#]/.test(path)) throw new TossError('INPUT_INVALID');
     let token = await this.token();
     let recovered = false,
