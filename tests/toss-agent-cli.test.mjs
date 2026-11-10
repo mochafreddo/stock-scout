@@ -68,6 +68,98 @@ test('agent distinguishes permission errors and invalid inputs from empty result
   assert.equal(JSON.parse(invalid.stdout).error.code, 'INPUT_INVALID');
 });
 
+test('agent reads synthetic account data and follows an empty transaction page', () => {
+  const buying = run('success', 'buying-power', 'USD');
+  assert.equal(buying.status, 0, buying.stderr);
+  const output = JSON.parse(buying.stdout);
+  assert.deepEqual(output.data, [{ currency: 'USD', cashBuyingPower: '3500.5000' }]);
+  assert.equal(output.source.accountAlias, 'primary');
+  assert.doesNotMatch(
+    buying.stdout + buying.stderr,
+    /accountSeq|accountNo|99887766554|synthetic-(secret|token|client)/,
+  );
+  const first = run('partial', 'transactions', '2026-10-11', '2026-11-10', 'limit=1');
+  assert.equal(first.status, 2, first.stderr);
+  const page = JSON.parse(first.stdout);
+  assert.deepEqual(page.data, []);
+  assert.equal(page.page.nextCursor, 'synthetic_next');
+  const last = run(
+    'partial',
+    'transactions',
+    '2026-10-11',
+    '2026-11-10',
+    'limit=1',
+    `cursor=${page.page.nextCursor}`,
+    `context=${page.page.context}`,
+  );
+  assert.equal(last.status, 0, last.stderr);
+  const end = JSON.parse(last.stdout);
+  assert.equal(end.data[0].netAmount, '23.469999');
+  assert.equal(end.data[0].settled, false);
+  assert.equal(end.data[0].transactionTime, null);
+  assert.deepEqual(end.page, { hasNext: false, nextCursor: null });
+  const denied = run('error', 'holdings');
+  assert.equal(denied.status, 1, denied.stderr);
+  assert.equal(JSON.parse(denied.stdout).error.code, 'PERMISSION_DENIED');
+});
+
+test('agent discovers and uses later market queries without assuming eligibility', () => {
+  for (const [args, status, check] of [
+    [['stock', 'DEMO'], 0, (o) => assert.equal(o.data[0].securityType, 'STOCK')],
+    [['orderbook', 'DEMO'], 0, (o) => assert.equal(o.data[0].asks[0].price, '10.0200')],
+    [['trades', 'DEMO', '1'], 0, (o) => assert.equal(o.data[0].volume, '0.0125')],
+    [['sessions', '2026-11-06'], 0, (o) => assert.equal(o.source.dateTimeZone, 'America/New_York')],
+    [
+      ['constraints', 'DEMO', '2026-11-06'],
+      2,
+      (o) => assert.equal(o.data[0].eligibility, 'unknown'),
+    ],
+  ]) {
+    const result = run('success', ...args);
+    assert.equal(result.status, status, result.stderr);
+    check(JSON.parse(result.stdout));
+  }
+});
+
+test('agent reads holdings and order groups and follows both order cursors', () => {
+  const holdings = run('success', 'holdings');
+  assert.equal(holdings.status, 0, holdings.stderr);
+  assert.equal(JSON.parse(holdings.stdout).data[0].items[0].quantity, '0.1250');
+  for (const command of ['orders', 'conditional-orders']) {
+    for (const group of ['OPEN', 'CLOSED']) {
+      const result = run('success', command, group);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(JSON.parse(result.stdout).data[0].symbol, 'DEMO');
+      if (command === 'orders') {
+        assert.equal(
+          JSON.parse(result.stdout).data[0].status,
+          group === 'OPEN' ? 'PENDING' : 'CANCELED',
+        );
+        assert.equal(JSON.parse(result.stdout).data[0].execution.filledQuantity, '0');
+      }
+    }
+    const first = run('partial', command, 'CLOSED', 'limit=1');
+    assert.equal(first.status, 2, first.stderr);
+    const page = JSON.parse(first.stdout);
+    assert.deepEqual(page.data, []);
+    assert.equal(page.page.nextCursor, 'synthetic_next');
+    const last = run(
+      'partial',
+      command,
+      'CLOSED',
+      'limit=1',
+      `cursor=${page.page.nextCursor}`,
+      `context=${page.page.context}`,
+    );
+    assert.equal(last.status, 0, last.stderr);
+    assert.deepEqual(JSON.parse(last.stdout).page, { hasNext: false, nextCursor: null });
+    assert.doesNotMatch(
+      last.stdout + last.stderr,
+      /accountSeq|accountNo|99887766554|synthetic-(secret|token|client)/,
+    );
+  }
+});
+
 test('synthetic notice survives fixture creation failure', (t) => {
   const f = fixture();
   t.after(f.close);

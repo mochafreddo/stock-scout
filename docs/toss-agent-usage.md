@@ -16,8 +16,23 @@ Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments fo
 | `partial` | `candles DEMO 1m count=1 before=VALUE` | Copy the previous `page.nextBefore` exactly to obtain the last page. |
 | `error` | `prices DEMO` | Receive a synthetic permission failure. |
 | `success` | `prices DEMO/` | Observe the actual CLI rejecting invalid input. |
+| `success` | `stock DEMO` | Read one listing and its security type. |
+| `success` | `orderbook DEMO` | Preserve decimal prices, quantities and provider order. |
+| `success` | `trades DEMO 1` | Read one recent execution without treating it as a full-day history. |
+| `success` | `sessions 2026-11-06` | Distinguish the US date from KST session timestamps. |
+| `success` | `constraints DEMO 2026-11-06` | Interpret exit 2 and unknown eligibility alongside documented rules. |
+| `success` | `holdings` | Read synthetic fractional holdings, costs and currency summaries. |
+| `success` | `buying-power USD` | Read cash buying power, not withdrawable cash. KRW is also accepted. |
+| `success` | `transactions 2026-10-11 2026-11-10 limit=1` | Preserve settlement fields and the provider's net amount. |
+| `success` | `orders OPEN` or `orders CLOSED limit=1` | Read a general order group and its separate item status. |
+| `success` | `conditional-orders OPEN limit=1` or `conditional-orders CLOSED limit=1` | Read conditional order state without inventing a currency. |
+| `partial` | `transactions 2026-10-11 2026-11-10 limit=1` | Receive an empty page with a next cursor and context. |
+| `partial` | `orders CLOSED limit=1` or `conditional-orders CLOSED limit=1` | Exercise the same account-page continuation contract. |
+| `error` | `holdings` | Distinguish account permission denial from an empty portfolio. |
 
-Start discovery with `node tests/toss-agent-cli.mjs success --help`. Choose subsequent arguments from its output and the reference. The fixture contains one `DEMO` price, rank and listed security. Ranking requests for more than one item return a partial result. Other symbols and filters do not create new fixture data. The runner covers only the cases above; it is not a replacement provider or live execution mode.
+Start discovery with `node tests/toss-agent-cli.mjs success --help`. Choose subsequent arguments from its output and the reference. The fixture contains one `DEMO` listing and fixed synthetic market/account responses. Ranking requests for more than one item return a partial result. Other symbols and filters do not create new fixture data. Session fixtures use only `2026-11-06`; adjacent dates are synthetic closed days, not historical calendar evidence. The runner covers only the cases above; it is not a replacement provider or live execution mode.
+
+Account exercises select a synthetic `primary` account in the invocation's isolated state, without reading or changing the live selection. For account pagination, copy both `page.nextCursor` and `page.context` into `cursor=VALUE context=VALUE`, keeping the scenario `partial` and the same command, group, period and filters. The next invocation returns one item and no next page. The fixed synthetic identity lets this context work across isolated invocations; do not reuse synthetic cursors or contexts with live state. Never use `account-select` to prepare a real account during this exercise.
 
 Read stdout as one JSON object and retain the process exit code even if it is nonzero. Interpret `version=1`, `status`, `data`, `omissions`, `page`, `source` and `error` together:
 
@@ -38,3 +53,15 @@ If dots cannot read this checkout or run a local process, record the observed li
 Keep `node scripts/toss.ts --help` as the discovery entry point and [the reference](toss-cli.md) as the argument and interpretation authority. Add a command-specific section there when a new query is implemented. Add a synthetic response at the existing external HTTP boundary and a public CLI regression check when extending this exercise; keep live state and fixture state separate. The remaining first-tool-set consumer acceptance belongs to later integration work.
 
 Actual Toss data, account access, credential setup and transmission to external models require the applicable [access conditions](toss-access-readiness.md) and task-specific authorization. Synthetic connection success does not establish any of them.
+
+## Real-data consumer exercise (#298)
+
+Run this exercise independently in Codex and dots after the user approves that consumer's real queries and transmission/storage scope. Use the existing approved launcher and state; do not open credential or selection files, copy credentials, or create a new client. If the launcher is unavailable in a consumer, report the limitation and request the authorized connection route.
+
+1. Read this document and the CLI reference, then discover commands with `node scripts/toss.ts --help`. Run the synthetic rows above, following both the candle boundary and account cursor/context. Interpret permission errors and partial results explicitly. Exit 2 is usable partial data, not a reason to retry authentication.
+2. Within the approved query budget, use the approved launcher for `stock`, `prices`, all four ranking types, `tradable`, `orderbook`, `trades`, daily/minute `candles`, `sessions` and `constraints`. Use a verified provider symbol and explicit dates. Link the observed data meanings and limits to [market validation](toss-market-validation.md); a new full provider-validation sweep is not required.
+3. Use `holdings`, USD/KRW `buying-power`, period-bound `transactions`, and OPEN/CLOSED `orders` and `conditional-orders`. Keep the selected account and scopes. Link meanings and unobserved samples to [account validation](toss-account-validation.md). Use actual next pages only within the approved budget; synthetic pagination already covers consumer error/continuation handling.
+4. Interpret the usable financial fields in that consumer: distinguish cash buying power, valuation and cost, settlement date/status, order creation and execution, and group versus item status. Preserve decimal strings, null, zero and missing fields. Do not infer eligibility, freshness, a complete history or an investment recommendation from a successful query.
+5. Record consumer/host, time, code revision, approved scope, command arguments without account identifiers or live cursors, status/exit code, interpretation and limits. Keep financial JSON in the approved consumer context only; do not copy raw responses, financial amounts, credentials, account identifiers or live cursors into shared evidence. Record user-reported dots observations separately from directly observed Codex results.
+
+Use [the #298 record](toss-agent-live-validation.md) for current progress. Keep final transition and legacy-path removal pending until both consumer paths and the applicable access conditions are satisfied.
