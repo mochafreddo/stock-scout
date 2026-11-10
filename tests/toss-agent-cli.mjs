@@ -205,7 +205,7 @@ try {
       path: '/api/v1/buying-power',
       result: {
         currency: args[1],
-        cashBuyingPower: '3500.5000',
+        cashBuyingPower: args[1] === 'KRW' ? '3500' : '3500.5000',
       },
     },
     transactions: {

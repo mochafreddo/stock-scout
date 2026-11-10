@@ -103,6 +103,12 @@ test('agent reads synthetic account data and follows an empty transaction page',
   assert.equal(JSON.parse(denied.stdout).error.code, 'PERMISSION_DENIED');
 });
 
+test('agent reads synthetic KRW buying power as an integer amount', () => {
+  const result = run('success', 'buying-power', 'KRW');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).data, [{ currency: 'KRW', cashBuyingPower: '3500' }]);
+});
+
 test('agent discovers and uses later market queries without assuming eligibility', () => {
   for (const [args, status, check] of [
     [['stock', 'DEMO'], 0, (o) => assert.equal(o.data[0].securityType, 'STOCK')],
