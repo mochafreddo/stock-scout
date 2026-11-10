@@ -58,6 +58,8 @@ node scripts/toss.ts buying-power KRW
 
 ## 기간별 거래내역
 
+승인 후 확인한 보유·매수 가능 금액·거래내역·주문과 실제 페이지의 결과는 [계좌 조회 검증 기록](toss-account-validation.md)에서 확인하세요. 진행 중 주문과 조건 주문의 다음 페이지는 미관측으로 구분합니다.
+
 ```sh
 node scripts/toss.ts transactions 2026-09-01 2026-10-31
 node scripts/toss.ts transactions 2026-09-01 2026-10-31 transactionTypes=BUY,SELL limit=20

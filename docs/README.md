@@ -37,6 +37,7 @@
 | 영역 | 기록 |
 | --- | --- |
 | 토스 시장 조회 | [실제 응답·페이지 검증과 남은 차단](toss-market-validation.md) |
+| 토스 계좌 조회 | [실제 응답·페이지 검증과 미관측 표본](toss-account-validation.md) |
 | 보고서와 제품 인수 | [첫 버전 인수](first-version-acceptance.md), [보고서 실행 이력](buy-candidate-history.md) |
 | 시장 일정 | [공식 일정 검증](market-calendar-validation.md) |
 | KIS 데이터 | [후보군 데이터 검증](kis-data-validation.md), [장전 순위 조사](kis-ranking-session-investigation.md), [세 시점 장전 관측](kis-premarket-observation-20261019.md), [EGW00316 조사](egw00316-investigation.md) |
