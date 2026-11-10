@@ -1,8 +1,10 @@
 # KIS 후보군 데이터 검증
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
 ## 2026-10-28 #239 후보군 구현 인계
 
-[#239](https://github.com/mochafreddo/stock-scout/issues/239)의 후보군 CLI는 하위 #245의 커밋 `a84b1fbe9eab6411f8372c3754ae3050b51649e0`에 구현돼 있다. [사용법과 출력·실패 계약](candidate-universe.md), [실행 코드](../scripts/candidate-universe.ts), [CLI·외부 HTTP 회귀 검사](../tests/candidate-universe.test.mjs)가 구현 근거다. 아래 #243 인계와 운영 보고서의 후보군 구현 대기 설명은 당시 상태이며, 현재 구현 여부는 이 절을 따른다.
+[#239](https://github.com/mochafreddo/stock-scout/issues/239)의 후보군 CLI는 하위 #245의 커밋 `a84b1fbe9eab6411f8372c3754ae3050b51649e0`에 구현돼 있다. [사용법과 출력·실패 계약](candidate-universe.md), [실행 코드](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/candidate-universe.ts), [CLI·외부 HTTP 회귀 검사](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/tests/candidate-universe.test.mjs)가 구현 근거다. 아래 #243 인계와 운영 보고서의 후보군 구현 대기 설명은 당시 상태이며, 현재 구현 여부는 이 절을 따른다.
 
 현재 계약은 ADR 0011부터 ADR 0014까지의 합의를 적용한다. 조회 당시 순위는 탐색에만 사용하고, 공식 일정상 필요한 완료 일봉의 준비 여부를 실행마다 검사한다. 완료 세션 순위 입증·고정 KST 지원 시간 사전 입증·정상 빈 응답 실연동·공지 완전성 전수 입증을 다시 완료 관문으로 두지 않는다. 해당 조건을 대체한 운영 가정은 과거 미검증 사실을 실제 검증 성공으로 바꾸지 않는다.
 
@@ -46,7 +48,7 @@
 
 | 검증 항목 | 확인한 결과와 근거 | 남은 한계·인계 |
 | --- | --- | --- |
-| 인증 구현·보호 | [공용 인증](../scripts/kis-auth.ts)과 [공용 조회](../scripts/kis-query.ts)가 보호된 캐시·KST 만료 해석·300초 발급 간격·60초 만료 여유·명시적 `EGW00123`에 한 번 복구하는 정책을 구현한다. [인증 기록](kis-auth.md)에 #247의 실제 발급·별도 프로세스 재사용과 #248의 모의 복구·음성 대조를 구분했다. | 실제 만료 복구는 미검증이다. 승인된 운영 가정과 #248 완료 범위에 따라 이를 새 구현 착수 조건으로 되살리지 않으며 실제 복구 성공으로 표현하지 않는다. |
+| 인증 구현·보호 | [공용 인증](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/kis-auth.ts)과 [공용 조회](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/kis-query.ts)가 보호된 캐시·KST 만료 해석·300초 발급 간격·60초 만료 여유·명시적 `EGW00123`에 한 번 복구하는 정책을 구현한다. [인증 기록](kis-auth.md)에 #247의 실제 발급·별도 프로세스 재사용과 #248의 모의 복구·음성 대조를 구분했다. | 실제 만료 복구는 미검증이다. 승인된 운영 가정과 #248 완료 범위에 따라 이를 새 구현 착수 조건으로 되살리지 않으며 실제 복구 성공으로 표현하지 않는다. |
 | 여섯 순위·일봉 조회 | [선별 응답](evidence/issue-243)과 [평일 관측 27건](kis-premarket-observation-20261019.md), [공식 자료 조사](kis-ranking-session-investigation.md)를 대조했다. #249는 탐색 전용 순위·첫 페이지·미보충·실행별 일봉 준비 검사 계약을 정한 조사 범위로 CLOSED다. | 완료 세션 순위·정규장 전용 집계·단위 배율·페이지 완전성은 입증하지 않았다. ADR 0011의 운영 가정을 적용하며 추가 고정 시각·페이지·정상 빈 응답 실연동을 기다리지 않는다. |
 | 유형·상장 종목 식별 | [KIS 반례 조사](kis-security-identification.md), [실제 순위 흐름](llm-security-probe.md), [작은 독립 표본 평가](security-type-evaluation-samples.md)와 [평가 자료](evidence/issue-261/evaluation.json)를 대조했다. #250은 실제 실행 흐름과 AAPL·BBD·BBDO 표본 점검 범위로 CLOSED다. | 실제 순위 두 실행은 모두 포함 0·제외 6·미확인 6의 분석 불충분이었다. 독립 표본의 포함 2·제외 1·미확인 0을 전체 시장·ETF·ETN·워런트의 실제 판단 품질로 확대하지 않는다. 유형·식별·현재성 미확인의 보수적 제외를 유지한다. |
 | 공식 일정 | #244는 [독립 일정 CLI](market-calendar.md)와 [모의·실제 검증](market-calendar-validation.md)의 합의한 범위로 CLOSED다. | 제한된 공지 수집·의미 판단의 운영 가정이며 공지 완전성·의미적 신뢰도는 미검증이다. 일정 성공이 KIS 자료 준비나 후보군 통합 성공을 뜻하지 않는다. |
@@ -203,7 +205,7 @@ DR 표시만으로 적격 ADR을 확정하지 않는다. 보통주 성격임을 
 
 ## 검증 도구와 재현
 
-현재 관측 CLI의 실행 환경·로컬 검사·실제 조회 절차는 [처음 실행하고 검증하기](getting-started.md)에 있다. 인수·환경 변수·요청 조건·출력 필드·오류의 정확한 계약은 [KIS 관측 CLI 레퍼런스](kis-probe-reference.md)에 있다. 도구의 성공 코드는 자료의 의미나 장전 지원 시간을 검증한 결과가 아니다.
+현재 관측 CLI의 실행 환경·로컬 검사·실제 조회 절차는 [처음 실행하고 검증하기](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/docs/getting-started.md)에 있다. 인수·환경 변수·요청 조건·출력 필드·오류의 정확한 계약은 [KIS 관측 CLI 레퍼런스](kis-probe-reference.md)에 있다. 도구의 성공 코드는 자료의 의미나 장전 지원 시간을 검증한 결과가 아니다.
 
 마스터 표본은 공식 예제를 실행하지 않고 표준 라이브러리로 ZIP을 메모리에서 읽어 선택했다. 마스터 자동 수집 기능은 CLI에 추가하지 않았다. 재확인할 때 ZIP의 대문자 파일명과 24열 구조를 확인하고, 위 공식 열 정의에 따라 `symbol`, `securityType`, `dr`, `etpType`, 거래소·식별자만 추린다. 새 분류 표본은 후보군에 추가하지 않는다.
 
@@ -211,7 +213,7 @@ DR 표시만으로 적격 ADR을 확정하지 않는다. 보통주 성격임을 
 
 ### 구현과 검증 근거의 구분
 
-현재 동작의 기준은 [관측 CLI](../scripts/kis-probe.ts)이며, 모의 검사의 범위는 [CLI 테스트](../tests/kis-probe.test.mjs)와 [HTTP 모의 코드](../tests/kis-http-mock.mjs)에서 확인한다. 레퍼런스가 설명하는 모든 경계에 자동 검사가 있는 것은 아니다.
+현재 동작의 기준은 [관측 CLI](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/kis-probe.ts)이며, 모의 검사의 범위는 [CLI 테스트](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/tests/kis-probe.test.mjs)와 [HTTP 모의 코드](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/tests/kis-http-mock.mjs)에서 확인한다. 레퍼런스가 설명하는 모든 경계에 자동 검사가 있는 것은 아니다.
 
 | 항목 | 현재 근거 | 남은 한계 |
 | --- | --- | --- |
@@ -222,7 +224,7 @@ DR 표시만으로 적격 ADR을 확정하지 않는다. 보통주 성격임을 
 | 1000행 제한·허용 연속 조회 코드·15초 제한 | 구현의 조건과 설정을 정적으로 확인함. | 초과 행·비허용 코드·실제 시간 초과를 재현하는 전용 자동 검사는 없음. |
 | 실제 응답의 세션·단위·유형 | 위 토요일 관측과 저장 자료, 고정 커밋의 공식 예제. | 장전 지원·정규장 범위·보통주 및 우선주 코드 정의 등 필수 조건이 남음. |
 
-이 표는 기존 검사와 미검증 경계를 구분한다. 자동 검사에 없는 동작도 구현에 있을 수 있으나 모의 검사 통과만으로 입증했다고 보고하지 않는다. [인증 없는 모의 실행](getting-started.md#인증-없이-관측-json-확인하기)은 출력 형식을 직접 확인하는 절차이며 실연동 근거를 추가하지 않는다.
+이 표는 기존 검사와 미검증 경계를 구분한다. 자동 검사에 없는 동작도 구현에 있을 수 있으나 모의 검사 통과만으로 입증했다고 보고하지 않는다. [인증 없는 모의 실행](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/docs/getting-started.md#인증-없이-관측-json-확인하기)은 출력 형식을 직접 확인하는 절차이며 실연동 근거를 추가하지 않는다.
 
 ## 인증 절차 명세
 

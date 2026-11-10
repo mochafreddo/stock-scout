@@ -1,6 +1,6 @@
 # 설계 결정 기록
 
-이 목록에서 각 결정의 배경과 근거를 확인할 수 있습니다. 후속 ADR에서 기존 결정의 일부 범위만 대체한 경우가 있습니다. 각 본문의 대체 안내와 연결된 결정을 함께 확인하세요.
+현재 제품 전환은 [ADR 0019](0019-toss-query-tools-transition.md)를 따른다. ADR 0004의 커밋 검사 정책은 유지하며, ADR 0001~0003·0005~0018은 제거된 KIS·내장 모델 제품의 당시 결정이다. 각 본문은 이력으로 보존한다.
 
 - [0001 KIS 발급 기록이 없는 실행의 대기와 공통 발급 제한](0001-kis-token-issuance-state.md)
 - [0002 KIS 명시적 만료의 조건부 캐시 무효화](0002-kis-expired-token-invalidation.md)
@@ -20,3 +20,5 @@
 - [0016 구독 한도 소진 뒤 추천 요청의 최대 비용을 먼저 확보한다](0016-bounded-paid-recommendation.md)
 - [0017 모델 요청 생명주기는 공통 모듈이 소유한다](0017-model-request-lifecycle.md)
 - [0018 상장 종목의 식별과 탐색 순위 누적은 공통 모듈이 소유한다](0018-listed-security-ranking-ownership.md)
+
+- [0019 토스 조회 도구로 전환하고 기존 KIS·내장 모델 경로를 제거한다](0019-toss-query-tools-transition.md)

@@ -1,5 +1,7 @@
 # 공식 거래 일정 CLI 레퍼런스
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
 `scripts/market-calendar.ts`는 공식 연간 일정과 제한된 공지 스냅샷으로 NAS·NYS·AMS의 공통 세션을 계산하는 도구다. [ADR 0013](adr/0013-llm-calendar-notice-assessment.md)에 따라 공지의 의미는 SIWC 구독 모델이 판단하고 코드는 검증·일정 계산을 담당한다. KIS·웹 검색·추가 조회 도구는 제공하지 않는다. 공지 완전성과 모델의 의미적 정확성은 보장이 아니며 [일정 영향 판단 결정](adr/0013-llm-calendar-notice-assessment.md)과 [실제 검증 상태](market-calendar-validation.md)를 구분한다.
 
 ## 실행
@@ -64,6 +66,6 @@ NYSE의 명시적인 비대상 시장·데이터 상품 라벨은 NAS·NYS·AMS 
 
 ## 검증과 현재 한계
 
-공개 검증 경계는 CLI 인수·stdout·stderr·종료 코드와 외부 HTTP다. [회귀 검사](../tests/market-calendar.test.mjs)와 [시간 경계 검사](../tests/market-calendar-boundaries.test.mjs)는 외부 HTTP와 시각만 대체하며 실제 XML·PDF 파서를 실행한다. 모의 정상 결과는 실제 공지 전체의 해석 성공이나 제품 인수 완료가 아니다.
+공개 검증 경계는 CLI 인수·stdout·stderr·종료 코드와 외부 HTTP다. [회귀 검사](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/tests/market-calendar.test.mjs)와 [시간 경계 검사](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/tests/market-calendar-boundaries.test.mjs)는 외부 HTTP와 시각만 대체하며 실제 XML·PDF 파서를 실행한다. 모의 정상 결과는 실제 공지 전체의 해석 성공이나 제품 인수 완료가 아니다.
 
 공식 공지의 실제 수집과 일정 CLI 실행 결과, 앞선 실패는 [일정 검증 기록](market-calendar-validation.md)에 있습니다. 수집 범위 밖의 공지와 모델의 의미 판단 한계는 계속 적용됩니다.

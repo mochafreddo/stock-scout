@@ -1,6 +1,8 @@
 # KIS 관측 CLI 레퍼런스
 
-이 문서는 현재 [scripts/kis-probe.ts](../scripts/kis-probe.ts)의 외부 입출력을 설명한다. 실행 절차는 [시작 안내](getting-started.md), 실제 자료의 해석 한계는 [KIS 데이터 검증](kis-data-validation.md)에 있다. 자동 발급·보호된 캐시 재사용 정책과 복구 절차는 [KIS 인증과 복구](kis-auth.md)에 있다.
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
+이 문서는 현재 [scripts/kis-probe.ts](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/kis-probe.ts)의 외부 입출력을 설명한다. 실행 절차는 [시작 안내](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/docs/getting-started.md), 실제 자료의 해석 한계는 [KIS 데이터 검증](kis-data-validation.md)에 있다. 자동 발급·보호된 캐시 재사용 정책과 복구 절차는 [KIS 인증과 복구](kis-auth.md)에 있다.
 
 ## 실행 구문과 입력
 
@@ -20,7 +22,7 @@ node scripts/kis-probe.ts <daily|info> <NAS|NYS|AMS> <symbol>
 
 두 값은 프로세스 환경에서 읽으며 누락 또는 빈 문자열이면 실패한다. 사전 발급 토큰 환경 변수는 사용하지 않는다. `.env`는 자동으로 읽지 않는다. 승인된 캐시를 검사하고 필요한 경우 공식 발급 API로 토큰을 확보한 뒤 조회한다. 입력 인수 검사 뒤에 환경 변수를 검사한다. 계좌번호나 OpenAI 인증은 사용하지 않는다.
 
-따라서 잘못된 인수와 인증 누락이 함께 있으면 `USAGE`가 먼저 발생하며 요청을 보내지 않는다. 유효한 인수에서 인증만 누락되면 `CREDENTIALS_MISSING`으로 끝나며 요청을 보내지 않는다. 인증 없는 실행 예시는 [시작 안내의 모의 관측](getting-started.md#인증-없이-관측-json-확인하기)에 있다.
+따라서 잘못된 인수와 인증 누락이 함께 있으면 `USAGE`가 먼저 발생하며 요청을 보내지 않는다. 유효한 인수에서 인증만 누락되면 `CREDENTIALS_MISSING`으로 끝나며 요청을 보내지 않는다. 인증 없는 실행 예시는 [시작 안내의 모의 관측](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/docs/getting-started.md#인증-없이-관측-json-확인하기)에 있다.
 
 ## 요청과 제한
 
@@ -95,4 +97,4 @@ HTTP 비정상 상태에서도 구조화된 오류 본문을 확인해 명시적
 
 ## 검증 경계
 
-[CLI 테스트](../tests/kis-probe.test.mjs)는 별도 Node.js 프로세스의 인수·stdout·stderr·종료 코드를 검사하고 [HTTP 모의 코드](../tests/kis-http-mock.mjs)로 외부 통신을 대체한다. 실제 인증·장전 지원 시간·정규장 범위·수치 단위·종목 유형 판별은 이 테스트가 입증하지 않는다. 해당 검증 상태와 공식 자료의 범위는 [KIS 데이터 검증](kis-data-validation.md)에 기록한다.
+[CLI 테스트](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/tests/kis-probe.test.mjs)는 별도 Node.js 프로세스의 인수·stdout·stderr·종료 코드를 검사하고 [HTTP 모의 코드](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/tests/kis-http-mock.mjs)로 외부 통신을 대체한다. 실제 인증·장전 지원 시간·정규장 범위·수치 단위·종목 유형 판별은 이 테스트가 입증하지 않는다. 해당 검증 상태와 공식 자료의 범위는 [KIS 데이터 검증](kis-data-validation.md)에 기록한다.

@@ -1,5 +1,7 @@
 # 종목 유형 평가 표본과 독립 정답
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
 2026-10-22 [#260](https://github.com/mochafreddo/stock-scout/issues/260)의 표본 조사 기록이다. 기준은 [#250](https://github.com/mochafreddo/stock-scout/issues/250), [ADR 0007](adr/0007-llm-security-type-judgment.md)이며, 현재 평가 정책은 [ADR 0010](adr/0010-incremental-security-type-validation.md)다. 모델 출력 없이 공식 자료로 정답을 확인했다. 실제 모델 평가는 실행하지 않았다.
 
 ## 현재 상태

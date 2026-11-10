@@ -1,6 +1,6 @@
 # 토스 미국 종목 조회 JSON CLI
 
-미국 시장 순위와 거래 가능 종목 목록을 조회하고, 토스 식별자로 종목 정보·현재가·호가·최근 체결·일봉·분봉과 미국 세션·거래 제약을 확인하는 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 전환 검증 전까지 유지합니다.
+미국 시장 순위와 거래 가능 종목 목록을 조회하고, 토스 식별자로 종목 정보·현재가·호가·최근 체결·일봉·분봉과 미국 세션·거래 제약을 확인하는 CLI입니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 기존 KIS·내장 모델 명령은 제거했으며 [전환 기록](toss-transition.md)에 대체 관계와 한계를 남겼습니다.
 
 ## 명령 발견과 실행
 
@@ -358,4 +358,4 @@ npm run typecheck
 
 `scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을, `scripts/toss-market.ts`가 호가·체결 응답 검증을, `scripts/toss-candles.ts`가 봉 인수·응답·페이지 검증을 맡습니다. `scripts/toss-orders.ts`가 일반·조건 주문 인수·현재 상태·페이지 검증을 맡고, `scripts/toss-transactions.ts`가 기간별 거래내역 검증을 맡습니다. `scripts/toss-account.ts`가 보유·매수 가능 금액의 응답 검증을 맡고, `scripts/toss-sessions.ts`가 미국 세션 검증과 문서상 거래 제약을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
 
-위 검사는 합성 자료에 한정합니다. 승인 후 수행한 시장 조회와 실제 봉 페이지의 결과는 [실제 응답 검증 기록](toss-market-validation.md)에서 확인하세요. 비어 있지 않은 최근 체결과 종목별 거래 제약은 여전히 미관측 또는 미제공입니다. 기존 로컬 인증·연결의 준비 결과와 자료 전달·공급자 조회 전용 권한의 남은 미확인은 [접근 준비 기록](toss-access-readiness.md)에, Codex·dots 각각의 합성 연결 결과는 [환경별 검증 기록](toss-agent-validation.md)에 구분했습니다. 각 환경의 실제 자료 사용과 전체 전환 완료는 별도 관문입니다. 기존 KIS·내장 모델 테스트는 기존 경로의 회귀 확인이며 새 토스 호환성의 근거가 아닙니다.
+위 검사는 합성 자료에 한정합니다. 승인 후 수행한 시장 조회와 실제 봉 페이지의 결과는 [실제 응답 검증 기록](toss-market-validation.md)에서 확인하세요. 비어 있지 않은 최근 체결 항목의 원응답 대조를 완료했습니다. 종목별 거래 제약은 합의에 따라 미확인으로 표시합니다. 기존 로컬 인증·연결의 준비 결과와 자료 전달·공급자 조회 전용 권한의 남은 미확인은 [접근 준비 기록](toss-access-readiness.md)에, Codex·dots 각각의 합성 연결 결과는 [환경별 검증 기록](toss-agent-validation.md)에 구분했습니다. 각 환경의 실제 자료 사용은 [실자료 소비 검증](toss-agent-live-validation.md)에, 기존 경로 제거와 최종 소스의 검증은 [전환 기록](toss-transition.md)에 구분했습니다. 제거된 KIS·내장 모델 테스트의 과거 통과 결과를 새 토스 호환성의 근거로 승계하지 않습니다.

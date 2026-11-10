@@ -1,5 +1,7 @@
 # 후보군 조회 CLI
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록입니다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 참고하세요. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아닙니다.
+
 이 도구는 공식 거래 일정, KIS 탐색 순위와 일봉, 기존 LLM 증권 유형 판단을 연결합니다. 매수 후보 선정·추천은 하지 않습니다. [#245](https://github.com/mochafreddo/stock-scout/issues/245)의 현재 구현 계약은 [ADR 0011](adr/0011-ranking-discovery-and-runtime-data-readiness.md)부터 [ADR 0014](adr/0014-candidate-runtime-budget.md)까지의 후속 합의를 따릅니다.
 
 ## 실행하기

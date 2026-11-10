@@ -1,5 +1,7 @@
 # 공식 거래소 일정의 선행 검증
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
 2026-10-18에 [#244](https://github.com/mochafreddo/stock-scout/issues/244)의 구현 요청을 받아 공식 변경 공지 경로부터 확인한 기록이다. [#237](https://github.com/mochafreddo/stock-scout/issues/237)과 [#239](https://github.com/mochafreddo/stock-scout/issues/239)의 시장 데이터 검증을 대신하지 않는다.
 
 ## 2026-10-28 최종 로컬 검증 결과

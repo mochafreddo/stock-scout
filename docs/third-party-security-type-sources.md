@@ -1,5 +1,7 @@
 # 제3자 종목 유형·증권 연결 공급자 조사
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
 2026-10-19 [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 후속 조사다. [ADR 0006](adr/0006-third-party-security-type-sources.md)에 따라 개인이 직접 가입하여 자동 API 이용을 할 수 있는 제3자 공급자를 검토했다. [ADR 0005](adr/0005-official-security-type-sources.md)의 개별 증권 연결·ADR 기초 권리·현재성 조건은 유지하며 시세·거래량·거래대금·순위의 공급자는 KIS로 유지한다.
 
 ## 결과와 확인 범위

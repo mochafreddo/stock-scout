@@ -6,8 +6,8 @@
 
 에이전트 공용 [document-generate](../.agents/skills/document-generate/SKILL.md)는 코드와 테스트를 조사한 뒤 필요한 튜토리얼·작업 안내·레퍼런스·설명 문서를 작성합니다. 사용자 문서는 한국어로 작성하며, 명시적으로 호출할 때만 실행합니다.
 
-- Codex: `$document-generate KIS 관측 CLI의 사용 안내를 작성해 주세요.`
-- Claude Code: `/document-generate KIS 관측 CLI의 사용 안내를 작성해 주세요.`
+- Codex: `$document-generate 토스 조회 CLI의 사용 안내를 작성해 주세요.`
+- Claude Code: `/document-generate 토스 조회 CLI의 사용 안내를 작성해 주세요.`
 - 다른 에이전트: 위 `SKILL.md`를 읽고 따르도록 명시적으로 요청하세요. 자동 탐색 지원 여부는 도구마다 다릅니다.
 
 공용 본문은 `.agents/skills/`에서 관리하고 Claude Code는 `.claude/skills/`의 심볼릭 링크로 같은 본문을 읽습니다. 목록에 보이지 않으면 저장소에서 새 세션을 시작하세요. gstack 설치는 필요하지 않습니다. 문서 생성 요청만으로 커밋·푸시를 수행하지 않으며, 작업 요청과 저장소의 전달 규칙을 따릅니다.
@@ -18,8 +18,8 @@
 
 에이전트 공용 [qa](../.agents/skills/qa/SKILL.md)는 지정한 CLI 동작을 점검하고 결함을 재현한 뒤, 회귀 테스트와 최소 수정으로 다시 검증합니다. 명시적으로 호출할 때만 실행하며 gstack 설치는 필요하지 않습니다.
 
-- Codex: `$qa KIS 관측 CLI를 점검하고 발견한 버그를 수정해 주세요.`
-- Claude Code: `/qa KIS 관측 CLI를 점검하고 발견한 버그를 수정해 주세요.`
+- Codex: `$qa 토스 조회 CLI를 점검하고 발견한 버그를 수정해 주세요.`
+- Claude Code: `/qa 토스 조회 CLI를 점검하고 발견한 버그를 수정해 주세요.`
 - 다른 에이전트: 위 `SKILL.md`를 읽고 따르도록 명시적으로 요청하세요.
 
 기본은 지정 범위의 전체 점검과 중간 심각도 이상 결함 수정입니다. `--quick`은 빠른 점검, `--exhaustive`는 경미한 결함까지 수정, `--regression <보고서 경로>`는 이전 실패 재검증, `--report-only`는 보고만 수행합니다. 이 옵션은 스킬의 실행 방식을 지정하며 제품 CLI에 전달하지 않습니다.

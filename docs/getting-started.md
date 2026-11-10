@@ -1,135 +1,32 @@
 # 처음 실행하고 검증하기
 
-## 매수 후보 보고서 준비하기
-
-1. [package.json](../package.json)의 Node.js 버전 조건을 확인하고 저장소 루트에서 `npm ci`로 의존성을 준비하세요. 일정 자료를 읽으려면 `/usr/bin/xmllint`와 `PATH`에서 실행할 수 있는 `pdftotext`도 필요합니다.
-2. [KIS 인증](kis-auth.md)과 [ChatGPT 구독 인증](siwc-auth.md)을 준비하세요. KIS 인증을 준비하려면 승인된 기존 자격 증명을 프로세스 환경에 전달하세요. 구독에 이미 연결했다면 그 인증 디렉터리를 사용하세요.
-3. 계정에서 사용할 모델을 정한 뒤 [매수 후보 보고서 실행 안내](buy-candidates.md#준비와-실행)를 따르세요. 실제 보고서 실행은 KIS와 ChatGPT 구독을 사용합니다.
-
-외부 서비스 없이 CLI 출력을 확인하려면 아래 모의 실행 절차를 사용하세요.
-
-이 안내에서는 로컬 테스트로 관측 CLI의 입출력을 확인한 뒤, 기존 자격 증명이 준비된 경우 실제 KIS 데이터를 조회합니다. 현재 개발 대상과 계획은 [README](../README.md), 용어는 [용어집](../GLOSSARY.md)에서 확인하세요.
-
 ## 로컬 테스트로 시작하기
 
-저장소 루트에서 진행하세요. Node.js 24 이상과 npm이 필요합니다. 테스트는 외부 HTTP를 모의 응답으로 대체하므로 KIS 계정이나 OpenAI 인증이 필요하지 않습니다.
+[package.json](../package.json)의 Node.js 버전 조건을 확인하세요. 선택 사항인 mise의 개발 버전은 [mise.toml](../mise.toml)에 있습니다. 개발 의존성이 준비되지 않았다면 저장소 루트에서 `npm ci`를 실행하세요. 이 명령은 패키지를 다운로드하고 기존 `node_modules/`를 다시 구성합니다. 런타임 조회는 Node.js 기본 기능을 사용하며 내장 모델이나 OpenAI 인증이 필요하지 않습니다.
 
-이미 mise를 사용한다면 [mise.toml](../mise.toml)에 지정한 개발용 Node.js 버전으로 실행할 수 있습니다. 지정한 버전이 없다면 먼저 `mise install node`로 설치하세요. 이어서 `mise exec -- node --version`을 실행해 선택된 버전이 설정과 일치하는지 확인하세요. 셸에서 mise를 활성화하지 않았다면 아래 명령에 `mise exec --`를 붙여 실행하세요. mise 사용은 선택 사항입니다.
+1. `node scripts/toss.ts --help`로 인증 없이 명령 JSON을 확인하세요.
+2. `node tests/toss-agent-cli.mjs success prices DEMO`로 합성 가격 JSON과 종료 코드 0을 확인하세요. stderr의 `SYNTHETIC` 표시는 실제 시세가 아님을 뜻합니다.
+3. `node tests/toss-agent-cli.mjs error prices DEMO`로 합성 권한 오류와 종료 코드 1을 확인하세요. 오류를 정상 빈 결과로 해석하지 마세요.
 
-1. 실행 환경을 확인하세요.
+합성 실행기는 격리된 임시 상태와 합성 자격 증명·HTTP 응답만 사용합니다. 실제 인증이나 시장·계좌 자료는 사용하지 않습니다. [에이전트 지침](toss-agent-usage.md)에서 빈 부분 페이지의 후속 조회·계좌 자료 예제를 확인하세요.
 
-   ```sh
-   node --version
-   npm --version
-   ```
+## 실제 조회 준비하기
 
-   Node.js 버전이 24 이상인지 확인하세요. 버전 요구사항은 [package.json](../package.json)의 `engines`가 기준입니다.
+[접근 준비 기록](toss-access-readiness.md)의 사용자 재결정과 남은 미확인을 먼저 확인하세요. 실제 인증·보관 위치·계좌 선택·자료 전달은 해당 작업의 승인 범위가 필요합니다. 비밀값·계좌 식별자를 대화·명령 인수·공유 로그에 붙여 넣지 마세요.
 
-2. 잠금 파일에 고정된 개발 의존성을 설치하세요.
-
-   ```sh
-   npm ci
-   ```
-
-   패키지 다운로드가 발생하며 기존 `node_modules/`를 다시 구성합니다. TypeScript·Biome·Node.js 타입 정의와 Vercel AI SDK·OpenAI 공급자를 설치합니다.
-
-3. CLI 프로세스 테스트를 실행하세요.
-
-   ```sh
-   npm test
-   ```
-
-   전체 테스트를 시작하기 전에 테스트 도구가 `127.0.0.1`의 임시 포트에 바인딩한 뒤 즉시 닫습니다. 이 절차로 로컬 callback 서버를 사용할 수 있는지 확인합니다. 바인딩에 실패하면 환경 오류와 테스트 미실행을 알리고 종료합니다. 필요한 루프백 사용이 허용된 환경에서 다시 실행하세요. 권한을 자동으로 확대하거나 외부 서비스 호출로 대체하지 않습니다.
-
-   실패한 테스트가 없으면 정상 관측, 오류와 비밀 필드 배제, 지원 모드와 시장, 빈 응답과 연속 조회 표시, 잘못된 입력, 인증 누락에 대한 모의 검사가 끝납니다. 이는 실제 KIS 인증이나 데이터 의미 검증의 결과가 아닙니다.
-
-테스트의 공개 경계는 CLI 인수·stdout·stderr·종료 코드입니다. 구현은 [scripts/kis-probe.ts](../scripts/kis-probe.ts), 테스트는 [tests/kis-probe.test.mjs](../tests/kis-probe.test.mjs), 외부 HTTP 대체 코드는 [tests/kis-http-mock.mjs](../tests/kis-http-mock.mjs)에 있습니다.
-
-## push 전 로컬 검증 설정하기
-
-훅 설치와 실행 조건은 [개발과 로컬 검증](development.md#커밋푸시-검사)을 참고하세요.
-
-## 인증 없이 관측 JSON 확인하기
-
-테스트 결과에 이어 CLI의 JSON을 직접 확인하려면 저장소 루트에서 다음 명령을 실행하세요. 테스트 도우미가 임시 홈과 캐시, 통제된 시각, 모의 자격 증명만 전달합니다. `--import`로 불러온 테스트 전용 코드가 `fetch`를 대체하므로 실제 KIS 요청이나 토큰 발급은 발생하지 않습니다.
-
-```sh
-node --input-type=module -e '
-import { fixture, runCli } from "./tests/kis-cli-helper.mjs";
-const f = fixture();
-try {
-  const result = runCli(f, "ok");
-  process.stdout.write(result.stdout);
-  process.stderr.write(result.stderr);
-  process.exitCode = result.status;
-} finally { f.close(); }
-'
-```
-
-종료 코드 0과 JSON 한 줄을 확인하세요. 모의 응답의 `rowCount`는 1이며 `rows[0]`에는 `symb: "AAPL"`, `tvol: "123"`, `tamt: "456"`이 있습니다. `validation: "unverified"`와 `dataSession: null`도 확인하세요. 시각은 실행할 때 생성하며 수치는 테스트용입니다. 이 결과를 실제 시세로 사용하지 마세요.
-
-같은 명령에서 `runCli(f, "ok")`의 `"ok"`를 다음 값으로 바꿔 경계 동작도 확인하세요.
-
-| 값 | 예상 결과 |
-| --- | --- |
-| `empty` | 종료 코드 0, `rowCount: 0`, `rows: []`. 정상적인 빈 후보군이라는 뜻은 아닙니다. |
-| `continued` | 종료 코드 0, `continuation: "M"`. 다음 페이지는 요청하지 않습니다. |
-| `api-error` | 종료 코드 1, stdout은 비어 있고 stderr에 `{"error":"KIS_FAILURE"}`를 출력합니다. |
-
-이 모의 코드는 테스트용 헤더 값과 요청 조건을 검사합니다. 실제 인증 값을 넣지 마세요. 다른 모드·거래소의 모의 실행도 실제 상장 여부나 종목 유형을 확인하는 절차는 아닙니다.
+승인된 기존 실행기와 보호 상태를 사용해 [CLI 레퍼런스](toss-cli.md)의 필요한 명령을 실행하세요. `.env`는 자동으로 읽지 않습니다. 상태·커서·미확인·자료 시점의 의미는 명령별 계약을 따릅니다. 주어진 부분 결과를 전체 이력이나 거래 가능의 보장으로 해석하지 마세요.
 
 ## 변경 후 로컬 검사하기
 
-[package.json](../package.json)의 검사 명령을 저장소 루트에서 실행하세요.
+저장소 루트에서 실행하세요.
 
 ```sh
 npm run check
 npm run typecheck
 npm test
+node scripts/pre-push.ts --docs README.md docs/getting-started.md
 ```
 
-`check`는 `scripts/`, `tests/`와 지정된 JSON 설정 파일에 Biome 형식·린트 검사를 적용합니다. Markdown은 이 명령의 대상이 아니므로 문서의 내용과 링크는 별도로 확인하세요. `typecheck`는 `scripts/*.ts`를 검사하며 출력 파일을 만들지 않습니다. 검사 설정은 [biome.json](../biome.json)과 [tsconfig.json](../tsconfig.json)을 참고하세요. 저장소 방침에 따라 Actions는 비활성 상태를 유지하고 필요한 검사는 로컬에서 실행합니다.
+형식·린트·타입 검사와 전체 합성 테스트를 실행합니다. 테스트 사전 검사는 `127.0.0.1`의 임시 포트를 열고 닫으며, 바인딩을 허용하지 않는 환경에서는 환경 오류로 중단합니다. 이는 실제 토스 호출 성공을 검증하는 절차가 아닙니다. 문서 검사는 지정한 문서의 공백·로컬 링크·제목 앵커를 확인합니다. 훅 설치와 검사 범위는 [개발 안내](development.md#커밋푸시-검사)를 참고하세요. Actions는 비활성 상태로 유지합니다.
 
-## LLM 유형 검증 흐름 실행하기
-
-[KIS 순위에서 LLM으로 종목 유형 확인하기](llm-security-probe.md)에서 Stock Scout 전용 공식 구독 인증과 자동 순위 기반 검증 흐름을 확인하세요. 기존 KIS 관측과 별도 단계이며 매수 추천은 생성하지 않습니다.
-
-실행 결과와 유형 판단 품질은 [현재 검증 상태](llm-security-probe.md#현재-검증-상태)에서 구분해 확인하세요.
-
-## 실제 KIS 응답 관측하기
-
-이 단계는 KIS 운영 API로 실제 요청을 보냅니다. 앞선 테스트와 달리 외부 서비스에 접근합니다. CLI는 자동 발급과 실행 간 재사용을 처리합니다. 승인된 기존 보관소에서 다음 값을 프로세스 환경으로 준비하세요. [인증과 복구](kis-auth.md)의 첫 실행 대기와 캐시 보호 조건을 확인하세요.
-
-| 환경 변수 | 필요한 값 |
-| --- | --- |
-| `KIS_APP_KEY` | 기존 KIS 앱 키 |
-| `KIS_APP_SECRET` | 해당 앱 시크릿 |
-
-CLI는 `.env` 파일을 자동으로 읽지 않습니다. 비밀 값을 명령 인수·셸 기록·로그에 입력하거나 문서에 붙여 넣지 마세요. 이 안내는 새 자격 증명 발급이나 새 보관 위치 설정을 다루지 않습니다.
-
-필요한 관측 명령 하나를 선택해 실행하세요. 각 명령은 시세를 조회하며 필요한 경우 발급 요청이 먼저 발생합니다. 조회 중 명시적 토큰 만료에서만 한 번 복구·재조회하며, 복구에도 300초 발급 간격을 적용합니다. 발급 기록이 없는 첫 실행은 요청 없이 실패하고 300초 뒤 재실행을 안내합니다. CLI가 자동으로 기다리지는 않습니다.
-
-```sh
-node scripts/kis-probe.ts volume NAS
-node scripts/kis-probe.ts amount NYS
-node scripts/kis-probe.ts daily AMS SPY
-node scripts/kis-probe.ts info NYS BAC/B
-```
-
-성공하면 stdout에 JSON 한 줄과 종료 코드 0을 받습니다. `request`의 거래소·종목·요청 조건, `rowCount`, `rows`, UTC 요청·수신 시각을 확인하세요. `validation`은 항상 `unverified`, `dataSession`은 항상 `null`입니다. 빈 `rows`나 연속 조회 표시는 추가 판단이 필요한 관측 결과입니다. 후보군 구성·유형 제외·장전 시간 판정은 수행하지 않습니다.
-
-실패하면 stdout은 비어 있고 stderr에 `{"error":"오류 코드"}` 형식의 JSON을 받으며 종료 코드는 1입니다. 코드별 의미는 [오류 레퍼런스](kis-probe-reference.md#오류와-종료-코드)를 참고하세요.
-
-| 코드 | 확인할 항목 |
-| --- | --- |
-| `USAGE` | 모드·거래소의 대소문자, 종목 인수의 필요 여부와 허용 문자, 추가 인수를 확인하세요. `--help`도 지원하지 않습니다. |
-| `CREDENTIALS_MISSING` | 필요한 두 환경 변수를 현재 프로세스에 전달했는지 확인하세요. `.env` 파일을 두는 것만으로는 전달되지 않습니다. |
-| `AUTH_COOLDOWN` | `retryAfterSeconds` 이상 지난 뒤 재실행하세요. 시계 확인 안내가 있으면 시스템 시각을 확인하세요. |
-| `AUTH_LOCKED`, `AUTH_RECORD`, `AUTH_STORAGE`, `AUTH_FAILED` | [인증 복구 절차](kis-auth.md)를 확인하세요. |
-| `HTTP_FAILURE`, `KIS_FAILURE` | 기존 인증과 서비스 상태를 확인하세요. 이 코드만으로 토큰 만료를 확정하거나 자동 재발급을 기대하지 마세요. |
-| `RESPONSE_SHAPE` | 응답 구조가 CLI의 허용 조건을 벗어났습니다. 요청 모드·시각·오류 코드를 기록하고 레퍼런스의 응답 조건과 대조하세요. |
-| `REQUEST_FAILED` | 통신·시간 제한·리디렉션·JSON 해석 실패 등을 포함합니다. 연결 상태와 서비스 상태를 확인하세요. |
-
-도구는 오류 원문을 출력하지 않으므로 이 코드만으로 세부 원인을 확정하지 마세요. 비밀 값이나 인증 헤더를 진단 자료로 공유하지 마세요.
-
-현재 인수·출력의 정확한 계약은 [CLI 레퍼런스](kis-probe-reference.md)에 있습니다. 관측값을 해석하기 전에 [KIS 데이터 검증](kis-data-validation.md)의 실제 관측 범위와 미검증 조건을 확인하세요. 이 문서의 실제 KIS 명령은 이번 문서 작성 과정에서 재실행하지 않았습니다. 기존 실연동 자료와 이번 로컬 모의 검사는 구분합니다.
+기존 KIS·구독·추천 명령의 안내는 [과거 제품 기록](README.md#과거-제품-기록)이며 현재 체크아웃에서 실행할 수 없습니다.

@@ -1,32 +1,33 @@
 # Stock Scout
 
-직전에 끝난 미국 정규장의 KIS 일봉을 바탕으로 다음 정규장의 매수 검토 후보를 최대 5개 찾는 개인용 CLI입니다. 보고서에서 기준 종가, 선정 근거, 관찰 기간, 주요 위험을 확인할 수 있습니다. 주문과 소수점 거래 가능 여부는 증권사에서 직접 확인하세요.
-
-## 토스 조회 도구 전환
-
-새 제품은 외부 AI 에이전트가 필요한 자료를 조회하는 로컬 JSON CLI입니다. [미국 순위·거래 가능 종목·종목 정보·가격 조회 안내](docs/toss-cli.md)에서 `node scripts/toss.ts --help`로 명령을 발견할 수 있습니다. 초기 구현 이슈는 [현재가 #285](https://github.com/mochafreddo/stock-scout/issues/285), [종목 정보 #286](https://github.com/mochafreddo/stock-scout/issues/286), [순위와 거래 가능 종목 목록 #287](https://github.com/mochafreddo/stock-scout/issues/287), [호가와 최근 체결 #288](https://github.com/mochafreddo/stock-scout/issues/288)입니다. 새 요구사항은 [#278의 통합 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)를 따릅니다. Codex와 dots의 최소 합성 CLI 연결 결과는 [환경별 검증 기록](docs/toss-agent-validation.md)에서 확인할 수 있습니다. 실제 토스 자료를 사용하는 전체 도구 모음의 에이전트 연결은 별도 검증 대상이며, 아래 기존 KIS 제품은 전환 검증 전까지 유지합니다.
+토스 Open API의 시장·계좌 자료를 조회하는 개인용 로컬 JSON CLI입니다. 외부 AI 에이전트가 조회 순서와 분석·추천을 맡고, CLI는 요청한 자료의 조회·검증·시점 표시·오류 처리를 맡습니다. 주문은 사용자가 직접 판단하고 실행합니다.
 
 ## 시작하기
 
-1. [실행 환경과 인증을 준비하세요](docs/getting-started.md).
-2. [매수 후보 보고서를 실행하세요](docs/buy-candidates.md#준비와-실행). 실행 시점은 필요한 데이터가 준비된 뒤부터 다음 정규장이 열리기 전까지입니다.
-3. [보고서 확인 방법을 살펴보세요](docs/buy-candidates.md#보고서-확인). 분석은 끝났지만 후보가 없는 경우와 자료가 부족해 분석이 중단된 경우를 구분하세요.
+1. [실행 환경과 합성 실행 안내](docs/getting-started.md)를 확인하세요.
+2. `node scripts/toss.ts --help`로 명령을 찾고 [CLI 레퍼런스](docs/toss-cli.md)에서 인수를 확인하세요.
+3. 실제 조회는 [접근 조건](docs/toss-access-readiness.md)과 해당 계좌·소비 환경의 승인 범위 안에서 실행하세요. Codex·dots는 [에이전트 사용 지침](docs/toss-agent-usage.md)을 따릅니다.
 
-첫 버전을 한국 시간으로 낮에 통합 실행해, 완료 일봉으로 분석을 정상적으로 마치고 후보가 없다는 보고서가 나온 것을 확인했습니다. 실제 실행에서 후보가 담긴 보고서가 나오는지, 한국 시간으로 낮 시간대 내내 사용할 수 있는지, 추천 품질이 어떤지는 아직 검증하지 않았습니다. [첫 버전 인수 기록](docs/first-version-acceptance.md#2026-11-03-한국-낮-통합-실행)
+stdout은 버전이 있는 JSON입니다. `success`는 종료 코드 0, `partial`은 2, `error`는 1입니다. 부분 결과의 다음 페이지와 미확인을 확인하고, 조회 시각을 자료 갱신 시각으로 해석하지 마세요.
+
+## 전환과 검증
+
+[#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)에 따라 기존 KIS·후보군·추천·내장 모델 제품 경로를 제거했습니다. [전환 기록](docs/toss-transition.md)에서 선행 합성 검사·실제 토스 조회·Codex 직접 관측·사용자 보고에 따른 dots 사용을 구분하고, 수용한 예외와 남은 한계를 확인하세요. 공급자의 조회 전용 권한과 세부 처리·보관 조건의 미확인은 남아 있습니다.
+
+기존 제품의 요구사항 [#237](https://github.com/mochafreddo/stock-scout/issues/237), ADR·인수·연구 자료는 당시 이력으로 보존합니다. 옛 명령·JSON·관측 파일의 호환 계층과 KIS 자동 복귀는 제공하지 않습니다.
 
 ## 문서
 
-- [사용 안내·CLI 레퍼런스·설계 및 검증 기록](docs/README.md)
+- [사용 안내와 검증·연구 기록](docs/README.md)
 - [용어집](GLOSSARY.md)
 - [개발·로컬 검사·에이전트 스킬](docs/development.md)
-- [제품 요구사항과 인수 범위](https://github.com/mochafreddo/stock-scout/issues/237)
 
 <a name="문서-생성-스킬"></a>
 <a name="qa-스킬"></a>
 <a name="커밋푸시-검사"></a>
 <a name="프로젝트-스킬-검사"></a>
 
-기존 스킬·훅 안내는 [개발과 로컬 검증](docs/development.md)에서 확인하세요.
+스킬·훅 안내는 [개발과 로컬 검증](docs/development.md)에서 확인하세요.
 
 ## 라이선스
 

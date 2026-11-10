@@ -1,5 +1,7 @@
 # KIS 인증과 복구
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록입니다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 참고하세요. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아닙니다.
+
 관측 CLI는 `KIS_APP_KEY`와 `KIS_APP_SECRET`을 프로세스 환경에서 읽습니다. `.env`를 자동으로 읽지 않으며 `KIS_ACCESS_TOKEN`은 사용하지 않습니다. 기존 환경 파일의 값은 수정하지 마세요. 조회 전 인증은 [#247](https://github.com/mochafreddo/stock-scout/issues/247), 조회 중 만료 복구는 [#248](https://github.com/mochafreddo/stock-scout/issues/248), 공식 자료 조사와 운영 가정은 [#246](https://github.com/mochafreddo/stock-scout/issues/246)에 있습니다.
 
 ## 실행과 저장

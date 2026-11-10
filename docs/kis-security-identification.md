@@ -1,5 +1,7 @@
 # KIS 종목 유형과 상장 종목 식별 검증
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
 2026-10-19 [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 조사 기록이다. 상위 요구사항은 [#237](https://github.com/mochafreddo/stock-scout/issues/237)·[#239](https://github.com/mochafreddo/stock-scout/issues/239), 부모는 [#243](https://github.com/mochafreddo/stock-scout/issues/243)이다. [기존 검증 기록](kis-data-validation.md)의 2026-10-17 관측을 재사용하고, 공식 코드 정의·공개 마스터·추가 상품 정보로 보완했다. 기존 기록의 코드 정의 미확보와 워런트 표본 미확보 상태는 아래 조사 결과로 갱신한다.
 
 이후 같은 날 종목 유형과 증권 연결에 외부 공식 자료를 허용하는 설계를 합의하고 [후속 조사](official-security-type-validation.md)를 수행했다. 아래 KIS 전용 조사와 당시의 차단·재개 설명은 이력으로 보존하며, 현재 허용 범위와 후속 조사 결과는 새 기록을 따른다. 실제 적격 종목 자동 판별과 후속 구현의 차단은 유지한다.
@@ -22,7 +24,7 @@
 
 기존 자료는 [issue-243 표본](evidence/issue-243)의 2026-10-17 실제 응답이다. 추가 자료는 [issue-250 표본](evidence/issue-250)에 있다. 각 자료의 `requestedAt`·`receivedAt`은 조회 시각이며 데이터 기준 세션이 아니다. 추가 API 관측은 2026-10-19T04:22:06.309Z~04:22:13.256Z에 SHOP·BBD·BBDO·ACONW·ADSEW·SPY 순서로 수행했다. 모두 정상 JSON 한 개와 종료 코드 0을 확인했다. `validation: unverified`, `dataSession: null`을 유지한다.
 
-사용자가 기존 앱 키·시크릿 두 값의 조회와 사용을 승인한 뒤, 변경하지 않은 [관측 CLI](../scripts/kis-probe.ts)를 별도 프로세스로 실행했다. 요청은 `info <exchange> <symbol>`이며 기존 [공용 인증](../scripts/kis-auth.ts)의 발급·캐시·복구 정책을 사용했다. 앱 키·시크릿·토큰·인증 헤더·계좌 정보는 증거 자료에 포함하지 않았다. 인증 요청 수나 캐시 재사용 여부는 별도 계측하지 않았으므로 여섯 상품 조회 성공을 발급 횟수·복구 검증으로 확대하지 않는다.
+사용자가 기존 앱 키·시크릿 두 값의 조회와 사용을 승인한 뒤, 변경하지 않은 [관측 CLI](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/kis-probe.ts)를 별도 프로세스로 실행했다. 요청은 `info <exchange> <symbol>`이며 기존 [공용 인증](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/kis-auth.ts)의 발급·캐시·복구 정책을 사용했다. 앱 키·시크릿·토큰·인증 헤더·계좌 정보는 증거 자료에 포함하지 않았다. 인증 요청 수나 캐시 재사용 여부는 별도 계측하지 않았으므로 여섯 상품 조회 성공을 발급 횟수·복구 검증으로 확대하지 않는다.
 
 공식 공개 마스터 세 ZIP을 TLS 검증을 유지한 채 메모리에서 읽고 cp949·탭 구분 24열로 해석했다. NAS/NYS/AMS의 행 수는 각각 5265/2839/4765, 유형 `4` 행 수는 모두 0이었다. 전체 파일에서 해당 코드의 존재를 확인한 뒤 필요한 소수 표본만 저장했으며, 모든 상장 종목의 유형을 조사하거나 정확도를 검증한 작업은 아니다. ZIP을 디스크에 추출하거나 공식 예제의 TLS 검증 해제를 실행하지 않았다.
 

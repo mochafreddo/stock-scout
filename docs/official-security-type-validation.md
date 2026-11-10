@@ -1,5 +1,7 @@
 # 외부 공식 종목 유형 자료의 자동화 가능성 조사
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
 2026-10-19 사용자의 `$implement` 요청으로 수행한 [#250](https://github.com/mochafreddo/stock-scout/issues/250)의 후속 조사다. [ADR 0005](adr/0005-official-security-type-sources.md)와 최신 이슈 명세를 기준으로 Nasdaq·NYSE의 공개 구조화 목록, SEC 공시와 발행사 자료를 확인했다. [기존 KIS 조사](kis-security-identification.md)는 당시의 관측 기록이며, 종목 유형에 외부 공식 자료를 허용한 이번 합의와 구분한다. 시세·거래량·거래대금·순위와 그 밖의 종목 정보는 KIS로 유지한다.
 
 ## 결론

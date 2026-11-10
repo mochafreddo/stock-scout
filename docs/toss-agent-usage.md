@@ -46,11 +46,11 @@ Preserve decimal strings and distinguish null from zero and omission. Treat `ret
 
 In each actual consumer, ask the agent to read this document, discover the CLI, choose arguments for the normal market queries, follow the partial page and interpret the error. Record the consumer and execution host, commands, exit codes and its interpretation. A shell command run by Codex proves only that Codex path. A Node regression test proves the runner behavior, not that dots can discover or execute it.
 
-If dots cannot read this checkout or run a local process, record the observed limitation and ask whether to connect dots to this computer or reconsider the CLI interface. Keep #295 pending until the required consumer path is observed or the user changes the requirement. Do not add a server or drop a consumer automatically.
+If dots cannot read this checkout or run a local process, record the observed limitation and ask whether to connect dots to this computer or reconsider the CLI interface. Evaluate each new consumer connection from its own evidence; use [the synthetic validation record](toss-agent-validation.md) for the accepted #295 observations. Do not add a server or drop a consumer automatically.
 
 ## Extend to later commands
 
-Keep `node scripts/toss.ts --help` as the discovery entry point and [the reference](toss-cli.md) as the argument and interpretation authority. Add a command-specific section there when a new query is implemented. Add a synthetic response at the existing external HTTP boundary and a public CLI regression check when extending this exercise; keep live state and fixture state separate. The remaining first-tool-set consumer acceptance belongs to later integration work.
+Keep `node scripts/toss.ts --help` as the discovery entry point and [the reference](toss-cli.md) as the argument and interpretation authority. Add a command-specific section there when a new query is implemented. Add a synthetic response at the existing external HTTP boundary and a public CLI regression check when extending this exercise; keep live state and fixture state separate. The accepted first-tool-set consumer observations are recorded in [the live consumer record](toss-agent-live-validation.md).
 
 Actual Toss data, account access, credential setup and transmission to external models require the applicable [access conditions](toss-access-readiness.md) and task-specific authorization. Synthetic connection success does not establish any of them.
 
@@ -64,4 +64,4 @@ Run this exercise independently in Codex and dots after the user approves that c
 4. Interpret the usable financial fields in that consumer: distinguish cash buying power, valuation and cost, settlement date/status, order creation and execution, and group versus item status. Preserve decimal strings, null, zero and missing fields. Do not infer eligibility, freshness, a complete history or an investment recommendation from a successful query.
 5. Record consumer/host, time, code revision, approved scope, command arguments without account identifiers or live cursors, status/exit code, interpretation and limits. Keep financial JSON in the approved consumer context only; do not copy raw responses, financial amounts, credentials, account identifiers or live cursors into shared evidence. Record user-reported dots observations separately from directly observed Codex results.
 
-Use [the #298 record](toss-agent-live-validation.md) for current progress. Keep final transition and legacy-path removal pending until both consumer paths and the applicable access conditions are satisfied.
+Use [the #298 record](toss-agent-live-validation.md) for accepted consumer observations, separating direct Codex execution from user-reported dots execution. Use [the transition record](toss-transition.md) for legacy-path removal and residual limits. Existing acceptance does not authorize a new account, consumer environment or data-transmission scope.

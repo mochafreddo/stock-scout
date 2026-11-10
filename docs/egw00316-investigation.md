@@ -1,5 +1,7 @@
 # KIS EGW00316 공개 자료 조사
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록이다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 따른다. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아니다.
+
 2026-10-31의 #240 진단 기록과 한국투자증권 공식 공개 자료를 바탕으로 한 조사다. 이 조사 단계에서는 KIS 조회·인증·주문 API와 OpenAI API를 다시 호출하지 않았다. 아래 대응안은 제안이며 실행하거나 공급자에게 전송하지 않았다.
 
 ## 후속 근거와 승인한 복구 정책
@@ -61,7 +63,7 @@ TR ID: HHDFS76310010
 
 가장 최근의 인증 수정은 실전·모의 토큰 파일 충돌을 해결한다. [커밋의 인증 변경](https://github.com/koreainvestment/open-trading-api/commit/3a9be59a3ed8745720dc3aa9d584bdf3b7830362)은 `examples_llm/kis_auth.py`와 `examples_user/kis_auth.py`에 같은 변경을 적용했다. 기존 날짜별 단일 파일을 서버 구분별 파일로 나누고, `auth(svr)`가 `read_token(svr)`·`save_token(..., svr)`를 사용하게 했다. 변경 전에는 같은 날 실전과 모의를 함께 사용하면 다른 환경의 토큰을 덮어쓰거나 읽을 수 있었다. 커밋 메시지도 이 인증 실패를 수정 대상으로 명시하지만, `EGW00316`과의 관계는 설명하지 않는다. 다른 변경은 백테스터 UTF-8 처리와 종목 마스터 경로·인코딩 호환성으로, 이번 순위 조회를 직접 고치는 변경은 아니다.
 
-Stock Scout의 현재 [토큰 관리](../scripts/kis-auth.ts)는 앱 키·시크릿 조합의 SHA-256 지문과 만료까지 60초 넘게 남았는지를 확인한 뒤 자체 JSON 캐시를 재사용한다. 토큰 발급과 [조회](../scripts/kis-query.ts)는 모두 실전 서버로 고정되어 있으며 공식 Python 예제의 날짜별 파일을 읽지 않는다. 따라서 현재 표준 실행 경로에는 공식 예제의 실전·모의 파일 충돌 수정이 직접 적용되지 않는다. 이 수정은 토큰의 저장 대상과 요청 환경이 일치하는지 살펴볼 단서이지만, Stock Scout 캐시가 잘못됐다는 증거는 아니다. 지문과 로컬 만료 검사는 서버의 폐기·권한 변경까지 확인하지 못하므로 오래되었거나 거절된 캐시라는 가설도 확정하거나 완전히 배제할 수 없다.
+Stock Scout의 현재 [토큰 관리](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/kis-auth.ts)는 앱 키·시크릿 조합의 SHA-256 지문과 만료까지 60초 넘게 남았는지를 확인한 뒤 자체 JSON 캐시를 재사용한다. 토큰 발급과 [조회](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/kis-query.ts)는 모두 실전 서버로 고정되어 있으며 공식 Python 예제의 날짜별 파일을 읽지 않는다. 따라서 현재 표준 실행 경로에는 공식 예제의 실전·모의 파일 충돌 수정이 직접 적용되지 않는다. 이 수정은 토큰의 저장 대상과 요청 환경이 일치하는지 살펴볼 단서이지만, Stock Scout 캐시가 잘못됐다는 증거는 아니다. 지문과 로컬 만료 검사는 서버의 폐기·권한 변경까지 확인하지 못하므로 오래되었거나 거절된 캐시라는 가설도 확정하거나 완전히 배제할 수 없다.
 
 요청 형식에서 남은 차이는 헤더다. 최신 [공식 인증·HTTP 래퍼](https://github.com/koreainvestment/open-trading-api/blob/3a9be59a3ed8745720dc3aa9d584bdf3b7830362/examples_llm/kis_auth.py#L61-L66)는 `Content-Type: application/json`, `Accept: text/plain`, `charset: UTF-8`, 설정된 `User-Agent`를 기본값으로 두고 [`_url_fetch`](https://github.com/koreainvestment/open-trading-api/blob/3a9be59a3ed8745720dc3aa9d584bdf3b7830362/examples_llm/kis_auth.py#L444-L490)가 빈 `tr_cont`도 명시한다. Stock Scout는 인증·앱 정보·TR ID·`custtype`만 명시하고 나머지는 Node.js의 기본 동작에 맡긴다. 반면 [최신 거래량순위 예제](https://github.com/koreainvestment/open-trading-api/blob/3a9be59a3ed8745720dc3aa9d584bdf3b7830362/examples_llm/overseas_stock/trade_vol/trade_vol.py)와 경로·TR ID·조회 파라미터는 일치한다. 헤더 차이는 구체적인 대조 지점이지만 해당 헤더가 필수이거나 그 누락이 `EGW00316`을 일으킨다는 근거는 없다. 공식 예제의 브라우저형 `User-Agent`를 차단 우회 수단으로 복사하는 결론도 내리지 않는다.
 

@@ -1,5 +1,7 @@
 # KIS 순위에서 LLM으로 종목 유형 확인하기
 
+> 이 문서는 제거된 KIS·내장 모델 제품의 당시 기록입니다. 현재 제품은 [토스 전환 기록](toss-transition.md)을 참고하세요. 아래 명령·검증 결과는 당시 이력이며 현재 실행 안내가 아닙니다.
+
 이 CLI는 KIS 순위를 자동 수집한 뒤 LLM이 조회 근거로 개별 상장 종목의 유형을 판단하는 검증 도구입니다. [#250](https://github.com/mochafreddo/stock-scout/issues/250)과 [ADR 0007](adr/0007-llm-security-type-judgment.md)의 작은 흐름을 구현합니다. 매수 추천이나 장전 보고서를 생성하지 않으며, 정상 출력에서도 `validation: unverified`, `dataSession: null`을 유지합니다.
 
 ## 현재 검증 상태
@@ -10,7 +12,7 @@
 
 ## 실행 책임
 
-[종목 유형 판단 실행 모듈](../scripts/security-type-assessment.ts)은 도구를 사용하는 하나의 모델 흐름에서 자료 조회와 최종 유형 판단을 처리합니다. 실제 열람 출처의 ID 연결·결과 검증, 명시적 완료·호출·시간 제한도 모듈에서 관리합니다. [CLI](../scripts/llm-security-probe.ts)는 인증, 순위 또는 평가 입력 준비, 출력과 종료 처리를 맡습니다. 구조 변경의 결정은 [ADR 0010](adr/0010-incremental-security-type-validation.md)을 따릅니다.
+[종목 유형 판단 실행 모듈](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/security-type-assessment.ts)은 도구를 사용하는 하나의 모델 흐름에서 자료 조회와 최종 유형 판단을 처리합니다. 실제 열람 출처의 ID 연결·결과 검증, 명시적 완료·호출·시간 제한도 모듈에서 관리합니다. [CLI](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/scripts/llm-security-probe.ts)는 인증, 순위 또는 평가 입력 준비, 출력과 종료 처리를 맡습니다. 구조 변경의 결정은 [ADR 0010](adr/0010-incremental-security-type-validation.md)을 따릅니다.
 
 기존 실행 인수와 공용 KIS·SIWC 경로는 유지합니다. 별도 조회 산출물과 두 번째 판단 호출, 단계별 출력 통계는 제거했습니다. 결과 필드 변경과 실제 검증 범위는 아래에서 확인하세요.
 
