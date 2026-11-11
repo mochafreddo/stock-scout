@@ -95,6 +95,8 @@ test('unrecognized types remain usable identities and never gate a prices call',
 test('stock separates empty and failed lookups, malformed rows and partial responses', async (t) => {
   for (const [rows, code] of [
     [[], 'NOT_FOUND'],
+    [[null], 'RESPONSE_INVALID'],
+    [[[]], 'RESPONSE_INVALID'],
     [[{ ...stock, symbol: 'OTHER' }], 'RESPONSE_INVALID'],
     [[{ ...stock, status: null }], 'RESPONSE_INVALID'],
     [[{ ...stock, englishName: undefined }], 'RESPONSE_INVALID'],
@@ -127,6 +129,20 @@ test('stock separates empty and failed lookups, malformed rows and partial respo
     denied.stdout + denied.stderr,
     /private upstream message|synthetic-(client|secret|token)/,
   );
+});
+
+test('stock preserves the existing 30-character decimal limit for shares outstanding', async (t) => {
+  const valid = await lookup(t, [
+    { ...stock, sharesOutstanding: '1234567890123456789012345678.9' },
+  ]);
+  assert.equal(valid.status, 0, valid.stdout);
+  assert.equal(valid.out.data[0].symbol, 'DEMO');
+
+  const invalid = await lookup(t, [
+    { ...stock, sharesOutstanding: '12345678901234567890123456789.9' },
+  ]);
+  assert.equal(invalid.status, 1, invalid.stdout);
+  assert.equal(invalid.out.error.code, 'RESPONSE_INVALID');
 });
 
 test('stock rejects secrets in selected data or choices and invalid arguments before HTTP', async (t) => {

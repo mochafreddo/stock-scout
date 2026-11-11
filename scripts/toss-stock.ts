@@ -1,4 +1,5 @@
 import { TossError } from './toss-client.ts';
+import { decimal, record } from './toss-values.ts';
 
 export const securityTypes = new Set([
   'STOCK',
@@ -49,9 +50,7 @@ function stockInfo(row: Record<string, unknown>, choice: StockChoice) {
     typeof row.isCommonShare !== 'boolean' ||
     typeof row.currency !== 'string' ||
     !/^[A-Z]{3}$/.test(row.currency) ||
-    typeof row.sharesOutstanding !== 'string' ||
-    row.sharesOutstanding.length > 30 ||
-    !/^-?\d+(?:\.\d+)?$/.test(row.sharesOutstanding)
+    !decimal(row.sharesOutstanding)
   )
     return;
   return {
@@ -65,10 +64,7 @@ export function stockResult(rows: unknown[], symbol: string, market?: string, is
   const listings = new Map<string, { choice: StockChoice; row: Record<string, unknown> | null }>();
   const omissions: { index?: number; symbol?: string; reason: string }[] = [];
   for (const [index, value] of rows.entries()) {
-    const row =
-      value && typeof value === 'object' && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : null;
+    const row = record(value) ? value : null;
     const choice = row && stockChoice(row, symbol);
     if (!choice) {
       omissions.push({ index, reason: 'invalid_item' });
