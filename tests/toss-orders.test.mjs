@@ -95,6 +95,43 @@ test('orders preserve current state, decimal strings and execution on the select
   }
 });
 
+test('orders attach request semantics only after account validation (characterization)', async (t) => {
+  for (const command of ['orders', 'conditional-orders']) {
+    const f = fixture();
+    t.after(f.close);
+    const args = [command, 'CLOSED', 'symbol=AAPL', 'limit=7'];
+    const missing = await runCli(f, [], args);
+    assert.equal(missing.status, 1, missing.stdout);
+    const base = { provider: 'tossinvest', endpoint: `/api/v1/${command}`, freshness: 'unknown' };
+    assert.deepEqual(JSON.parse(missing.stdout).source, base);
+    assert.deepEqual(missing.requests, []);
+    await select(f);
+    const denied = await runCli(
+      f,
+      [accounts, { path: `/api/v1/${command}`, status: 403, body: {} }],
+      args,
+    );
+    assert.equal(denied.status, 1, denied.stdout);
+    assert.equal(denied.stderr.trim(), 'PERMISSION_DENIED');
+    assert.deepEqual(JSON.parse(denied.stdout).source, {
+      ...base,
+      accountAlias: 'primary',
+      snapshot: 'unknown',
+      status: 'CLOSED',
+      limit: '7',
+      symbol: 'AAPL',
+      scope:
+        command === 'orders'
+          ? 'KR_US_API_supported_order_types_only'
+          : 'KR_US_all_channels_conditional_orders',
+      dateTimeZone: 'Asia/Seoul',
+      dateMeaning: command === 'orders' ? 'orderedAt' : 'createdAt',
+      quantityUnit: 'securities',
+      priceUnit: 'currency_per_security',
+    });
+  }
+});
+
 test('conditional orders preserve both legs, optional fields and future codes', async () => {
   const f = fixture();
   try {

@@ -205,35 +205,16 @@ try {
           Object.assign(source, {
             accountAlias: alias,
             snapshot: 'unknown',
-            ...(order
-              ? {
-                  ...Object.fromEntries([...order.query].filter(([key]) => key !== 'cursor')),
-                  scope: order.conditional
-                    ? 'KR_US_all_channels_conditional_orders'
-                    : 'KR_US_API_supported_order_types_only',
-                  dateTimeZone: 'Asia/Seoul',
-                  dateMeaning: order.conditional ? 'createdAt' : 'orderedAt',
-                  quantityUnit: 'securities',
-                  priceUnit: 'currency_per_security',
-                }
-              : transaction
-                ? {
-                    from: transaction.from,
-                    to: transaction.to,
-                    transactionTypes: transaction.query.get('transactionTypes'),
-                    limit: Number(transaction.query.get('limit')),
-                    dateTimeZone: 'Asia/Seoul',
-                    dateMeaning: 'settlementDate',
-                    scope: 'KR_US_transactions_including_options_bonds',
-                  }
-                : command === 'buying-power'
-                  ? { currency: symbols, scope: 'cash_based_excluding_margin' }
-                  : {
-                      scope: 'KR_US_stocks_excluding_options_bonds',
-                      quantityUnit: 'securities',
-                      priceUnit: 'currency_per_security',
-                      ...(symbols ? { symbol: symbols } : {}),
-                    }),
+            ...(paged
+              ? paged.source
+              : command === 'buying-power'
+                ? { currency: symbols, scope: 'cash_based_excluding_margin' }
+                : {
+                    scope: 'KR_US_stocks_excluding_options_bonds',
+                    quantityUnit: 'securities',
+                    priceUnit: 'currency_per_security',
+                    ...(symbols ? { symbol: symbols } : {}),
+                  }),
           }),
       );
     }
@@ -267,22 +248,9 @@ try {
         : constraintResult(value, symbols, date);
     }
     if (command === 'candles') {
-      const query = candleQuery(symbols, rest);
-      const daily = query.get('interval') === '1d';
-      Object.assign(source, {
-        ...Object.fromEntries(query),
-        count: Number(query.get('count')),
-        adjusted: query.get('adjusted') === 'true',
-        originalPricesGuaranteed: false,
-        priceUnit: 'currency_per_security',
-        volumeUnit: 'securities',
-        timestampMeaning: daily ? 'trade_date_local_midnight' : 'minute_end_exclusive',
-        usSessionSemantics: {
-          ohlc: daily ? 'regular' : 'provider_trades_session_unknown',
-          volume: daily ? 'consolidated_including_extended_hours' : 'selected_US_exchanges',
-        },
-      });
-      return candleResult(await read(query), query);
+      const request = candleQuery(symbols, rest);
+      Object.assign(source, request.source);
+      return candleResult(await read(request.query), request);
     }
     if (command === 'orderbook' || command === 'trades') {
       const count = rest[0] ?? '50';

@@ -42,7 +42,21 @@ export function transactionQuery(from: string | undefined, args: string[]) {
     else query.set(key, value);
   }
   if (query.has('cursor') !== (context !== undefined)) throw new TossError('INPUT_INVALID');
-  return { query, context, from, to };
+  return {
+    query,
+    context,
+    from,
+    to,
+    source: {
+      from,
+      to,
+      transactionTypes: query.get('transactionTypes'),
+      limit: Number(query.get('limit')),
+      dateTimeZone: 'Asia/Seoul',
+      dateMeaning: 'settlementDate',
+      scope: 'KR_US_transactions_including_options_bonds',
+    },
+  };
 }
 export function transactionResult(
   value: unknown,

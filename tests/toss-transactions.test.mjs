@@ -57,6 +57,37 @@ test('transactions preserve settlement meaning, precision and duplicate rows on 
   }
 });
 
+test('transactions attach settlement semantics only after account validation (characterization)', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const args = ['transactions', ...period, 'limit=7', 'transactionTypes=BUY'];
+  const missing = await runCli(f, [], args);
+  assert.equal(missing.status, 1, missing.stdout);
+  const base = { provider: 'tossinvest', endpoint: '/api/v1/transactions', freshness: 'unknown' };
+  assert.deepEqual(JSON.parse(missing.stdout).source, base);
+  assert.deepEqual(missing.requests, []);
+  await select(f);
+  const denied = await runCli(
+    f,
+    [accounts, { path: '/api/v1/transactions', status: 403, body: {} }],
+    args,
+  );
+  assert.equal(denied.status, 1, denied.stdout);
+  assert.equal(denied.stderr.trim(), 'PERMISSION_DENIED');
+  assert.deepEqual(JSON.parse(denied.stdout).source, {
+    ...base,
+    accountAlias: 'primary',
+    snapshot: 'unknown',
+    from: '2026-09-01',
+    to: '2026-10-31',
+    transactionTypes: 'BUY',
+    limit: 7,
+    dateTimeZone: 'Asia/Seoul',
+    dateMeaning: 'settlementDate',
+    scope: 'KR_US_transactions_including_options_bonds',
+  });
+});
+
 test('empty transaction pages preserve provider cursors and bind continuation to account and filters', async () => {
   const f = fixture();
   try {

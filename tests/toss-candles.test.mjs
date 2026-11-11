@@ -114,6 +114,35 @@ test('help discovers candles and its supported intervals without authentication'
   assert.deepEqual(r.requests, []);
 });
 
+test('candles retain request semantics on upstream errors (characterization)', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const r = await runCli(
+    f,
+    [{ path: '/api/v1/candles', status: 403, body: {} }],
+    ['candles', 'AAPL', '1m', 'count=1', 'adjusted=false'],
+  );
+  assert.equal(r.status, 1, r.stdout);
+  assert.equal(r.stderr.trim(), 'PERMISSION_DENIED');
+  assert.deepEqual(JSON.parse(r.stdout).source, {
+    provider: 'tossinvest',
+    endpoint: '/api/v1/candles',
+    freshness: 'unknown',
+    symbol: 'AAPL',
+    interval: '1m',
+    count: 1,
+    adjusted: false,
+    originalPricesGuaranteed: false,
+    priceUnit: 'currency_per_security',
+    volumeUnit: 'securities',
+    timestampMeaning: 'minute_end_exclusive',
+    usSessionSemantics: {
+      ohlc: 'provider_trades_session_unknown',
+      volume: 'selected_US_exchanges',
+    },
+  });
+});
+
 test('candles reject response order and upper-bound violations instead of silently reordering', async (t) => {
   const older = { ...candle, timestamp: '2026-11-04T14:00:00+09:00' };
   for (const [candles, args] of [

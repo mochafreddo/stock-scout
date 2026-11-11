@@ -22,10 +22,26 @@ export function candleQuery(symbol: string | undefined, args: string[]) {
     seen.add(key);
     query.set(key, value);
   }
-  return query;
+  const daily = interval === '1d';
+  return {
+    query,
+    source: {
+      ...Object.fromEntries(query),
+      count: Number(query.get('count')),
+      adjusted: query.get('adjusted') === 'true',
+      originalPricesGuaranteed: false,
+      priceUnit: 'currency_per_security',
+      volumeUnit: 'securities',
+      timestampMeaning: daily ? 'trade_date_local_midnight' : 'minute_end_exclusive',
+      usSessionSemantics: {
+        ohlc: daily ? 'regular' : 'provider_trades_session_unknown',
+        volume: daily ? 'consolidated_including_extended_hours' : 'selected_US_exchanges',
+      },
+    },
+  };
 }
 
-export function candleResult(value: unknown, query: URLSearchParams) {
+export function candleResult(value: unknown, { query }: ReturnType<typeof candleQuery>) {
   const count = Number(query.get('count'));
   if (!record(value) || !Array.isArray(value.candles) || value.candles.length > count)
     throw new TossError('RESPONSE_INVALID');

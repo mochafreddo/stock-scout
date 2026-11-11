@@ -35,7 +35,22 @@ export function orderQuery(status: string | undefined, args: string[], condition
   const to = query.get('to');
   if ((from && to && from > to) || query.has('cursor') !== (context !== undefined))
     throw new TossError('INPUT_INVALID');
-  return { query, context, conditional, paginated };
+  return {
+    query,
+    context,
+    conditional,
+    paginated,
+    source: {
+      ...Object.fromEntries([...query].filter(([key]) => key !== 'cursor')),
+      scope: conditional
+        ? 'KR_US_all_channels_conditional_orders'
+        : 'KR_US_API_supported_order_types_only',
+      dateTimeZone: 'Asia/Seoul',
+      dateMeaning: conditional ? 'createdAt' : 'orderedAt',
+      quantityUnit: 'securities',
+      priceUnit: 'currency_per_security',
+    },
+  };
 }
 
 function fields(
