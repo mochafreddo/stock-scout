@@ -1,5 +1,5 @@
 import { buyingPowerResult, holdingsResult } from './toss-account.ts';
-import { candleQuery, candleResult } from './toss-candles.ts';
+import { candleQuery, queryCandlePage } from './toss-candles.ts';
 import { payload, TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
@@ -115,10 +115,20 @@ try {
             {
               name: 'candles',
               usage:
-                'node scripts/toss.ts candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP]',
+                'node scripts/toss.ts candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP | date=YYYY-MM-DD]',
               intervals: ['1d', '1m'],
               defaultCount: 100,
               maxCount: 200,
+              dateSelection: {
+                interval: '1d',
+                market: 'provider_verified_US',
+                timeZone: 'America/New_York',
+                boundary: 'inclusive_trade_date',
+                conflictsWith: 'before',
+                continuation: 'copy_page_nextBefore_to_before_without_date',
+                completion: 'unknown',
+                inProgress: 'unknown',
+              },
             },
             {
               name: 'trades',
@@ -250,7 +260,10 @@ try {
     if (command === 'candles') {
       const request = candleQuery(symbols, rest);
       Object.assign(source, request.source);
-      return candleResult(await read(request.query), request);
+      client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
+      const result = await queryCandlePage(client, request);
+      Object.assign(source, result.source);
+      return result;
     }
     if (command === 'orderbook' || command === 'trades') {
       const count = rest[0] ?? '50';

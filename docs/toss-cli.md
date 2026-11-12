@@ -231,13 +231,20 @@ node scripts/toss.ts constraints AAPL 2026-11-06
 
 ```sh
 node scripts/toss.ts candles AAPL 1d
+node scripts/toss.ts candles AAPL 1d date=2026-11-06 count=100
 node scripts/toss.ts candles AAPL 1m count=200 adjusted=false
 node scripts/toss.ts candles AAPL 1m count=100 adjusted=true before=2026-11-06T09:31:00.123+09:00
 ```
 
-`candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP]`는 봉 한 페이지를 조회합니다. `INTERVAL`은 일봉 `1d` 또는 1분봉 `1m`이며 두 주기 모두 같은 선택 인수를 지원합니다. 개수는 1~200, 기본값은 100이고 수정주가 요청은 기본 `true`입니다. 선택 인수 순서는 자유롭지만 같은 인수의 반복은 거부합니다. `before`는 오프셋을 포함한 유효한 ISO 8601 시각이며 해당 시각을 포함하는 상한입니다. 생략하면 최신 봉부터 조회합니다. 공급자는 시작일·종료일·다른 봉 주기 인수를 제공하지 않습니다. `from=...`, `to=...`, `cursor=...`나 주봉 요청을 임의로 변환하지 않습니다.
+`candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP | date=YYYY-MM-DD]`는 봉 한 페이지를 조회합니다. `INTERVAL`은 일봉 `1d` 또는 1분봉 `1m`입니다. 개수는 1~200, 기본값은 100이고 수정주가 요청은 기본 `true`입니다. 선택 인수 순서는 자유롭지만 같은 인수의 반복은 거부합니다. `before`는 오프셋을 포함한 유효한 ISO 8601 시각이며 해당 시각을 포함하는 상한입니다. `date`는 미국 일봉 전용입니다. 두 상한을 모두 생략하면 기존처럼 최신 봉부터 조회하며 시장 확인 호출을 추가하지 않습니다. 공급자는 시작일·종료일·다른 봉 주기 인수를 제공하지 않습니다. `from=...`, `to=...`, `cursor=...`나 주봉 요청을 임의로 변환하지 않습니다.
 
-2026-11-07 KST에 확인한 [공식 REST OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)의 엔드포인트는 `GET /api/v1/candles`이며 호출 제한 그룹은 `MARKET_DATA_CHART`입니다. [공식 FAQ](https://openapi.tossinvest.com/openapi-docs/faq.md)와 함께 다음 의미를 적용합니다. 표의 미국 세션 설명은 미국 종목에 해당하며 심볼의 시장·유형을 이 명령에서 별도로 확인하지 않습니다.
+`date`는 유효한 달력 날짜를 받아 뉴욕 현지 자정으로 변환하고 서머타임을 반영합니다. 지정 거래일의 봉을 포함하며 그 이전 봉을 함께 조회합니다. 예를 들어 `date=2026-03-08`은 `before=2026-03-08T05:00:00.000Z`, 다음 날 `date=2026-03-09`는 `before=2026-03-09T04:00:00.000Z`로 요청합니다. 휴장일은 그날 이하에서 존재하는 봉을 조회하며 오늘 자동 제외·직전 완료 거래일 추정·봉 필터링·개수 보충은 하지 않습니다. 분봉 날짜 선택·잘못된 날짜·`date`와 `before`의 동시 입력은 인증을 포함한 첫 HTTP 호출 전에 `INPUT_INVALID`로 거부합니다.
+
+날짜 옵션을 쓰면 먼저 `GET /api/v1/stocks?symbols=SYMBOL`로 종목을 확인합니다. 공급자가 식별한 시장이 `NYSE`·`NASDAQ`·`AMEX`·`US_ETC` 중 하나일 때만 봉을 조회하며 티커 모양이나 통화로 시장을 추정하지 않습니다. 미국 외 시장과 미확인 시장은 `UNSUPPORTED`, 모호한 식별은 `IDENTITY_AMBIGUOUS`, 정상 빈 종목 목록은 `NOT_FOUND`, 중복·잘못된 식별 자료는 `RESPONSE_INVALID`로 중단합니다. 식별에 영향을 주는 잘못된 항목이 섞여도 봉을 조회하지 않습니다. 증권 유형 미확인만으로 확인된 미국 시장 조회를 막지는 않습니다. 시장 확인·인증·재시도와 대기를 모두 같은 단일 조회의 60초·HTTP 10회 예산에 포함하며 개별 HTTP 최대 15초와 공통 최소 1초 간격을 유지합니다.
+
+`source.date`·`source.dateTimeZone=America/New_York`·`source.market`은 선택한 거래일과 확인한 시장이며 `source.before`는 공급자에게 전송한 시각 상한입니다. 날짜 선택·과거 날짜·반환 개수는 봉 완료나 최종 확정의 근거가 아니며 `completion`·`inProgress`는 계속 `unknown`입니다. 날짜로 첫 페이지를 받은 뒤에는 `date`를 빼고 `page.nextBefore`를 `before`에 그대로 넣어 후속 개별 조회를 요청하세요.
+
+2026-11-12 KST에 확인한 [공식 REST OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)의 엔드포인트는 `GET /api/v1/candles`이며 호출 제한 그룹은 `MARKET_DATA_CHART`입니다. [공식 FAQ](https://openapi.tossinvest.com/openapi-docs/faq.md)와 함께 다음 의미를 적용합니다. 표의 미국 세션 설명은 미국 종목에 해당하며 날짜 옵션이 없으면 심볼의 시장·유형을 별도로 확인하지 않습니다.
 
 | 자료 | 의미와 출력 |
 | --- | --- |
