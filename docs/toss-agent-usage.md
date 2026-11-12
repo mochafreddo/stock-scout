@@ -2,6 +2,16 @@
 
 Use these instructions in the repository root. Use [the CLI reference](toss-cli.md) for command arguments and data meanings. Discover the current command list with `node scripts/toss.ts --help`; it requires no authentication. This document is intended for agents, including Codex and OpenAI dots.
 
+## Use the CLI for a user request
+
+1. Identify the user's request and the approved scope for queries, account access and data transmission/storage. Reuse existing authorization within that scope.
+2. Discover commands with `node scripts/toss.ts --help` and use the CLI reference to choose the queries and arguments needed for the request.
+3. Run the selected queries and inspect stdout JSON, exit codes, omissions and next-page information together.
+4. If more data is needed, request additional queries or pages within the approved scope. Report unresolved gaps when the scope or query budget prevents further retrieval.
+5. Use the returned data to write the analysis and recommendations, reflecting its coverage and limits. The agent owns query order and analysis; the CLI owns retrieval, validation, timestamps and error handling. The user decides and executes actual trades.
+
+For example, when asked to review an additional purchase of a held security, choose the relevant holdings, buying-power and market queries for that request. Do not run every command automatically.
+
 ## Synthetic connection exercise
 
 Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments for `node scripts/toss.ts`. The runner starts that actual CLI with the existing HTTP mock and a new temporary state directory for each invocation. It supplies only synthetic credentials and responses, ignores the caller's `TOSS_STATE_DIR` for the child, and deletes its temporary state after the invocation. No HTTP server or MCP server is needed. The `SYNTHETIC` stderr notice labels the entire exercise; the CLI's stdout JSON and exit code are forwarded unchanged. Even `source.provider=tossinvest` refers to mocked responses here.
