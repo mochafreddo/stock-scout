@@ -18,7 +18,18 @@ test('agent discovers the real CLI and reads explicitly synthetic prices', () =>
   const price = run('success', 'prices', 'DEMO');
   assert.equal(price.status, 0, price.stderr);
   assert.deepEqual(JSON.parse(price.stdout).data, [
-    { symbol: 'DEMO', lastPrice: '10.0100', currency: 'USD', timestamp: null },
+    {
+      symbol: 'DEMO',
+      lastPrice: '10.0100',
+      currency: 'USD',
+      timestamp: null,
+      priceAge: {
+        seconds: null,
+        thresholdSeconds: 900,
+        exceedsThreshold: null,
+        unavailableReason: 'timestamp_null',
+      },
+    },
   ]);
   assert.match(price.stderr, /SYNTHETIC/);
   assert.doesNotMatch(price.stdout + price.stderr, /synthetic-(secret|token|client)/);
