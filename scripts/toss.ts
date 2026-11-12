@@ -7,7 +7,7 @@ import { orderQuery, orderResult } from './toss-orders.ts';
 import { constraintResult, sessionResult, validDate } from './toss-sessions.ts';
 import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
 import { transactionQuery, transactionResult } from './toss-transactions.ts';
-import { decimal, symbolPattern, validTime } from './toss-values.ts';
+import { decimal, laterThan, symbolPattern, validTime, wholeSecondMillis } from './toss-values.ts';
 
 function priceResult(rows: unknown[], symbols: string) {
   const requested = new Set(symbols.split(','));
@@ -58,6 +58,7 @@ process.on('SIGINT', interrupt);
 process.on('SIGTERM', interrupt);
 let client: TossClient | undefined;
 const [command, symbols, ...rest] = process.argv.slice(2);
+let staleAfterSeconds = 900;
 const endpoints: Record<string, string> = {
   stock: '/api/v1/stocks',
   prices: '/api/v1/prices',
@@ -101,8 +102,11 @@ try {
           commands: [
             {
               name: 'prices',
-              usage: 'node scripts/toss.ts prices SYMBOL[,SYMBOL...]',
+              usage: 'node scripts/toss.ts prices SYMBOL[,SYMBOL...] [staleAfterSeconds=SECONDS]',
               maxSymbols: 200,
+              defaultStaleAfterSeconds: 900,
+              priceAge:
+                'Elapsed seconds from provider timestamp to retrievedAt; warns only above the threshold. Missing, null and future timestamps are unavailable. No realtime or transport-delay guarantee.',
             },
             {
               name: 'tradable',
@@ -299,12 +303,21 @@ try {
       Object.assign(source, Object.fromEntries(query));
       return tradableResult(await read(query), query);
     }
+    if (command === 'prices' && rest.length) {
+      if (
+        rest.length !== 1 ||
+        !/^staleAfterSeconds=(?:0|[1-9]\d*)$/.test(rest[0]) ||
+        !Number.isSafeInteger(Number(rest[0].slice('staleAfterSeconds='.length)))
+      )
+        throw new TossError('INPUT_INVALID');
+      staleAfterSeconds = Number(rest[0].slice('staleAfterSeconds='.length));
+    }
     if (
       (command !== 'prices' && command !== 'stock') ||
       (command === 'stock' && symbols?.includes(',')) ||
       !symbols ||
       (command === 'prices'
-        ? rest.length > 0
+        ? rest.length > 1
         : rest.length > 2 ||
           (rest[0] !== undefined && !marketPattern.test(rest[0])) ||
           (rest[1] !== undefined && rest[1] !== '-' && !isinPattern.test(rest[1]))) ||
@@ -323,14 +336,53 @@ try {
   const { data, omissions } = result;
   const status = omissions.length ? 'partial' : 'success';
   client?.check();
+  const retrievedAt = new Date().toISOString();
+  const outputData =
+    command === 'prices'
+      ? data.map((row) => {
+          const timestamp = 'timestamp' in row ? row.timestamp : undefined;
+          const unavailableReason =
+            timestamp === undefined
+              ? 'timestamp_missing'
+              : timestamp === null
+                ? 'timestamp_null'
+                : typeof timestamp === 'string' && laterThan(timestamp, retrievedAt)
+                  ? 'timestamp_future'
+                  : undefined;
+          if (unavailableReason)
+            return {
+              ...row,
+              priceAge: {
+                seconds: null,
+                thresholdSeconds: staleAfterSeconds,
+                exceedsThreshold: null,
+                unavailableReason,
+              },
+            };
+          if (typeof timestamp !== 'string') throw new TossError('RESPONSE_INVALID');
+          const fraction = (value: string) => Number(`0.${/\.(\d+)/.exec(value)?.[1] ?? '0'}`);
+          const seconds =
+            (wholeSecondMillis(retrievedAt) - wholeSecondMillis(timestamp)) / 1000 +
+            fraction(retrievedAt) -
+            fraction(timestamp);
+          return {
+            ...row,
+            priceAge: {
+              seconds,
+              thresholdSeconds: staleAfterSeconds,
+              exceedsThreshold: laterThan(retrievedAt, timestamp, staleAfterSeconds),
+            },
+          };
+        })
+      : data;
   const output = JSON.stringify({
     version: 1,
     status,
-    data,
+    data: outputData,
     omissions,
     ...('page' in result ? { page: result.page } : {}),
     source,
-    retrievedAt: new Date().toISOString(),
+    retrievedAt,
   });
   if (client?.containsSecret(output)) throw new TossError('SENSITIVE_OUTPUT');
   console.log(output);
