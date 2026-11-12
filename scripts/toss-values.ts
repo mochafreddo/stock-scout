@@ -6,8 +6,8 @@ export function wholeSecondMillis(value: string) {
   return Date.parse(value.replace(/\.\d+/, ''));
 }
 
-export function laterThan(left: string, right: string) {
-  const difference = wholeSecondMillis(left) - wholeSecondMillis(right);
+export function laterThan(left: string, right: string, seconds = 0) {
+  const difference = (wholeSecondMillis(left) - wholeSecondMillis(right)) / 1000 - seconds;
   if (difference !== 0) return difference > 0;
   const fraction = (value: string) => /\.(\d+)/.exec(value)?.[1] ?? '';
   const a = fraction(left);

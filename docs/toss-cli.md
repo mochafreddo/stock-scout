@@ -13,9 +13,10 @@ node scripts/toss.ts --help
 node scripts/toss.ts stock AAPL
 node scripts/toss.ts prices AAPL
 node scripts/toss.ts prices AAPL,MSFT
+node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 ```
 
-`--help`는 인증 없이 명령 목록을 JSON으로 출력합니다. `prices`는 공식 API의 `symbols` 식별자 1~200개를 쉼표로 받습니다. 각 식별자는 영문 대소문자·숫자·`.`·`-`만 허용하며 빈 항목과 추가 인수는 거부합니다. 티커 검색·시장 추정·KIS 식별자 변환은 수행하지 않습니다. 공급자가 확인한 식별자를 사용하세요. 미국 장중에도 실행할 수 있으며 증권 유형 관문을 두지 않습니다.
+`--help`는 인증 없이 명령 목록을 JSON으로 출력합니다. `prices`는 공식 API의 `symbols` 식별자 1~200개를 쉼표로 받습니다. 각 식별자는 영문 대소문자·숫자·`.`·`-`만 허용하며 빈 항목과 정의되지 않은 추가 인수는 거부합니다. 티커 검색·시장 추정·KIS 식별자 변환은 수행하지 않습니다. 공급자가 확인한 식별자를 사용하세요. 미국 장중에도 실행할 수 있으며 증권 유형 관문을 두지 않습니다.
 
 [실자료 허용·조회 권한과 접근 준비](toss-access-readiness.md)에서 [#284의 조사](https://github.com/mochafreddo/stock-scout/issues/284) 이후의 사용자 재결정, 제한된 실제 연결 결과와 남은 미확인을 확인하세요. 새 연결이나 범위 변경에는 해당 작업의 별도 승인이 필요합니다. 원자료뿐 아니라 요약·가공 결과의 전달에도 승인 범위가 적용됩니다. 이 문서의 예시는 합성 자료입니다.
 
@@ -306,6 +307,11 @@ node scripts/toss.ts candles AAPL 1m count=100 adjusted=true before=2026-11-06T0
 | `lastPrice` | 필수 소수 문자열, 최대 30자. 숫자로 바꾸거나 반올림하지 않습니다. `0` 문자열은 유효하며 null·누락·숫자 자료형은 오류입니다. |
 | `currency` | 필수 통화 문자열. 공식 값은 `KRW`·`USD`이며 공식 확장 지침에 따라 다른 세 자리 대문자 코드도 원문으로 반환합니다. 서로 다른 통화는 합산하지 않습니다. |
 | `timestamp` | 선택 필드이며 문자열 또는 null입니다. 오프셋이 있는 유효한 날짜·시각 문자열을 검사하고 그대로 반환합니다. 생략과 null을 구분하며 조회 시각으로 채우지 않습니다. |
+| `priceAge` | CLI가 계산한 종목별 경과 시간 정보입니다. `seconds`는 원천 시각부터 결과의 `retrievedAt`까지 지난 초이며 소수초를 포함할 수 있습니다. `thresholdSeconds`는 이번 호출의 임계값, `exceedsThreshold`는 엄격한 초과 여부입니다. `seconds`의 숫자 표현은 JavaScript 정밀도에 따르며 경고 판정은 원천 시각의 소수초를 보존하여 비교합니다. |
+
+`staleAfterSeconds=SECONDS`는 호출별 오래됨 경고 임계값이며 기본 900초입니다. 0~9007199254740991 범위의 정수를 십진 표기로 받으며 선행 0·부호·소수·지수 표기·반복 입력은 HTTP 전에 거부합니다. 공급자 요청에는 이 옵션을 보내지 않습니다. 경과 시간이 임계값과 같으면 `exceedsThreshold=false`, 초과하면 `true`입니다. 예를 들어 조회 시각이 `2026-11-06T15:45:00Z`이고 원천 시각이 `2026-11-06T15:30:00Z`이면 900초이므로 기본 임계값 경고가 없습니다.
+
+시각이 생략·null·미래이면 `seconds`와 `exceedsThreshold`는 null이고 `unavailableReason`은 각각 `timestamp_missing`·`timestamp_null`·`timestamp_future`입니다. 원래 `timestamp`의 생략·null·문자열을 보존합니다. 경고나 판정 불가만으로 유효 가격을 제외하거나 `omissions`에 추가하거나 `partial`로 바꾸지 않습니다. 임계값 이내라는 사실도 최신·실시간 보장이 아니며 이 값은 공급자의 전송 지연 측정값이 아닙니다.
 
 stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·공급자 메시지 없는 오류 코드만 출력합니다. 알려진 자격 증명·사용한 토큰이 결과에 나타나면 `SENSITIVE_OUTPUT`으로 자료 출력을 차단합니다. 공급자 추가 필드는 그대로 전달하지 않습니다.
 
@@ -313,7 +319,7 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 {
   "version": 1,
   "status": "success",
-  "data": [{"symbol":"AAPL","lastPrice":"185.7000","currency":"USD","timestamp":null}],
+  "data": [{"symbol":"AAPL","lastPrice":"185.7000","currency":"USD","timestamp":null,"priceAge":{"seconds":null,"thresholdSeconds":900,"exceedsThreshold":null,"unavailableReason":"timestamp_null"}}],
   "omissions": [],
   "source": {
     "provider":"tossinvest",

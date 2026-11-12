@@ -14,7 +14,10 @@ test('Toss CLI preserves decimal prices and data time through real arguments and
     const out = JSON.parse(r.stdout);
     assert.equal(out.version, 1);
     assert.equal(out.status, 'success');
-    assert.deepEqual(out.data, [price]);
+    assert.deepEqual(
+      out.data.map(({ priceAge, ...row }) => row),
+      [price],
+    );
     assert.equal(out.source.provider, 'tossinvest');
     assert.equal(out.source.endpoint, '/api/v1/prices');
     assert.equal(out.source.freshness, 'unknown');
@@ -23,6 +26,186 @@ test('Toss CLI preserves decimal prices and data time through real arguments and
     assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
   } finally {
     f.close();
+  }
+});
+
+test('Toss CLI reports per-price age at the output time and warns only above 900 seconds', async () => {
+  const f = fixture();
+  try {
+    const rows = [
+      { ...price, symbol: 'BEFORE', timestamp: '2026-11-06T10:30:01-05:00' },
+      { ...price, symbol: 'EQUAL', timestamp: '2026-11-06T15:30:00Z' },
+      { ...price, symbol: 'AFTER', timestamp: '2026-11-07T00:29:59+09:00' },
+      { ...price, symbol: 'FRACTION', timestamp: '2026-11-06T15:29:59.9999999999999999Z' },
+    ];
+    const r = await runCli(
+      f,
+      [{ body: { result: rows }, freezeAt: '2026-11-06T15:45:00Z' }],
+      ['prices', 'BEFORE,EQUAL,AFTER,FRACTION'],
+      { TEST_CLOCK_START: '1793979898000' },
+    );
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.retrievedAt, '2026-11-06T15:45:00.000Z');
+    assert.equal(out.status, 'success');
+    assert.deepEqual(out.omissions, []);
+    assert.deepEqual(out.data, [
+      { ...rows[0], priceAge: { seconds: 899, thresholdSeconds: 900, exceedsThreshold: false } },
+      { ...rows[1], priceAge: { seconds: 900, thresholdSeconds: 900, exceedsThreshold: false } },
+      { ...rows[2], priceAge: { seconds: 901, thresholdSeconds: 900, exceedsThreshold: true } },
+      { ...rows[3], priceAge: { seconds: 900, thresholdSeconds: 900, exceedsThreshold: true } },
+    ]);
+    assert.equal(out.source.freshness, 'unknown');
+    assert.equal(out.source.snapshot, 'unknown');
+    assert.equal(r.requests.at(-1).query, '?symbols=BEFORE%2CEQUAL%2CAFTER%2CFRACTION');
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI applies an explicit age threshold locally and rejects invalid thresholds before HTTP', async () => {
+  for (const [option, threshold, expected] of [
+    ['staleAfterSeconds=899', 899, true],
+    ['staleAfterSeconds=900', 900, false],
+    ['staleAfterSeconds=901', 901, false],
+    ['staleAfterSeconds=0', 0, true],
+    ['staleAfterSeconds=9007199254740991', 9007199254740991, false],
+  ]) {
+    const f = fixture();
+    try {
+      const row = { ...price, timestamp: '2026-11-06T15:30:00Z' };
+      const r = await runCli(
+        f,
+        [{ body: { result: [row] }, freezeAt: '2026-11-06T15:45:00Z' }],
+        ['prices', 'AAPL', option],
+        { TEST_CLOCK_START: '1793979898000' },
+      );
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      const out = JSON.parse(r.stdout);
+      assert.deepEqual(out.data, [
+        {
+          ...row,
+          priceAge: {
+            seconds: 900,
+            thresholdSeconds: threshold,
+            exceedsThreshold: expected,
+          },
+        },
+      ]);
+      assert.equal(r.requests.at(-1).query, '?symbols=AAPL');
+    } finally {
+      f.close();
+    }
+  }
+  const f = fixture();
+  try {
+    for (const options of [
+      ['staleAfterSeconds='],
+      ['staleAfterSeconds=-1'],
+      ['staleAfterSeconds=1.5'],
+      ['staleAfterSeconds=NaN'],
+      ['staleAfterSeconds=Infinity'],
+      ['staleAfterSeconds=1e3'],
+      ['staleAfterSeconds=9007199254740992'],
+      ['staleAfterSeconds=0900'],
+      ['staleAfterSeconds=900', 'staleAfterSeconds=901'],
+      ['unknown=900'],
+    ]) {
+      const r = await runCli(f, [], ['prices', 'AAPL', ...options]);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.equal(JSON.parse(r.stdout).error.code, 'INPUT_INVALID');
+      assert.equal(r.requests.length, 0);
+      assert.match(r.stderr, /INPUT_INVALID/);
+    }
+  } finally {
+    f.close();
+  }
+});
+
+test('Toss CLI retains prices with missing, null and future time while distinguishing unavailable age', async () => {
+  for (const partial of [false, true]) {
+    const f = fixture();
+    try {
+      const rows = [
+        { symbol: 'MISSING', lastPrice: '0', currency: 'USD' },
+        { symbol: 'NULL', lastPrice: '1.00', currency: 'EUR', timestamp: null },
+        { ...price, symbol: 'FUTURE', timestamp: '2026-11-06T15:45:01Z' },
+        { ...price, symbol: 'FUTURE-FRACTION', timestamp: '2026-11-06T15:45:00.0001Z' },
+      ];
+      const r = await runCli(
+        f,
+        [
+          {
+            body: {
+              result: partial ? [...rows, { ...price, symbol: 'INVALID', lastPrice: null }] : rows,
+            },
+            freezeAt: '2026-11-06T15:45:00Z',
+          },
+        ],
+        [
+          'prices',
+          partial
+            ? 'MISSING,NULL,FUTURE,FUTURE-FRACTION,INVALID'
+            : 'MISSING,NULL,FUTURE,FUTURE-FRACTION',
+        ],
+        { TEST_CLOCK_START: '1793979898000' },
+      );
+      assert.equal(r.status, partial ? 2 : 0, r.stdout + r.stderr);
+      const out = JSON.parse(r.stdout);
+      assert.equal(out.status, partial ? 'partial' : 'success');
+      assert.deepEqual(out.data, [
+        {
+          ...rows[0],
+          priceAge: {
+            seconds: null,
+            thresholdSeconds: 900,
+            exceedsThreshold: null,
+            unavailableReason: 'timestamp_missing',
+          },
+        },
+        {
+          ...rows[1],
+          priceAge: {
+            seconds: null,
+            thresholdSeconds: 900,
+            exceedsThreshold: null,
+            unavailableReason: 'timestamp_null',
+          },
+        },
+        {
+          ...rows[2],
+          priceAge: {
+            seconds: null,
+            thresholdSeconds: 900,
+            exceedsThreshold: null,
+            unavailableReason: 'timestamp_future',
+          },
+        },
+        {
+          ...rows[3],
+          priceAge: {
+            seconds: null,
+            thresholdSeconds: 900,
+            exceedsThreshold: null,
+            unavailableReason: 'timestamp_future',
+          },
+        },
+      ]);
+      assert.deepEqual(
+        out.omissions,
+        partial
+          ? [
+              { index: 4, reason: 'invalid_item' },
+              { symbol: 'INVALID', reason: 'missing_item' },
+            ]
+          : [],
+      );
+      assert.equal(out.source.freshness, 'unknown');
+      assert.equal(out.source.snapshot, 'unknown');
+      assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
+    } finally {
+      f.close();
+    }
   }
 });
 
@@ -79,10 +262,17 @@ test('Toss CLI distinguishes empty, partial and malformed prices without losing 
       assert.equal(out.status, expectedCode);
       if (expectedCode === 'error') assert.equal(out.error.code, 'RESPONSE_INVALID');
       if (expectedCode === 'partial') {
-        assert.deepEqual(out.data, [price]);
+        assert.deepEqual(
+          out.data.map(({ priceAge, ...row }) => row),
+          [price],
+        );
         assert.ok(out.omissions.length);
       }
-      if (expectedCode === 'success') assert.deepEqual(out.data, rows);
+      if (expectedCode === 'success')
+        assert.deepEqual(
+          out.data.map(({ priceAge, ...row }) => row),
+          rows,
+        );
     }
     for (const body of [{}, { result: null }, { result: [], error: {} }]) {
       const r = await runCli(f, [{ body }]);
