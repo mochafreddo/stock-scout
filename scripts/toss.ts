@@ -57,6 +57,19 @@ const interrupt = () => interruption.abort();
 process.on('SIGINT', interrupt);
 process.on('SIGTERM', interrupt);
 let client: TossClient | undefined;
+function errorDetail(error: unknown) {
+  const code = error instanceof TossError ? error.code : 'INTERNAL_ERROR';
+  let detail = {
+    code,
+    ...(error instanceof AmbiguousStock ? { choices: error.choices } : {}),
+    ...(error instanceof TossError
+      ? { providerCode: error.providerCode, requestId: error.requestId }
+      : {}),
+  };
+  if (client?.containsAccountIdentifier(JSON.stringify(detail))) detail = { code };
+  if (client?.containsSecret(JSON.stringify(detail))) detail = { code: 'SENSITIVE_OUTPUT' };
+  return detail;
+}
 const [command, symbols, ...rest] = process.argv.slice(2);
 let staleAfterSeconds = 900;
 const endpoints: Record<string, string> = {
@@ -67,6 +80,7 @@ const endpoints: Record<string, string> = {
   orderbook: '/api/v1/orderbook',
   trades: '/api/v1/trades',
   candles: '/api/v1/candles',
+  'candles-batch': '/api/v1/candles',
   sessions: '/api/v1/market-calendar/US',
   constraints: '/api/v1/market-calendar/US',
   'account-select': 'local:account-selection',
@@ -133,6 +147,20 @@ try {
                 completion: 'unknown',
                 inProgress: 'unknown',
               },
+            },
+            {
+              name: 'candles-batch',
+              usage:
+                'node scripts/toss.ts candles-batch SYMBOL[,SYMBOL...] [count=COUNT] [adjusted=true|false] [before=TIMESTAMP | date=YYYY-MM-DD]',
+              maxSymbols: 20,
+              interval: '1d',
+              defaultCount: 100,
+              maxCount: 200,
+              executionLimits: { maxSeconds: 120, maxHttpTransmissions: 40, maxHttpSeconds: 15 },
+              semantics:
+                'Sequential one-page daily queries with one budget including market checks, authentication, retries, locks and waits; common HTTP spacing still applies. Limits do not guarantee completion. Date selection uses the same verified US inclusive New York date as candles. Copy each page.nextBefore to the individual candles command without date. Completion and inProgress remain unknown.',
+              results:
+                'Ordered per-symbol success, partial, error or not_queried. Valid empty pages are usable. Handled SIGINT/SIGTERM and limits preserve completed results and distinguish the current error from unqueried symbols. No automatic file storage, resume or recovery after forced termination/crash.',
             },
             {
               name: 'trades',
@@ -261,6 +289,85 @@ try {
         ? sessionResult(value, date)
         : constraintResult(value, symbols, date);
     }
+    if (command === 'candles-batch') {
+      const requested = symbols?.split(',') ?? [];
+      if (
+        !requested.length ||
+        requested.length > 20 ||
+        new Set(requested.map((symbol) => symbol.toUpperCase())).size !== requested.length
+      )
+        throw new TossError('INPUT_INVALID');
+      const requests = requested.map((symbol) => candleQuery(symbol, ['1d', ...rest]));
+      client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal, 'batch');
+      const data: Record<string, unknown>[] = [];
+      let stopped: string | undefined;
+      for (const request of requests) {
+        const rowSource = { ...source, ...request.source };
+        if (!stopped) {
+          try {
+            client.checkAvailable();
+          } catch (error) {
+            stopped = errorDetail(error).code;
+            if (!data.length) console.error(stopped);
+          }
+        }
+        if (stopped) {
+          data.push({
+            symbol: request.symbol,
+            status: 'not_queried',
+            data: [],
+            source: rowSource,
+            retrievedAt: new Date().toISOString(),
+            reason: stopped,
+          });
+          continue;
+        }
+        try {
+          const result = await queryCandlePage(client, request);
+          data.push({
+            symbol: request.symbol,
+            status: result.omissions.length ? 'partial' : 'success',
+            ...result,
+            source: { ...source, ...result.source },
+            retrievedAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          const detail = errorDetail(error);
+          data.push({
+            symbol: request.symbol,
+            status: 'error',
+            data: [],
+            source: rowSource,
+            retrievedAt: new Date().toISOString(),
+            error: detail,
+          });
+          console.error(detail.code);
+          if (
+            error instanceof TossError &&
+            [
+              'INTERRUPTED',
+              'AUTH_FAILED',
+              'AUTH_STORAGE',
+              'AUTH_CONFIG',
+              'AUTH_ISSUANCE_UNKNOWN',
+              'AUTH_RESPONSE_INVALID',
+              'PERMISSION_DENIED',
+            ].includes(error.code)
+          )
+            stopped = detail.code;
+        }
+      }
+      const usable = data.some((row) => row.status === 'success' || row.status === 'partial');
+      return {
+        data,
+        omissions: [],
+        status: data.every((row) => row.status === 'success')
+          ? 'success'
+          : usable
+            ? 'partial'
+            : 'error',
+      };
+    }
     if (command === 'candles') {
       const request = candleQuery(symbols, rest);
       Object.assign(source, request.source);
@@ -334,8 +441,8 @@ try {
   }
   const result = await lookup();
   const { data, omissions } = result;
-  const status = omissions.length ? 'partial' : 'success';
-  client?.check();
+  const status = 'status' in result ? result.status : omissions.length ? 'partial' : 'success';
+  if (command !== 'candles-batch') client?.check();
   const retrievedAt = new Date().toISOString();
   const outputData =
     command === 'prices'
@@ -386,18 +493,9 @@ try {
   });
   if (client?.containsSecret(output)) throw new TossError('SENSITIVE_OUTPUT');
   console.log(output);
-  process.exitCode = status === 'partial' ? 2 : 0;
+  process.exitCode = status === 'error' ? 1 : status === 'partial' ? 2 : 0;
 } catch (error) {
-  const code = error instanceof TossError ? error.code : 'INTERNAL_ERROR';
-  let detail = {
-    code,
-    ...(error instanceof AmbiguousStock ? { choices: error.choices } : {}),
-    ...(error instanceof TossError
-      ? { providerCode: error.providerCode, requestId: error.requestId }
-      : {}),
-  };
-  if (client?.containsAccountIdentifier(JSON.stringify(detail))) detail = { code };
-  if (client?.containsSecret(JSON.stringify(detail))) detail = { code: 'SENSITIVE_OUTPUT' };
+  const detail = errorDetail(error);
   console.log(
     JSON.stringify({
       version: 1,

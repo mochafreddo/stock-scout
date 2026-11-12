@@ -19,10 +19,12 @@ if (!process.env.TEST_REAL_CLOCK) {
 }
 if (process.env.TEST_CLOCK_JUMP) {
   let calls = 0;
+  const jump = Number(process.env.TEST_CLOCK_JUMP_MS || 60001);
+  const at = Number(process.env.TEST_CLOCK_JUMP_AT || 3);
   if (process.env.TEST_CLOCK_JUMP === 'wall') {
     const original = Date.now.bind(Date);
-    Date.now = () => original() + (++calls >= 3 ? 60001 : 0);
-  } else mock.method(performance, 'now', () => (++calls >= 3 ? 60001 : 0));
+    Date.now = () => original() + (++calls >= at ? jump : 0);
+  } else mock.method(performance, 'now', () => (++calls >= at ? jump : 0));
 }
 const authSteps = JSON.parse(process.env.TEST_AUTH_STEPS || '[]');
 
