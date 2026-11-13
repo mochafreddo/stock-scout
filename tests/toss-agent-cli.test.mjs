@@ -161,6 +161,26 @@ test('same executable accepts zero closes without masking a missing closePrice f
   assert.match(wrongCommand.stderr, /daily candle output required/);
 });
 
+test('consumer rejects nondecimal values and invalid source timestamps', async (t) => {
+  const result = run('success', 'candles', 'DEMO', '1d');
+  assert.equal(result.status, 0, result.stderr);
+  for (const [field, value] of [
+    ['closePrice', '0x10'],
+    ['volume', '1e2'],
+    ['timestamp', '2026-11-05'],
+    ['timestamp', '2026-02-30T00:00:00Z'],
+  ]) {
+    await t.test(`${field}=${value}`, () => {
+      const output = JSON.parse(result.stdout);
+      output.data[0][field] = value;
+      const consumed = consume({ stdout: JSON.stringify(output) });
+      assert.equal(consumed.status, 1, consumed.stderr);
+      assert.equal(consumed.stdout, '');
+      assert.match(consumed.stderr, /AssertionError/);
+    });
+  }
+});
+
 test('daily error scenarios preserve original exit and diagnostic semantics', () => {
   for (const args of [
     ['candles', 'DEMO', '1d'],

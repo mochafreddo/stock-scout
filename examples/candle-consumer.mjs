@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { decimal, validTime } from '../scripts/toss-values.ts';
 
 const output = JSON.parse(readFileSync(0, 'utf8'));
 assert.equal(output.version, 1);
@@ -16,19 +17,11 @@ const data = rows.map((row) => {
     ['NYSE', 'NASDAQ', 'AMEX', 'US_ETC'].includes(row.source.market) &&
     row.source.dateTimeZone === 'America/New_York';
   const bars = row.data.map((bar) => {
-    assert.equal(typeof bar.closePrice, 'string', 'closePrice must be a decimal string');
-    assert.equal(typeof bar.volume, 'string', 'volume must be a decimal string');
-    assert.ok(
-      bar.closePrice.trim() &&
-        Number.isFinite(Number(bar.closePrice)) &&
-        Number(bar.closePrice) >= 0,
-      'closePrice must be nonnegative',
-    );
-    assert.ok(
-      bar.volume.trim() && Number.isFinite(Number(bar.volume)) && Number(bar.volume) >= 0,
-      'volume must be nonnegative',
-    );
-    assert.ok(Number.isFinite(Date.parse(bar.timestamp)), 'timestamp must be valid');
+    assert.ok(decimal(bar.closePrice), 'closePrice must be a decimal string');
+    assert.ok(decimal(bar.volume), 'volume must be a decimal string');
+    assert.ok(Number(bar.closePrice) >= 0, 'closePrice must be nonnegative');
+    assert.ok(Number(bar.volume) >= 0, 'volume must be nonnegative');
+    assert.ok(validTime(bar.timestamp), 'timestamp must be valid');
     const tradeDate = knownMarket
       ? new Intl.DateTimeFormat('en-CA', {
           timeZone: 'America/New_York',
