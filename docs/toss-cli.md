@@ -343,6 +343,8 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 
 시각이 생략·null·미래이면 `seconds`와 `exceedsThreshold`는 null이고 `unavailableReason`은 각각 `timestamp_missing`·`timestamp_null`·`timestamp_future`입니다. 원래 `timestamp`의 생략·null·문자열을 보존합니다. 경고나 판정 불가만으로 유효 가격을 제외하거나 `omissions`에 추가하거나 `partial`로 바꾸지 않습니다. 임계값 이내라는 사실도 최신·실시간 보장이 아니며 이 값은 공급자의 전송 지연 측정값이 아닙니다.
 
+보고서에서는 원천 `timestamp`부터 명시한 보고서 기준 시각까지 경과 시간을 다시 계산하고, 해당 행의 `priceAge.thresholdSeconds`를 적용하세요. 엄격히 초과한 가격만 현재가와 구분한 참고가로 표시하며, 같은 값은 초과가 아닙니다. 원천 시각·보고서 기준 시각·재계산한 경과 시간·적용 임계값을 함께 표시하세요. 조회 당시에는 임계값 이내였어도 분석 중에 초과할 수 있습니다. 원천 시각 누락·null·보고서 기준 시각보다 미래인 경우는 참고가와 별도로 시점 미확인 가격으로 표시하세요. 원래 `retrievedAt`·`priceAge`·원천 값과 누락·null 구분은 보존하고, 조회 시각을 원천 시각으로 대신하지 마세요. 임계값 이내도 실시간성·공급자 전송 지연·동일 시점 스냅샷을 보장하지 않습니다. [에이전트 보고 지침](toss-agent-usage.md#classify-prices-at-report-time)과 [실행 가능한 소비 예시](../examples/price-consumer.mjs)에 적용 방법이 있습니다. 보고서 작성과 분류는 외부 에이전트의 책임입니다.
+
 stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·공급자 메시지 없는 오류 코드만 출력합니다. 알려진 자격 증명·사용한 토큰이 결과에 나타나면 `SENSITIVE_OUTPUT`으로 자료 출력을 차단합니다. 공급자 추가 필드는 그대로 전달하지 않습니다.
 
 ```json
