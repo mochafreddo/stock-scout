@@ -105,6 +105,12 @@ export async function queryCandleBatch(
       data.push({
         symbol: request.symbol,
         status: 'not_queried',
+        summary: {
+          returnedCount: null,
+          latestTimestamp: null,
+          latestTradeDate: null,
+          tradeDateUnavailableReason: null,
+        },
         data: [],
         source: rowSource,
         retrievedAt: new Date().toISOString(),
@@ -114,9 +120,27 @@ export async function queryCandleBatch(
     }
     try {
       const result = await queryCandlePage(client, request);
+      const latestTimestamp = result.data[0]?.timestamp ?? null;
+      const tradeDateKnown =
+        result.source.market !== undefined && request.source.dateTimeZone === 'America/New_York';
       data.push({
         symbol: request.symbol,
         status: result.omissions.length ? 'partial' : 'success',
+        summary: {
+          returnedCount: result.data.length,
+          latestTimestamp,
+          latestTradeDate:
+            latestTimestamp !== null && tradeDateKnown
+              ? new Intl.DateTimeFormat('en-CA', {
+                  timeZone: 'America/New_York',
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit',
+                }).format(new Date(latestTimestamp))
+              : null,
+          tradeDateUnavailableReason:
+            latestTimestamp !== null && !tradeDateKnown ? 'market_timezone_unconfirmed' : null,
+        },
         ...result,
         source: { ...source, ...result.source },
         retrievedAt: new Date().toISOString(),
@@ -126,6 +150,12 @@ export async function queryCandleBatch(
       data.push({
         symbol: request.symbol,
         status: 'error',
+        summary: {
+          returnedCount: null,
+          latestTimestamp: null,
+          latestTradeDate: null,
+          tradeDateUnavailableReason: null,
+        },
         data: [],
         source: rowSource,
         retrievedAt: new Date().toISOString(),
