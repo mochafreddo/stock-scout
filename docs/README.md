@@ -15,6 +15,10 @@
 
 구현은 [진입점](../scripts/toss.ts)과 공통 [인증·조회 클라이언트](../scripts/toss-client.ts), 명령별 `scripts/toss-*.ts`에 있다. [CLI 검사](../tests/toss.test.mjs)와 명령별 `tests/toss-*.test.mjs`는 외부 HTTP·시계를 대체하여 실제 CLI를 실행한다.
 
+## 확정된 후속 설계
+
+[가격 시각·일봉 날짜 선택·묶음 조회 개선 설계](query-improvements.md)는 2026-11-12 합의한 후속 요구사항과 검증 계획이다. 현재 구현된 기능 안내와 구분한다.
+
 ## 토스 검증 기록
 
 | 영역 | 기록 |
