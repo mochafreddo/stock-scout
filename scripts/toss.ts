@@ -29,7 +29,6 @@ function errorDetail(error: unknown) {
   return detail;
 }
 const [command, symbols, ...rest] = process.argv.slice(2);
-let priceRequest: ReturnType<typeof priceQuery> | undefined;
 const endpoints: Record<string, string> = {
   stock: '/api/v1/stocks',
   prices: '/api/v1/prices',
@@ -373,8 +372,8 @@ try {
       return stockResult(await read(request.query), request.symbol, request.market, request.isin);
     }
     if (command === 'prices') {
-      priceRequest = priceQuery(symbols, rest);
-      return priceResult(await read(priceRequest.query), priceRequest);
+      const priceRequest = priceQuery(symbols, rest);
+      return { ...priceResult(await read(priceRequest.query), priceRequest), priceRequest };
     }
     throw new TossError('INPUT_INVALID');
   }
@@ -383,7 +382,8 @@ try {
   const status = 'status' in result ? result.status : omissions.length ? 'partial' : 'success';
   if (command !== 'candles-batch') client?.check();
   const retrievedAt = new Date().toISOString();
-  const outputData = priceRequest ? priceAge(data, priceRequest, retrievedAt) : data;
+  const outputData =
+    'priceRequest' in result ? priceAge(result.data, result.priceRequest, retrievedAt) : data;
   const output = JSON.stringify({
     version: 1,
     status,

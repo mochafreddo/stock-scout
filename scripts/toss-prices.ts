@@ -1,6 +1,8 @@
 import { TossError } from './toss-client.ts';
 import { decimal, laterThan, symbolPattern, validTime, wholeSecondMillis } from './toss-values.ts';
 
+type Price = { symbol: string; lastPrice: string; currency: string; timestamp?: string | null };
+
 export function priceQuery(symbols: string | undefined, args: string[]) {
   if (
     !symbols ||
@@ -25,13 +27,15 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
   if (!Array.isArray(value)) throw new TossError('RESPONSE_INVALID');
   const rows: unknown[] = value;
   const requested = new Set(symbols.split(','));
-  const data: Record<string, unknown>[] = [];
+  const data: Price[] = [];
   const omissions: { index?: number; symbol?: string; reason: string }[] = [];
   const counts = new Map<string, number>();
   for (const row of rows)
     if (row && typeof row === 'object' && 'symbol' in row && typeof row.symbol === 'string')
       counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1);
   for (const [index, row] of rows.entries()) {
+    const timestamp =
+      row && typeof row === 'object' && 'timestamp' in row ? row.timestamp : undefined;
     if (
       !row ||
       typeof row !== 'object' ||
@@ -44,10 +48,9 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
       !decimal(row.lastPrice) ||
       typeof row.currency !== 'string' ||
       !/^[A-Z]{3}$/.test(row.currency) ||
-      ('timestamp' in row &&
-        row.timestamp !== undefined &&
-        row.timestamp !== null &&
-        !validTime(row.timestamp))
+      (timestamp !== undefined &&
+        timestamp !== null &&
+        (typeof timestamp !== 'string' || !validTime(timestamp)))
     ) {
       omissions.push({ index, reason: 'invalid_item' });
       continue;
@@ -56,7 +59,7 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
       symbol: row.symbol,
       lastPrice: row.lastPrice,
       currency: row.currency,
-      ...('timestamp' in row ? { timestamp: row.timestamp } : {}),
+      ...('timestamp' in row ? { timestamp } : {}),
     });
   }
   if (rows.length && !data.length) throw new TossError('RESPONSE_INVALID');
@@ -67,31 +70,27 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
   return { data, omissions };
 }
 export function priceAge(
-  data: Record<string, unknown>[],
+  data: ReturnType<typeof priceResult>['data'],
   { staleAfterSeconds }: ReturnType<typeof priceQuery>,
   retrievedAt: string,
 ) {
   return data.map((row) => {
-    const timestamp = 'timestamp' in row ? row.timestamp : undefined;
-    const unavailableReason =
-      timestamp === undefined
-        ? 'timestamp_missing'
-        : timestamp === null
-          ? 'timestamp_null'
-          : typeof timestamp === 'string' && laterThan(timestamp, retrievedAt)
-            ? 'timestamp_future'
-            : undefined;
-    if (unavailableReason)
+    const { timestamp } = row;
+    if (timestamp === undefined || timestamp === null || laterThan(timestamp, retrievedAt))
       return {
         ...row,
         priceAge: {
           seconds: null,
           thresholdSeconds: staleAfterSeconds,
           exceedsThreshold: null,
-          unavailableReason,
+          unavailableReason:
+            timestamp === undefined
+              ? 'timestamp_missing'
+              : timestamp === null
+                ? 'timestamp_null'
+                : 'timestamp_future',
         },
       };
-    if (typeof timestamp !== 'string') throw new TossError('RESPONSE_INVALID');
     const fraction = (value: string) => Number(`0.${/\.(\d+)/.exec(value)?.[1] ?? '0'}`);
     const seconds =
       (wholeSecondMillis(retrievedAt) - wholeSecondMillis(timestamp)) / 1000 +
