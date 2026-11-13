@@ -11,6 +11,172 @@ function run(...args) {
   });
 }
 
+function consume(result) {
+  return spawnSync(process.execPath, ['examples/candle-consumer.mjs'], {
+    input: result.stdout,
+    encoding: 'utf8',
+    timeout: 15000,
+    env: { PATH: process.env.PATH },
+  });
+}
+
+test('daily synthetic stdout runs through the executable analysis consumer', () => {
+  const result = run('success', 'candles', 'DEMO', '1d', 'date=2026-11-05', 'count=3');
+  assert.equal(result.status, 0, result.stderr);
+  const consumed = consume(result);
+  assert.equal(consumed.status, 0, consumed.stderr);
+  const row = JSON.parse(consumed.stdout).data[0];
+  assert.deepEqual(row.bars, [
+    {
+      timestamp: '2026-11-04T23:00:00-06:00',
+      tradeDate: '2026-11-05',
+      closePrice: '12.50',
+      volume: '200',
+    },
+    {
+      timestamp: '2026-11-03T23:00:00-06:00',
+      tradeDate: '2026-11-04',
+      closePrice: '10.00',
+      volume: '100',
+    },
+  ]);
+  assert.deepEqual(row.analysis, { closeChangePercent: 25, totalVolume: 300 });
+});
+
+test('batch consumer preserves usable partial coverage, empty pages, errors and unqueried rows', () => {
+  const result = run(
+    'partial',
+    'candles-batch',
+    'DEMO,PARTIAL,EMPTY,INVALID,DENIED,LATER',
+    'date=2026-11-05',
+    'count=3',
+  );
+  assert.equal(result.status, 2, result.stderr);
+  const consumed = consume(result);
+  assert.equal(consumed.status, 0, consumed.stderr);
+  const output = JSON.parse(consumed.stdout);
+  assert.equal(output.status, 'partial');
+  const [complete, partial, empty, invalid, denied, later] = output.data;
+  assert.deepEqual(
+    output.data.map((row) => row.status),
+    ['success', 'partial', 'partial', 'partial', 'error', 'not_queried'],
+  );
+  assert.deepEqual(complete.analysis, { closeChangePercent: 25, totalVolume: 300 });
+  assert.deepEqual(partial.analysis, complete.analysis);
+  assert.deepEqual(partial.summary, {
+    returnedCount: 2,
+    latestTimestamp: '2026-11-04T23:00:00-06:00',
+    latestTradeDate: '2026-11-05',
+    tradeDateUnavailableReason: null,
+  });
+  assert.deepEqual(partial.omissions, [{ reason: 'next_page' }]);
+  assert.deepEqual(partial.page, { nextBefore: '2026-11-02T23:00:00-06:00' });
+  assert.deepEqual(empty.summary, {
+    returnedCount: 0,
+    latestTimestamp: null,
+    latestTradeDate: null,
+    tradeDateUnavailableReason: null,
+  });
+  assert.equal(empty.analysis, null);
+  assert.deepEqual(empty.omissions, [{ reason: 'next_page' }]);
+  assert.equal(empty.page.nextBefore, partial.page.nextBefore);
+  assert.deepEqual(invalid.analysis, { closeChangePercent: 25, totalVolume: 300 });
+  assert.equal(invalid.summary.returnedCount, 2);
+  assert.deepEqual(
+    invalid.omissions.map((item) => item.reason),
+    ['invalid_item', 'pagination_unknown'],
+  );
+  assert.deepEqual(invalid.page, {});
+  assert.equal(denied.error.code, 'PERMISSION_DENIED');
+  assert.equal(later.reason, 'PERMISSION_DENIED');
+  for (const row of [denied, later]) {
+    assert.deepEqual(row.summary, {
+      returnedCount: null,
+      latestTimestamp: null,
+      latestTradeDate: null,
+      tradeDateUnavailableReason: null,
+    });
+    assert.deepEqual(row.bars, []);
+    assert.equal(row.analysis, null);
+  }
+});
+
+test('consumer keeps unconfirmed trade dates null and distinguishes a successful empty batch row', () => {
+  for (const args of [
+    ['candles', 'DEMO', '1d'],
+    ['candles-batch', 'DEMO,EMPTY'],
+  ]) {
+    const result = run('success', ...args);
+    assert.equal(result.status, 0, result.stderr);
+    const consumed = consume(result);
+    assert.equal(consumed.status, 0, consumed.stderr);
+    const [row, empty] = JSON.parse(consumed.stdout).data;
+    assert.deepEqual(
+      row.bars.map((bar) => bar.tradeDate),
+      [null, null],
+    );
+    assert.equal(row.tradeDateUnavailableReason, 'market_timezone_unconfirmed');
+    assert.equal(row.bars[0].timestamp, '2026-11-04T23:00:00-06:00');
+    assert.deepEqual(row.analysis, { closeChangePercent: 25, totalVolume: 300 });
+    if (empty) {
+      assert.equal(row.summary.latestTradeDate, null);
+      assert.equal(row.summary.tradeDateUnavailableReason, 'market_timezone_unconfirmed');
+      assert.equal(empty.status, 'success');
+      assert.equal(empty.summary.returnedCount, 0);
+      assert.equal(empty.analysis, null);
+    }
+  }
+});
+
+test('same executable accepts zero closes without masking a missing closePrice field', () => {
+  const result = run('success', 'candles', 'DEMO', '1d');
+  assert.equal(result.status, 0, result.stderr);
+  for (const [index, expected] of [
+    [0, -100],
+    [1, null],
+  ]) {
+    const output = JSON.parse(result.stdout);
+    output.data[index].closePrice = '0';
+    const consumed = consume({ stdout: JSON.stringify(output) });
+    assert.equal(consumed.status, 0, consumed.stderr);
+    assert.deepEqual(JSON.parse(consumed.stdout).data[0].analysis, {
+      closeChangePercent: expected,
+      totalVolume: 300,
+    });
+  }
+  const output = JSON.parse(result.stdout);
+  delete output.data[0].closePrice;
+  const missing = consume({ stdout: JSON.stringify(output) });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /closePrice must be a decimal string/);
+  const wrongCommand = consume({
+    stdout: JSON.stringify({
+      version: 1,
+      status: 'success',
+      source: { endpoint: '/api/v1/prices' },
+      data: [],
+    }),
+  });
+  assert.equal(wrongCommand.status, 1);
+  assert.match(wrongCommand.stderr, /daily candle output required/);
+});
+
+test('daily error scenarios preserve original exit and diagnostic semantics', () => {
+  for (const args of [
+    ['candles', 'DEMO', '1d'],
+    ['candles-batch', 'DEMO,LATER'],
+  ]) {
+    const result = run('error', ...args);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(JSON.parse(result.stdout).status, 'error');
+    assert.match(result.stderr, /SYNTHETIC/);
+    assert.match(result.stderr, /PERMISSION_DENIED/);
+    const consumed = consume(result);
+    assert.equal(consumed.status, 0, consumed.stderr);
+    assert.equal(JSON.parse(consumed.stdout).data[0].analysis, null);
+  }
+});
+
 test('agent discovers the real CLI and reads explicitly synthetic prices', () => {
   const help = run('success', '--help');
   assert.equal(help.status, 0, help.stderr);

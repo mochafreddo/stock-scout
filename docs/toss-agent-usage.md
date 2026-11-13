@@ -24,6 +24,11 @@ Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments fo
 | `success` | `tradable NASDAQ` | Read a complete synthetic list for the requested market. |
 | `partial` | `candles DEMO 1m count=1` | Receive an empty page with a next boundary. |
 | `partial` | `candles DEMO 1m count=1 before=VALUE` | Copy the previous `page.nextBefore` exactly to obtain the last page. |
+| `success` | `candles DEMO 1d date=2026-11-05 count=3` | Read two daily bars with a verified synthetic US identity. |
+| `partial` | `candles DEMO 1d date=2026-11-05 count=3` | Analyze two bars while preserving the remaining-page omission and exit 2. |
+| `success` | `candles-batch DEMO,EMPTY count=3` | Distinguish two returned bars with unconfirmed trade dates from a successful empty page. |
+| `partial` | `candles-batch DEMO,PARTIAL,EMPTY,INVALID,DENIED,LATER date=2026-11-05 count=3` | Read success, usable partial pages, invalid-item/pagination omissions, a permission error and an unqueried symbol with the actual CLI summaries. |
+| `error` | `candles DEMO 1d` or `candles-batch DEMO,LATER` | Preserve the permission failure and, for the batch, the unqueried remainder. |
 | `error` | `prices DEMO` | Receive a synthetic permission failure. |
 | `success` | `prices DEMO/` | Observe the actual CLI rejecting invalid input. |
 | `success` | `stock DEMO` | Read one listing and its security type. |
@@ -40,9 +45,27 @@ Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments fo
 | `partial` | `orders CLOSED limit=1` or `conditional-orders CLOSED limit=1` | Exercise the same account-page continuation contract. |
 | `error` | `holdings` | Distinguish account permission denial from an empty portfolio. |
 
-Start discovery with `node tests/toss-agent-cli.mjs success --help`. Choose subsequent arguments from its output and the reference. The fixture contains one `DEMO` listing and fixed synthetic market/account responses. Ranking requests for more than one item return a partial result. Other symbols and filters do not create new fixture data. Session fixtures use only `2026-11-06`; adjacent dates are synthetic closed days, not historical calendar evidence. The runner covers only the cases above; it is not a replacement provider or live execution mode.
+Start discovery with `node tests/toss-agent-cli.mjs success --help`. Choose subsequent arguments from its output and the reference. The fixture contains a `DEMO` listing and fixed synthetic market/account responses; date-selected daily batches supply matching synthetic identities for their requested symbols. Ranking requests for more than one item return a partial result. Outside the daily batch cases, other symbols and filters do not create new fixture data. Session fixtures use only `2026-11-06`; adjacent dates are synthetic closed days, not historical calendar evidence. The runner covers only the cases above; it is not a replacement provider or live execution mode.
 
 Account exercises select a synthetic `primary` account in the invocation's isolated state, without reading or changing the live selection. For account pagination, copy both `page.nextCursor` and `page.context` into `cursor=VALUE context=VALUE`, keeping the scenario `partial` and the same command, group, period and filters. The next invocation returns one item and no next page. The fixed synthetic identity lets this context work across isolated invocations; do not reuse synthetic cursors or contexts with live state. Never use `account-select` to prepare a real account during this exercise.
+
+### Check changed candle analysis before real queries
+
+When creating analysis code or changing its field mapping, feed synthetic CLI stdout into the same code that will analyze the actual response, before making real queries. Repeat when that code changes, rather than before every real query. Keep independently chosen expected trade dates, `closePrice`, `volume` and calculation results; checking only extraction in a separate test implementation does not verify the analysis path. A field-mapping failure must stop the analysis. Do not fill a missing close with zero, silently use another field name or query Toss again to repair a code error.
+
+The executable [candle consumer](../examples/candle-consumer.mjs) reads either individual daily or batch stdout from stdin and performs a minimal two-point close return and volume sum. The public regression check runs that executable with synthetic CLI stdout: `node --test tests/toss-agent-cli.test.mjs`. To inspect the same calculation directly, use a shell with `pipefail` so the upstream CLI exit remains observable:
+
+```sh
+set -o pipefail
+node tests/toss-agent-cli.mjs success candles DEMO 1d date=2026-11-05 count=3 | node examples/candle-consumer.mjs
+node tests/toss-agent-cli.mjs partial candles-batch DEMO,PARTIAL,EMPTY,INVALID,DENIED,LATER date=2026-11-05 count=3 | node examples/candle-consumer.mjs
+```
+
+The first query exits 0. Its newest source timestamp is `2026-11-04T23:00:00-06:00`, whose confirmed New York trade date is `2026-11-05`; the older trade date is `2026-11-04`. Closes `12.50` and `10.00` give a 25% change, and volumes `200` and `100` sum to 300. The example preserves the decimal strings and uses JavaScript numbers for this illustrative calculation; choose suitable precision for actual analysis. A zero latest close is valid; a zero base makes the percentage unavailable (`null`) while volume remains calculable.
+
+The second pipeline exits 2, with `PERMISSION_DENIED` on stderr. `DEMO` succeeds; `PARTIAL` has the same usable calculation and a next page, which does not make the analysis fail or change its partial status. `EMPTY` is a usable empty partial page with count 0 and its next boundary. `INVALID` excludes an invalid bar and retains `invalid_item` plus `pagination_unknown`; its two valid bars still give 25% and 300. `DENIED` is an attempted error and `LATER` is unqueried; their summary counts are null and their existing error/reason explains why. The consumer forwards each actual summary, status, omissions, page and error/reason rather than rebuilding a batch schema or partial-reason list. An empty result has no calculation; the consumer does not choose a universal minimum bar count or follow additional pages.
+
+Omit `date` to exercise unconfirmed market/timezone evidence: source timestamps remain available, but trade dates are null with `market_timezone_unconfirmed`. Never derive a US trade date by slicing the timestamp's date portion. The regression check also sends a missing `closePrice` through this same executable and requires failure; the implementation's extraction mutation from `closePrice` to `close` is checked as a negative control before delivery. Synthetic success establishes this fixture and consumer path only, not live provider-schema agreement, live integration success or other agents' continued compliance. It authorizes no real queries or data transmission.
 
 Read stdout as one JSON object and retain the process exit code even if it is nonzero. Interpret `version=1`, `status`, `data`, `omissions`, `page`, `source` and `error` together:
 

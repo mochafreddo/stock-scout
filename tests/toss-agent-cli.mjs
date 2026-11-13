@@ -12,6 +12,7 @@ const accountCommand = [
 ].includes(args[0]);
 const paginated =
   args[0] === 'candles' ||
+  args[0] === 'candles-batch' ||
   args[0] === 'transactions' ||
   args[0] === 'conditional-orders' ||
   (args[0] === 'orders' && args[1] === 'CLOSED');
@@ -24,18 +25,19 @@ if (
       'rankings',
       'tradable',
       'candles',
+      'candles-batch',
       'stock',
       'orderbook',
       'trades',
       'sessions',
       'constraints',
     ].includes(args[0])) ||
-  (args[0] === 'candles' && scenario !== 'partial') ||
+  (args[0] === 'candles' && args[2] !== '1d' && scenario !== 'partial') ||
   (scenario === 'partial' && !paginated) ||
   (args[0] === '--help' && scenario !== 'success')
 ) {
   console.error(
-    'Use success with --help; success|error with query commands; partial with candles or paginated account queries.',
+    'Use success with --help; success|error with query commands; partial with candles, candles-batch or paginated account queries. Minute candles require partial.',
   );
   process.exit(1);
 }
@@ -50,6 +52,26 @@ try {
     isinCode: '',
   };
   const boundary = '2026-11-06T09:31:00.123+09:00';
+  const dailyCandles = [
+    {
+      timestamp: '2026-11-04T23:00:00-06:00',
+      openPrice: '10',
+      highPrice: '13',
+      lowPrice: '9',
+      closePrice: '12.50',
+      volume: '200',
+      currency: 'USD',
+    },
+    {
+      timestamp: '2026-11-03T23:00:00-06:00',
+      openPrice: '9',
+      highPrice: '11',
+      lowPrice: '8',
+      closePrice: '10.00',
+      volume: '100',
+      currency: 'USD',
+    },
+  ];
   const transaction = {
     transactionType: 'BUY',
     marketCountry: 'US',
@@ -240,45 +262,94 @@ try {
     tradable: { path: '/api/v1/stocks/all', result: [listed] },
     candles: {
       path: '/api/v1/candles',
-      result: args.includes(`before=${boundary}`)
-        ? {
-            candles: [
-              {
-                timestamp: boundary,
-                openPrice: '10',
-                highPrice: '11',
-                lowPrice: '9',
-                closePrice: '10.0100',
-                volume: '0',
-                currency: 'USD',
-              },
-            ],
-            nextBefore: null,
-          }
-        : { candles: [], nextBefore: boundary },
+      result:
+        args[2] === '1d'
+          ? {
+              candles: dailyCandles,
+              nextBefore: scenario === 'partial' ? '2026-11-03T14:00:00+09:00' : null,
+            }
+          : args.includes(`before=${boundary}`)
+            ? {
+                candles: [
+                  {
+                    timestamp: boundary,
+                    openPrice: '10',
+                    highPrice: '11',
+                    lowPrice: '9',
+                    closePrice: '10.0100',
+                    volume: '0',
+                    currency: 'USD',
+                  },
+                ],
+                nextBefore: null,
+              }
+            : { candles: [], nextBefore: boundary },
     },
   };
   const selected = responses[args[0]];
+  const batchSteps = [];
+  if (args[0] === 'candles-batch') {
+    for (const symbol of (args[1] ?? '').split(',')) {
+      if (args.some((arg) => arg.startsWith('date='))) {
+        batchSteps.push({
+          path: '/api/v1/stocks',
+          body: { result: [{ ...responses.stock.result[0], symbol }] },
+        });
+      }
+      if (scenario === 'error' || (scenario === 'partial' && symbol === 'DENIED')) {
+        batchSteps.push({
+          path: '/api/v1/candles',
+          status: 403,
+          body: { error: { code: 'ip-not-allowed', requestId: 'SYNTHETIC_308' } },
+        });
+        break;
+      }
+      const partial = scenario === 'partial';
+      const candles = symbol === 'EMPTY' ? [] : dailyCandles;
+      batchSteps.push({
+        path: '/api/v1/candles',
+        body: {
+          result: {
+            candles:
+              partial && symbol === 'INVALID' ? [...candles, { timestamp: 'invalid' }] : candles,
+            ...(partial && symbol === 'INVALID'
+              ? {}
+              : {
+                  nextBefore:
+                    partial && ['PARTIAL', 'EMPTY'].includes(symbol)
+                      ? '2026-11-02T23:00:00-06:00'
+                      : null,
+                }),
+          },
+        },
+      });
+    }
+  }
   if (accountCommand) {
     const selection = await selectAccount(f, 741, [args[0]]);
     assert.equal(selection.status, 0, selection.stdout);
   }
   const result = await (accountCommand ? runAccountCli : runCli)(
     f,
-    selected
-      ? [
-          ...(accountCommand ? [accounts] : []),
-          {
-            path: selected.path,
-            ...(scenario === 'error'
-              ? {
-                  status: 403,
-                  body: { error: { code: 'ip-not-allowed', requestId: 'SYNTHETIC_295' } },
-                }
-              : { body: { result: selected.result } }),
-          },
-        ]
-      : [],
+    args[0] === 'candles-batch'
+      ? batchSteps
+      : selected
+        ? [
+            ...(accountCommand ? [accounts] : []),
+            ...(args[0] === 'candles' && args.some((arg) => arg.startsWith('date='))
+              ? [{ path: responses.stock.path, body: { result: responses.stock.result } }]
+              : []),
+            {
+              path: selected.path,
+              ...(scenario === 'error'
+                ? {
+                    status: 403,
+                    body: { error: { code: 'ip-not-allowed', requestId: 'SYNTHETIC_295' } },
+                  }
+                : { body: { result: selected.result } }),
+            },
+          ]
+        : [],
     args,
   );
   if (accountCommand && (result.status === 0 || result.status === 2)) {
@@ -290,7 +361,11 @@ try {
       args.find((arg) => arg.startsWith('cursor='))?.slice(7) ?? null,
     );
   }
-  if (args[0] === 'candles' && (result.status === 0 || result.status === 2)) {
+  if (
+    args[0] === 'candles' &&
+    !args.some((arg) => arg.startsWith('date=')) &&
+    (result.status === 0 || result.status === 2)
+  ) {
     const request = result.requests.at(-1);
     assert.equal(request.path, '/api/v1/candles');
     const query = new URLSearchParams(request.query);
