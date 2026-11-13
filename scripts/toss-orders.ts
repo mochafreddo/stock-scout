@@ -189,7 +189,7 @@ export function orderResult(value: unknown, request: ReturnType<typeof orderQuer
       if (conditional && (status === 'HOLDING' || status === 'CANCELED')) return;
       if (knownStatuses.has(status) && !requestedStatuses.includes(status)) return;
       if (symbol !== null && parsed.symbol !== symbol) return;
-      if (!conditional) {
+      if (!conditional && (from !== null || to !== null)) {
         const date = new Date(Date.parse(String(parsed.orderedAt)) + 9 * 3600000)
           .toISOString()
           .slice(0, 10);

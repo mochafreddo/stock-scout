@@ -209,6 +209,44 @@ test('Toss CLI retains prices with missing, null and future time while distingui
   }
 });
 
+test('Toss CLI excludes every duplicate price and preserves omission order (characterization)', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const rows = [
+    price,
+    { symbol: 'MSFT', lastPrice: '0.0000', currency: 'USD', timestamp: null },
+    price,
+    { symbol: 'INVALID', lastPrice: null, currency: 'USD' },
+    { ...price, symbol: 'UNREQUESTED' },
+  ];
+  const r = await runCli(
+    f,
+    [{ body: { result: rows } }],
+    ['prices', 'MISSING-Z,AAPL,MSFT,MISSING-A,INVALID,AAPL'],
+  );
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.status, 'partial');
+  assert.deepEqual(
+    out.data.map(({ priceAge, ...row }) => row),
+    [{ symbol: 'MSFT', lastPrice: '0.0000', currency: 'USD', timestamp: null }],
+  );
+  assert.deepEqual(out.omissions, [
+    { index: 0, reason: 'invalid_item' },
+    { index: 2, reason: 'invalid_item' },
+    { index: 3, reason: 'invalid_item' },
+    { index: 4, reason: 'invalid_item' },
+    { symbol: 'MISSING-Z', reason: 'missing_item' },
+    { symbol: 'AAPL', reason: 'missing_item' },
+    { symbol: 'MISSING-A', reason: 'missing_item' },
+    { symbol: 'INVALID', reason: 'missing_item' },
+  ]);
+  assert.equal(
+    r.requests.at(-1).query,
+    '?symbols=MISSING-Z%2CAAPL%2CMSFT%2CMISSING-A%2CINVALID%2CAAPL',
+  );
+});
+
 test('Toss CLI rejects invalid arguments before authentication and advertises commands as JSON', async () => {
   const f = fixture();
   try {

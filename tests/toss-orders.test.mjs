@@ -95,6 +95,36 @@ test('orders preserve current state, decimal strings and execution on the select
   }
 });
 
+test('orders validate timestamps without date filters (characterization)', async () => {
+  for (const status of ['OPEN', 'CLOSED']) {
+    const f = fixture();
+    try {
+      const selected = await select(f);
+      assert.equal(selected.status, 0, selected.stdout);
+      const invalid = { ...order, orderedAt: '2026-02-30T10:00:00Z' };
+      const partial = await runCli(
+        f,
+        [accounts, page('orders', [invalid, order])],
+        ['orders', status],
+      );
+      assert.equal(partial.status, 2, partial.stdout + partial.stderr);
+      const output = JSON.parse(partial.stdout);
+      assert.equal(output.status, 'partial');
+      assert.deepEqual(output.data, [order]);
+      assert.deepEqual(output.omissions, [{ index: 0, reason: 'invalid_item' }]);
+      assert.equal(
+        partial.requests.at(-1).query,
+        status === 'OPEN' ? '?status=OPEN' : '?status=CLOSED&limit=20',
+      );
+      const rejected = await runCli(f, [accounts, page('orders', [invalid])], ['orders', status]);
+      assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+      assert.equal(JSON.parse(rejected.stdout).error.code, 'RESPONSE_INVALID');
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test('orders attach request semantics only after account validation (characterization)', async (t) => {
   for (const command of ['orders', 'conditional-orders']) {
     const f = fixture();

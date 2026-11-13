@@ -1,5 +1,12 @@
 import { TossError } from './toss-client.ts';
-import { decimal, laterThan, symbolPattern, validTime, wholeSecondMillis } from './toss-values.ts';
+import {
+  decimal,
+  items,
+  laterThan,
+  symbolPattern,
+  validTime,
+  wholeSecondMillis,
+} from './toss-values.ts';
 
 type Price = { symbol: string; lastPrice: string; currency: string; timestamp?: string | null };
 
@@ -27,13 +34,11 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
   if (!Array.isArray(value)) throw new TossError('RESPONSE_INVALID');
   const rows: unknown[] = value;
   const requested = new Set(symbols.split(','));
-  const data: Price[] = [];
-  const omissions: { index?: number; symbol?: string; reason: string }[] = [];
   const counts = new Map<string, number>();
   for (const row of rows)
     if (row && typeof row === 'object' && 'symbol' in row && typeof row.symbol === 'string')
       counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1);
-  for (const [index, row] of rows.entries()) {
+  const { data, omissions } = items<Price>(rows, (row) => {
     const timestamp =
       row && typeof row === 'object' && 'timestamp' in row ? row.timestamp : undefined;
     if (
@@ -51,23 +56,20 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
       (timestamp !== undefined &&
         timestamp !== null &&
         (typeof timestamp !== 'string' || !validTime(timestamp)))
-    ) {
-      omissions.push({ index, reason: 'invalid_item' });
-      continue;
-    }
-    data.push({
+    )
+      return;
+    requested.delete(row.symbol);
+    return {
       symbol: row.symbol,
       lastPrice: row.lastPrice,
       currency: row.currency,
       ...('timestamp' in row ? { timestamp } : {}),
-    });
-  }
-  if (rows.length && !data.length) throw new TossError('RESPONSE_INVALID');
-  if (rows.length)
-    for (const symbol of requested)
-      if (!data.some((row) => row.symbol === symbol))
-        omissions.push({ symbol, reason: 'missing_item' });
-  return { data, omissions };
+    };
+  });
+  const missing = rows.length
+    ? Array.from(requested, (symbol) => ({ symbol, reason: 'missing_item' }))
+    : [];
+  return { data, omissions: [...omissions, ...missing] };
 }
 export function priceAge(
   data: ReturnType<typeof priceResult>['data'],
