@@ -281,6 +281,10 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 
 모든 항목이 성공이면 전체 `success`·종료 코드 0입니다. 정상 빈 페이지와 다음 경계가 있는 유효한 빈 부분 페이지도 사용 가능한 조회 결과입니다. 사용 가능한 성공·부분 결과가 하나라도 있고 다른 부분 결과·오류·미조회가 있으면 전체 `partial`·2, 사용 가능한 조회 결과가 하나도 없으면 전체 `error`·1입니다. 전체 `omissions` 대신 각 항목의 `status`·`omissions`·`error`·`reason`을 검사하세요. 모든 종목이 실패해도 종목별 오류는 `data`에 남으며 최상위 `error`가 필요하지 않습니다. 입력·초기 설정 오류처럼 묶음을 시작하지 못한 실패는 기존 최상위 오류 형식을 사용합니다. stderr에는 실패한 조회의 안전한 오류 코드만 출력합니다.
 
+각 종목의 `summary`는 실제 반환한 유효 봉을 요약합니다. `returnedCount`는 검증·조회 조건을 통과한 `data`의 개수이며 요청한 `count`가 아닙니다. `latestTimestamp`는 최신 반환 봉의 원천 시각 표기를 그대로 보존합니다. `latestTradeDate`는 기존 날짜 선택 조회에서 미국 시장과 시간대를 확인했을 때만 `America/New_York`로 계산한 해당 봉의 거래일이며 지정한 기준 거래일로 대체하지 않습니다. 시장·시간대 근거가 없는 비어 있지 않은 결과는 거래일을 `null`, `tradeDateUnavailableReason`을 `market_timezone_unconfirmed`로 반환합니다. 요약을 위한 시장 확인·추가 페이지 HTTP는 없습니다.
+
+정상 빈 결과와 유효한 빈 부분 페이지의 요약은 `returnedCount=0`, `latestTimestamp=null`, `latestTradeDate=null`입니다. 오류·미조회는 세 값 모두 `null`이며 기존 `error`·`reason`으로 구분합니다. `tradeDateUnavailableReason`은 위 근거 부재 외에는 `null`입니다. 부분 사유는 기존 `omissions`의 `next_page`·`pagination_unknown`·`invalid_item`과 `page`를 함께 읽고 별도 요약 사유로 복제하지 않습니다. 예를 들어 요청 개수가 100이어도 유효 봉 두 개와 다음 경계를 반환하면 개수는 2이고 `partial`·종료 코드 2를 유지합니다. 분석에 필요한 개수와 후속 페이지는 소비 에이전트가 판단하며, 요약은 봉 완료·최종 확정을 보장하지 않습니다. 이 요약은 일봉 묶음에만 추가됩니다.
+
 각 항목의 `page.nextBefore`는 공급자 경계를 그대로 보존합니다. 필요한 종목만 `candles SYMBOL 1d count=COUNT adjusted=VALUE before=NEXT_BEFORE`로 추가 조회하고 `date`는 빼세요. 빈 부분 페이지도 같은 방식으로 이어 갑니다. 봉 timestamp에서 경계를 새로 계산하거나 시간을 빼지 마세요.
 
 한도 도달과 처리 가능한 SIGINT·SIGTERM에서는 확보한 결과를 반환하고 소유한 잠금을 해제합니다. 자동 금융자료 파일 저장·디스크 재개 상태를 만들지 않으며 강제 종료·프로세스 충돌 후 복구는 보장하지 않습니다. 보관이 필요하면 승인된 자료 보관 범위 안에서 stdout을 직접 저장하세요. 기존 출처·시각·필드 검증·출력 가림을 동일하게 적용하며 이 명령의 구현이나 합성 검사 통과가 실제 조회·계좌 접근·새 자료 전달의 승인은 아닙니다.

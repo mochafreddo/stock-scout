@@ -35,6 +35,149 @@ const identity = (symbol, market) => ({
   body: { result: [stock(symbol, market)] },
 });
 
+test('batch summarizes only returned valid candles without adding market or page requests', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const older = { ...candle, timestamp: '2026-11-04T14:00:00+09:00' };
+  const r = await runCli(
+    f,
+    [page([candle, null, older], older.timestamp)],
+    ['candles-batch', 'AAPL', 'count=4'],
+  );
+  const out = JSON.parse(r.stdout);
+  assert.equal(r.status, 2, r.stdout);
+  assert.equal(out.status, 'partial');
+  assert.equal(r.stderr, '');
+  assert.deepEqual(out.data[0].summary, {
+    returnedCount: 2,
+    latestTimestamp: candle.timestamp,
+    latestTradeDate: null,
+    tradeDateUnavailableReason: 'market_timezone_unconfirmed',
+  });
+  assert.deepEqual(
+    out.data[0].data,
+    [candle, older].map((row) => ({
+      ...row,
+      completion: 'unknown',
+      inProgress: 'unknown',
+    })),
+  );
+  assert.deepEqual(out.data[0].omissions, [
+    { index: 1, reason: 'invalid_item' },
+    { reason: 'next_page' },
+  ]);
+  assert.deepEqual(out.data[0].page, { nextBefore: older.timestamp });
+  assert.deepEqual(
+    r.requests.map(({ path }) => path),
+    ['/oauth2/token', '/api/v1/candles'],
+  );
+});
+
+test('batch derives the latest returned trade date from confirmed New York evidence across DST', async (t) => {
+  for (const [date, timestamp, tradeDate] of [
+    ['2026-03-09', '2026-03-08T04:30:00Z', '2026-03-07'],
+    ['2026-03-10', '2026-03-09T03:30:00Z', '2026-03-08'],
+    ['2026-11-02', '2026-11-01T03:30:00Z', '2026-10-31'],
+    ['2026-11-03', '2026-11-02T04:30:00Z', '2026-11-01'],
+    ['2026-11-06', '2026-11-05T14:00:00+09:00', '2026-11-05'],
+  ]) {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(
+      f,
+      [identity('AAPL'), page([{ ...candle, timestamp }])],
+      ['candles-batch', 'AAPL', `date=${date}`],
+    );
+    assert.equal(r.status, 0, r.stdout);
+    assert.equal(r.stderr, '');
+    assert.deepEqual(JSON.parse(r.stdout).data[0].summary, {
+      returnedCount: 1,
+      latestTimestamp: timestamp,
+      latestTradeDate: tradeDate,
+      tradeDateUnavailableReason: null,
+    });
+    assert.deepEqual(
+      r.requests.map(({ path }) => path),
+      ['/oauth2/token', '/api/v1/stocks', '/api/v1/candles'],
+    );
+  }
+});
+
+test('batch distinguishes empty pages from failed and unqueried summaries', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const r = await runCli(
+    f,
+    [
+      page([]),
+      page([], candle.timestamp),
+      { path: '/api/v1/candles', body: { result: { candles: [] } } },
+      { path: '/api/v1/candles', status: 403, body: {} },
+    ],
+    ['candles-batch', 'EMPTY,MORE,UNKNOWN,BLOCKED,LATER'],
+  );
+  const out = JSON.parse(r.stdout);
+  assert.equal(r.status, 2, r.stdout);
+  assert.equal(out.status, 'partial');
+  assert.equal(r.stderr, 'PERMISSION_DENIED\n');
+  assert.deepEqual(
+    out.data.map(({ symbol }) => symbol),
+    ['EMPTY', 'MORE', 'UNKNOWN', 'BLOCKED', 'LATER'],
+  );
+  assert.deepEqual(
+    out.data.map(({ status }) => status),
+    ['success', 'partial', 'partial', 'error', 'not_queried'],
+  );
+  assert.deepEqual(
+    out.data.map(({ summary }) => summary),
+    [
+      ...Array.from({ length: 3 }, () => ({
+        returnedCount: 0,
+        latestTimestamp: null,
+        latestTradeDate: null,
+        tradeDateUnavailableReason: null,
+      })),
+      ...Array.from({ length: 2 }, () => ({
+        returnedCount: null,
+        latestTimestamp: null,
+        latestTradeDate: null,
+        tradeDateUnavailableReason: null,
+      })),
+    ],
+  );
+  assert.deepEqual(out.data[1].page, { nextBefore: candle.timestamp });
+  assert.deepEqual(out.data[1].omissions, [{ reason: 'next_page' }]);
+  assert.deepEqual(out.data[2].page, {});
+  assert.deepEqual(out.data[2].omissions, [{ reason: 'pagination_unknown' }]);
+  assert.equal(out.data[3].error.code, 'PERMISSION_DENIED');
+  assert.equal(out.data[4].reason, 'PERMISSION_DENIED');
+  assert.equal(r.requests.length, 5);
+});
+
+test('batch preserves timestamp and unknown trade date with an explicit time bound', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const r = await runCli(
+    f,
+    [{ path: '/api/v1/candles', body: { result: { candles: [candle, null] } } }],
+    ['candles-batch', 'AAPL', `before=${candle.timestamp}`],
+  );
+  const row = JSON.parse(r.stdout).data[0];
+  assert.equal(r.status, 2, r.stdout);
+  assert.equal(r.stderr, '');
+  assert.deepEqual(row.summary, {
+    returnedCount: 1,
+    latestTimestamp: candle.timestamp,
+    latestTradeDate: null,
+    tradeDateUnavailableReason: 'market_timezone_unconfirmed',
+  });
+  assert.deepEqual(row.omissions, [
+    { index: 1, reason: 'invalid_item' },
+    { reason: 'pagination_unknown' },
+  ]);
+  assert.equal(r.requests.length, 2);
+});
+
 test('batch records the current symbol when the forty-call limit is reached between market and candle requests', async (t) => {
   const f = fixture();
   t.after(f.close);
@@ -388,6 +531,23 @@ test('batch stops after token issuance or recovery fails and retains nested erro
   );
   assert.equal(r.status, 1, r.stdout);
   assert.equal(JSON.parse(r.stdout).status, 'error');
+  assert.deepEqual(
+    JSON.parse(r.stdout).data.map(({ summary }) => summary),
+    [
+      {
+        returnedCount: null,
+        latestTimestamp: null,
+        latestTradeDate: null,
+        tradeDateUnavailableReason: null,
+      },
+      {
+        returnedCount: null,
+        latestTimestamp: null,
+        latestTradeDate: null,
+        tradeDateUnavailableReason: null,
+      },
+    ],
+  );
   assert.deepEqual(
     JSON.parse(r.stdout).data.map(({ error }) => error.code),
     ['NOT_FOUND', 'RESPONSE_INVALID'],
