@@ -4,54 +4,12 @@ import { payload, TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
 import { orderQuery, orderResult } from './toss-orders.ts';
+import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
 import { constraintResult, sessionResult, validDate } from './toss-sessions.ts';
-import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
+import { AmbiguousStock, stockQuery, stockResult } from './toss-stock.ts';
 import { transactionQuery, transactionResult } from './toss-transactions.ts';
-import { decimal, laterThan, symbolPattern, validTime, wholeSecondMillis } from './toss-values.ts';
+import { symbolPattern } from './toss-values.ts';
 
-function priceResult(rows: unknown[], symbols: string) {
-  const requested = new Set(symbols.split(','));
-  const data: Record<string, unknown>[] = [];
-  const omissions: { index?: number; symbol?: string; reason: string }[] = [];
-  const counts = new Map<string, number>();
-  for (const row of rows)
-    if (row && typeof row === 'object' && 'symbol' in row && typeof row.symbol === 'string')
-      counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1);
-  for (const [index, row] of rows.entries()) {
-    if (
-      !row ||
-      typeof row !== 'object' ||
-      !('symbol' in row) ||
-      typeof row.symbol !== 'string' ||
-      !('lastPrice' in row) ||
-      !('currency' in row) ||
-      !requested.has(row.symbol) ||
-      counts.get(row.symbol) !== 1 ||
-      !decimal(row.lastPrice) ||
-      typeof row.currency !== 'string' ||
-      !/^[A-Z]{3}$/.test(row.currency) ||
-      ('timestamp' in row &&
-        row.timestamp !== undefined &&
-        row.timestamp !== null &&
-        !validTime(row.timestamp))
-    ) {
-      omissions.push({ index, reason: 'invalid_item' });
-      continue;
-    }
-    data.push({
-      symbol: row.symbol,
-      lastPrice: row.lastPrice,
-      currency: row.currency,
-      ...('timestamp' in row ? { timestamp: row.timestamp } : {}),
-    });
-  }
-  if (rows.length && !data.length) throw new TossError('RESPONSE_INVALID');
-  if (rows.length)
-    for (const symbol of requested)
-      if (!data.some((row) => row.symbol === symbol))
-        omissions.push({ symbol, reason: 'missing_item' });
-  return { data, omissions };
-}
 const interruption = new AbortController();
 const interrupt = () => interruption.abort();
 process.on('SIGINT', interrupt);
@@ -71,7 +29,7 @@ function errorDetail(error: unknown) {
   return detail;
 }
 const [command, symbols, ...rest] = process.argv.slice(2);
-let staleAfterSeconds = 900;
+let priceRequest: ReturnType<typeof priceQuery> | undefined;
 const endpoints: Record<string, string> = {
   stock: '/api/v1/stocks',
   prices: '/api/v1/prices',
@@ -410,77 +368,22 @@ try {
       Object.assign(source, Object.fromEntries(query));
       return tradableResult(await read(query), query);
     }
-    if (command === 'prices' && rest.length) {
-      if (
-        rest.length !== 1 ||
-        !/^staleAfterSeconds=(?:0|[1-9]\d*)$/.test(rest[0]) ||
-        !Number.isSafeInteger(Number(rest[0].slice('staleAfterSeconds='.length)))
-      )
-        throw new TossError('INPUT_INVALID');
-      staleAfterSeconds = Number(rest[0].slice('staleAfterSeconds='.length));
+    if (command === 'stock') {
+      const request = stockQuery(symbols, rest);
+      return stockResult(await read(request.query), request.symbol, request.market, request.isin);
     }
-    if (
-      (command !== 'prices' && command !== 'stock') ||
-      (command === 'stock' && symbols?.includes(',')) ||
-      !symbols ||
-      (command === 'stock' &&
-        (rest.length > 2 ||
-          (rest[0] !== undefined && !marketPattern.test(rest[0])) ||
-          (rest[1] !== undefined && rest[1] !== '-' && !isinPattern.test(rest[1])))) ||
-      symbols.split(',').length > 200 ||
-      !symbols.split(',').every((symbol) => symbolPattern.test(symbol))
-    )
-      throw new TossError('INPUT_INVALID');
-
-    const rows = await read(new URLSearchParams({ symbols }));
-    if (!Array.isArray(rows)) throw new TossError('RESPONSE_INVALID');
-    return command === 'stock'
-      ? stockResult(rows, symbols, rest[0], rest[1])
-      : priceResult(rows, symbols);
+    if (command === 'prices') {
+      priceRequest = priceQuery(symbols, rest);
+      return priceResult(await read(priceRequest.query), priceRequest);
+    }
+    throw new TossError('INPUT_INVALID');
   }
   const result = await lookup();
   const { data, omissions } = result;
   const status = 'status' in result ? result.status : omissions.length ? 'partial' : 'success';
   if (command !== 'candles-batch') client?.check();
   const retrievedAt = new Date().toISOString();
-  const outputData =
-    command === 'prices'
-      ? data.map((row) => {
-          const timestamp = 'timestamp' in row ? row.timestamp : undefined;
-          const unavailableReason =
-            timestamp === undefined
-              ? 'timestamp_missing'
-              : timestamp === null
-                ? 'timestamp_null'
-                : typeof timestamp === 'string' && laterThan(timestamp, retrievedAt)
-                  ? 'timestamp_future'
-                  : undefined;
-          if (unavailableReason)
-            return {
-              ...row,
-              priceAge: {
-                seconds: null,
-                thresholdSeconds: staleAfterSeconds,
-                exceedsThreshold: null,
-                unavailableReason,
-              },
-            };
-          if (typeof timestamp !== 'string') throw new TossError('RESPONSE_INVALID');
-          const fraction = (value: string) => Number(`0.${/\.(\d+)/.exec(value)?.[1] ?? '0'}`);
-          const seconds =
-            (wholeSecondMillis(retrievedAt) - wholeSecondMillis(timestamp)) / 1000 +
-            fraction(retrievedAt) -
-            fraction(timestamp);
-          return {
-            ...row,
-            priceAge: {
-              seconds,
-              thresholdSeconds: staleAfterSeconds,
-              exceedsThreshold: laterThan(retrievedAt, timestamp, staleAfterSeconds),
-            },
-          };
-        })
-      : data;
+  const outputData = priceRequest ? priceAge(data, priceRequest, retrievedAt) : data;
   const output = JSON.stringify({
     version: 1,
     status,

@@ -78,7 +78,6 @@ export async function queryCandlePage(client: TossClient, request: ReturnType<ty
     const rows = payload(
       await client.get(`/api/v1/stocks?${new URLSearchParams({ symbols: symbol })}`),
     );
-    if (!Array.isArray(rows)) throw new TossError('RESPONSE_INVALID');
     const identity = stockResult(rows, symbol);
     if (identity.omissions.some(({ reason }) => reason === 'invalid_item'))
       throw new TossError('RESPONSE_INVALID');
