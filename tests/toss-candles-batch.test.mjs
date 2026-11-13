@@ -667,6 +667,45 @@ test('batch stops shared access failures and distinguishes the failed symbol fro
   }
 });
 
+test('date-selected batch stops shared access failures at either request and preserves safe reasons', async (t) => {
+  for (const path of ['/api/v1/stocks', '/api/v1/candles']) {
+    for (const [status, providerCode, code] of [
+      [401, 'invalid-token', 'AUTH_FAILED'],
+      [403, 'ip-not-allowed', 'PERMISSION_DENIED'],
+      [403, 'synthetic-secret', 'SENSITIVE_OUTPUT'],
+    ]) {
+      await t.test(`${path} ${code}`, async (t) => {
+        const f = fixture();
+        t.after(f.close);
+        const steps = [identity('FIRST'), page([])];
+        if (path === '/api/v1/candles') steps.push(identity('BLOCKED'));
+        steps.push({ path, status, body: { error: { code: providerCode } } });
+        const r = await runCli(f, steps, [
+          'candles-batch',
+          'FIRST,BLOCKED,LATER',
+          'date=2026-11-05',
+        ]);
+        const out = JSON.parse(r.stdout);
+        assert.equal(r.status, 2, r.stdout);
+        assert.equal(out.status, 'partial');
+        assert.deepEqual(
+          out.data.map(({ status }) => status),
+          ['success', 'error', 'not_queried'],
+        );
+        assert.deepEqual(out.data[0].data, []);
+        assert.equal(out.data[1].error.code, code);
+        assert.equal(out.data[2].reason, code);
+        assert.deepEqual(
+          r.requests.filter(({ method }) => method === 'GET').map(({ path }) => path),
+          steps.map(({ path }) => path),
+        );
+        assert.equal(r.stderr, `${code}\n`);
+        assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
+      });
+    }
+  }
+});
+
 test('batch preserves valid empty and partial pages, records individual failures and continues', async (t) => {
   const f = fixture();
   t.after(f.close);

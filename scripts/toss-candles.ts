@@ -162,19 +162,6 @@ export async function queryCandleBatch(
         error: detail,
       });
       reportDiagnostic(detail.code);
-      if (
-        error instanceof TossError &&
-        [
-          'INTERRUPTED',
-          'AUTH_FAILED',
-          'AUTH_STORAGE',
-          'AUTH_CONFIG',
-          'AUTH_ISSUANCE_UNKNOWN',
-          'AUTH_RESPONSE_INVALID',
-          'PERMISSION_DENIED',
-        ].includes(error.code)
-      )
-        stopped = detail.code;
     }
   }
   const usable = data.some((row) => row.status === 'success' || row.status === 'partial');

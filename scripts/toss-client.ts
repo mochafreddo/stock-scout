@@ -614,30 +614,40 @@ export class TossClient {
     return this.request(path);
   }
   private async request(path: string, account?: string) {
-    if (!path.startsWith('/api/v1/') || /[\r\n#]/.test(path)) throw new TossError('INPUT_INVALID');
-    let token = await this.token();
-    let recovered = false,
-      retried = false;
-    for (;;) {
-      let result: { response: Response; body: unknown };
-      try {
-        result = await this.transmit(path, token, account);
-      } catch (error) {
-        if (error instanceof TossError && error.code === 'NETWORK_ERROR' && !retried) {
-          retried = true;
-          continue;
+    try {
+      if (!path.startsWith('/api/v1/') || /[\r\n#]/.test(path))
+        throw new TossError('INPUT_INVALID');
+      let token = await this.token();
+      let recovered = false,
+        retried = false;
+      for (;;) {
+        let result: { response: Response; body: unknown };
+        try {
+          result = await this.transmit(path, token, account);
+        } catch (error) {
+          if (error instanceof TossError && error.code === 'NETWORK_ERROR' && !retried) {
+            retried = true;
+            continue;
+          }
+          throw error;
         }
-        throw error;
+        const { response, body } = result;
+        if (response.ok) return body;
+        const error = failure(response, body);
+        if (response.status === 401 && error.providerCode === 'expired-token' && !recovered) {
+          recovered = true;
+          token = await this.token(token);
+        } else if ((response.status === 429 || response.status >= 500) && !retried) {
+          retried = true;
+        } else throw error;
       }
-      const { response, body } = result;
-      if (response.ok) return body;
-      const error = failure(response, body);
-      if (response.status === 401 && error.providerCode === 'expired-token' && !recovered) {
-        recovered = true;
-        token = await this.token(token);
-      } else if ((response.status === 429 || response.status >= 500) && !retried) {
-        retried = true;
-      } else throw error;
+    } catch (error) {
+      if (
+        error instanceof TossError &&
+        ['AUTH_FAILED', 'AUTH_STORAGE', 'PERMISSION_DENIED'].includes(error.code)
+      )
+        this.stopped = error;
+      throw error;
     }
   }
 }
