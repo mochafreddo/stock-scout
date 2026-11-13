@@ -605,9 +605,9 @@ export class TossClient {
         save(this.directory, state);
       });
       return token;
-    }).catch((error: unknown) => {
-      this.stopped = error instanceof TossError ? error : new TossError('AUTH_STORAGE');
-      throw this.stopped;
+    }).catch((error: TossError) => {
+      this.stopped = error;
+      throw error;
     });
   }
   get(path: string) {

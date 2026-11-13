@@ -423,11 +423,10 @@ try {
       (command !== 'prices' && command !== 'stock') ||
       (command === 'stock' && symbols?.includes(',')) ||
       !symbols ||
-      (command === 'prices'
-        ? rest.length > 1
-        : rest.length > 2 ||
+      (command === 'stock' &&
+        (rest.length > 2 ||
           (rest[0] !== undefined && !marketPattern.test(rest[0])) ||
-          (rest[1] !== undefined && rest[1] !== '-' && !isinPattern.test(rest[1]))) ||
+          (rest[1] !== undefined && rest[1] !== '-' && !isinPattern.test(rest[1])))) ||
       symbols.split(',').length > 200 ||
       !symbols.split(',').every((symbol) => symbolPattern.test(symbol))
     )
