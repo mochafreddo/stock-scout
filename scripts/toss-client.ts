@@ -179,9 +179,18 @@ export class TossClient {
   private readonly signal: AbortSignal;
   private readonly startedWall = Date.now();
   private readonly started = performance.now();
+  private readonly timeout: number;
+  private readonly maxRequests: number;
   private requests = 0;
-  constructor(directory: string | undefined, signal = new AbortController().signal) {
+  private stopped?: TossError;
+  constructor(
+    directory: string | undefined,
+    signal = new AbortController().signal,
+    mode: 'single' | 'batch' = 'single',
+  ) {
     this.signal = signal;
+    this.timeout = mode === 'batch' ? 120000 : 60000;
+    this.maxRequests = mode === 'batch' ? 40 : 10;
     try {
       if (!directory || !isAbsolute(directory) || realpathSync(directory) !== resolve(directory))
         throw new TossError('AUTH_STORAGE');
@@ -319,17 +328,25 @@ export class TossClient {
   }
   private remaining() {
     return Math.min(
-      60000 - (performance.now() - this.started),
-      this.startedWall + 60000 - Date.now(),
+      this.timeout - (performance.now() - this.started),
+      this.startedWall + this.timeout - Date.now(),
     );
   }
   check() {
+    if (this.stopped) throw this.stopped;
     if (this.signal.aborted) throw new TossError('INTERRUPTED');
     if (this.remaining() <= 0) throw new TossError('TIMEOUT');
   }
+  checkAvailable() {
+    this.check();
+    if (this.requests >= this.maxRequests) throw new TossError('REQUEST_LIMIT');
+  }
   private async wait(milliseconds: number) {
     this.check();
-    if (milliseconds >= this.remaining()) throw new TossError('TIMEOUT');
+    if (milliseconds >= this.remaining()) {
+      this.stopped = new TossError('TIMEOUT');
+      throw this.stopped;
+    }
     await new Promise<void>((resolveWait, reject) => {
       const abort = () => {
         clearTimeout(timer);
@@ -422,7 +439,7 @@ export class TossClient {
           this.check();
           const delay = state.nextAt - Date.now();
           if (delay > 0) return delay;
-          if (this.requests >= 10) throw new TossError('REQUEST_LIMIT');
+          if (this.requests >= this.maxRequests) throw new TossError('REQUEST_LIMIT');
           const previousToken = state.token;
           const previousPending = state.pending;
           if (!token) {
@@ -588,6 +605,9 @@ export class TossClient {
         save(this.directory, state);
       });
       return token;
+    }).catch((error: TossError) => {
+      this.stopped = error;
+      throw error;
     });
   }
   get(path: string) {

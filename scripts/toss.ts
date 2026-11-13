@@ -1,62 +1,33 @@
 import { buyingPowerResult, holdingsResult } from './toss-account.ts';
-import { candleQuery, candleResult } from './toss-candles.ts';
+import { candleQuery, queryCandlePage } from './toss-candles.ts';
 import { payload, TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
 import { orderQuery, orderResult } from './toss-orders.ts';
+import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
 import { constraintResult, sessionResult, validDate } from './toss-sessions.ts';
-import { AmbiguousStock, isinPattern, marketPattern, stockResult } from './toss-stock.ts';
+import { AmbiguousStock, stockQuery, stockResult } from './toss-stock.ts';
 import { transactionQuery, transactionResult } from './toss-transactions.ts';
-import { decimal, symbolPattern, validTime } from './toss-values.ts';
+import { symbolPattern } from './toss-values.ts';
 
-function priceResult(rows: unknown[], symbols: string) {
-  const requested = new Set(symbols.split(','));
-  const data: Record<string, unknown>[] = [];
-  const omissions: { index?: number; symbol?: string; reason: string }[] = [];
-  const counts = new Map<string, number>();
-  for (const row of rows)
-    if (row && typeof row === 'object' && 'symbol' in row && typeof row.symbol === 'string')
-      counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1);
-  for (const [index, row] of rows.entries()) {
-    if (
-      !row ||
-      typeof row !== 'object' ||
-      !('symbol' in row) ||
-      typeof row.symbol !== 'string' ||
-      !('lastPrice' in row) ||
-      !('currency' in row) ||
-      !requested.has(row.symbol) ||
-      counts.get(row.symbol) !== 1 ||
-      !decimal(row.lastPrice) ||
-      typeof row.currency !== 'string' ||
-      !/^[A-Z]{3}$/.test(row.currency) ||
-      ('timestamp' in row &&
-        row.timestamp !== undefined &&
-        row.timestamp !== null &&
-        !validTime(row.timestamp))
-    ) {
-      omissions.push({ index, reason: 'invalid_item' });
-      continue;
-    }
-    data.push({
-      symbol: row.symbol,
-      lastPrice: row.lastPrice,
-      currency: row.currency,
-      ...('timestamp' in row ? { timestamp: row.timestamp } : {}),
-    });
-  }
-  if (rows.length && !data.length) throw new TossError('RESPONSE_INVALID');
-  if (rows.length)
-    for (const symbol of requested)
-      if (!data.some((row) => row.symbol === symbol))
-        omissions.push({ symbol, reason: 'missing_item' });
-  return { data, omissions };
-}
 const interruption = new AbortController();
 const interrupt = () => interruption.abort();
 process.on('SIGINT', interrupt);
 process.on('SIGTERM', interrupt);
 let client: TossClient | undefined;
+function errorDetail(error: unknown) {
+  const code = error instanceof TossError ? error.code : 'INTERNAL_ERROR';
+  let detail = {
+    code,
+    ...(error instanceof AmbiguousStock ? { choices: error.choices } : {}),
+    ...(error instanceof TossError
+      ? { providerCode: error.providerCode, requestId: error.requestId }
+      : {}),
+  };
+  if (client?.containsAccountIdentifier(JSON.stringify(detail))) detail = { code };
+  if (client?.containsSecret(JSON.stringify(detail))) detail = { code: 'SENSITIVE_OUTPUT' };
+  return detail;
+}
 const [command, symbols, ...rest] = process.argv.slice(2);
 const endpoints: Record<string, string> = {
   stock: '/api/v1/stocks',
@@ -66,6 +37,7 @@ const endpoints: Record<string, string> = {
   orderbook: '/api/v1/orderbook',
   trades: '/api/v1/trades',
   candles: '/api/v1/candles',
+  'candles-batch': '/api/v1/candles',
   sessions: '/api/v1/market-calendar/US',
   constraints: '/api/v1/market-calendar/US',
   'account-select': 'local:account-selection',
@@ -101,8 +73,11 @@ try {
           commands: [
             {
               name: 'prices',
-              usage: 'node scripts/toss.ts prices SYMBOL[,SYMBOL...]',
+              usage: 'node scripts/toss.ts prices SYMBOL[,SYMBOL...] [staleAfterSeconds=SECONDS]',
               maxSymbols: 200,
+              defaultStaleAfterSeconds: 900,
+              priceAge:
+                'Elapsed seconds from provider timestamp to retrievedAt; warns only above the threshold. Missing, null and future timestamps are unavailable. No realtime or transport-delay guarantee.',
             },
             {
               name: 'tradable',
@@ -115,10 +90,34 @@ try {
             {
               name: 'candles',
               usage:
-                'node scripts/toss.ts candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP]',
+                'node scripts/toss.ts candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP | date=YYYY-MM-DD]',
               intervals: ['1d', '1m'],
               defaultCount: 100,
               maxCount: 200,
+              dateSelection: {
+                interval: '1d',
+                market: 'provider_verified_US',
+                timeZone: 'America/New_York',
+                boundary: 'inclusive_trade_date',
+                conflictsWith: 'before',
+                continuation: 'copy_page_nextBefore_to_before_without_date',
+                completion: 'unknown',
+                inProgress: 'unknown',
+              },
+            },
+            {
+              name: 'candles-batch',
+              usage:
+                'node scripts/toss.ts candles-batch SYMBOL[,SYMBOL...] [count=COUNT] [adjusted=true|false] [before=TIMESTAMP | date=YYYY-MM-DD]',
+              maxSymbols: 20,
+              interval: '1d',
+              defaultCount: 100,
+              maxCount: 200,
+              executionLimits: { maxSeconds: 120, maxHttpTransmissions: 40, maxHttpSeconds: 15 },
+              semantics:
+                'Sequential one-page daily queries with one budget including market checks, authentication, retries, locks and waits; common HTTP spacing still applies. Limits do not guarantee completion. Date selection uses the same verified US inclusive New York date as candles. Copy each page.nextBefore to the individual candles command without date. Completion and inProgress remain unknown.',
+              results:
+                'Ordered per-symbol success, partial, error or not_queried. Valid empty pages are usable. Handled SIGINT/SIGTERM and limits preserve completed results and distinguish the current error from unqueried symbols. No automatic file storage, resume or recovery after forced termination/crash.',
             },
             {
               name: 'trades',
@@ -247,10 +246,92 @@ try {
         ? sessionResult(value, date)
         : constraintResult(value, symbols, date);
     }
+    if (command === 'candles-batch') {
+      const requested = symbols?.split(',') ?? [];
+      if (
+        !requested.length ||
+        requested.length > 20 ||
+        new Set(requested.map((symbol) => symbol.toUpperCase())).size !== requested.length
+      )
+        throw new TossError('INPUT_INVALID');
+      const requests = requested.map((symbol) => candleQuery(symbol, ['1d', ...rest]));
+      client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal, 'batch');
+      const data: Record<string, unknown>[] = [];
+      let stopped: string | undefined;
+      for (const request of requests) {
+        const rowSource = { ...source, ...request.source };
+        if (!stopped) {
+          try {
+            client.checkAvailable();
+          } catch (error) {
+            stopped = errorDetail(error).code;
+            if (!data.length) console.error(stopped);
+          }
+        }
+        if (stopped) {
+          data.push({
+            symbol: request.symbol,
+            status: 'not_queried',
+            data: [],
+            source: rowSource,
+            retrievedAt: new Date().toISOString(),
+            reason: stopped,
+          });
+          continue;
+        }
+        try {
+          const result = await queryCandlePage(client, request);
+          data.push({
+            symbol: request.symbol,
+            status: result.omissions.length ? 'partial' : 'success',
+            ...result,
+            source: { ...source, ...result.source },
+            retrievedAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          const detail = errorDetail(error);
+          data.push({
+            symbol: request.symbol,
+            status: 'error',
+            data: [],
+            source: rowSource,
+            retrievedAt: new Date().toISOString(),
+            error: detail,
+          });
+          console.error(detail.code);
+          if (
+            error instanceof TossError &&
+            [
+              'INTERRUPTED',
+              'AUTH_FAILED',
+              'AUTH_STORAGE',
+              'AUTH_CONFIG',
+              'AUTH_ISSUANCE_UNKNOWN',
+              'AUTH_RESPONSE_INVALID',
+              'PERMISSION_DENIED',
+            ].includes(error.code)
+          )
+            stopped = detail.code;
+        }
+      }
+      const usable = data.some((row) => row.status === 'success' || row.status === 'partial');
+      return {
+        data,
+        omissions: [],
+        status: data.every((row) => row.status === 'success')
+          ? 'success'
+          : usable
+            ? 'partial'
+            : 'error',
+      };
+    }
     if (command === 'candles') {
       const request = candleQuery(symbols, rest);
       Object.assign(source, request.source);
-      return candleResult(await read(request.query), request);
+      client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
+      const result = await queryCandlePage(client, request);
+      Object.assign(source, result.source);
+      return result;
     }
     if (command === 'orderbook' || command === 'trades') {
       const count = rest[0] ?? '50';
@@ -286,53 +367,37 @@ try {
       Object.assign(source, Object.fromEntries(query));
       return tradableResult(await read(query), query);
     }
-    if (
-      (command !== 'prices' && command !== 'stock') ||
-      (command === 'stock' && symbols?.includes(',')) ||
-      !symbols ||
-      (command === 'prices'
-        ? rest.length > 0
-        : rest.length > 2 ||
-          (rest[0] !== undefined && !marketPattern.test(rest[0])) ||
-          (rest[1] !== undefined && rest[1] !== '-' && !isinPattern.test(rest[1]))) ||
-      symbols.split(',').length > 200 ||
-      !symbols.split(',').every((symbol) => symbolPattern.test(symbol))
-    )
-      throw new TossError('INPUT_INVALID');
-
-    const rows = await read(new URLSearchParams({ symbols }));
-    if (!Array.isArray(rows)) throw new TossError('RESPONSE_INVALID');
-    return command === 'stock'
-      ? stockResult(rows, symbols, rest[0], rest[1])
-      : priceResult(rows, symbols);
+    if (command === 'stock') {
+      const request = stockQuery(symbols, rest);
+      return stockResult(await read(request.query), request.symbol, request.market, request.isin);
+    }
+    if (command === 'prices') {
+      const priceRequest = priceQuery(symbols, rest);
+      return { ...priceResult(await read(priceRequest.query), priceRequest), priceRequest };
+    }
+    throw new TossError('INPUT_INVALID');
   }
   const result = await lookup();
   const { data, omissions } = result;
-  const status = omissions.length ? 'partial' : 'success';
-  client?.check();
+  const status = 'status' in result ? result.status : omissions.length ? 'partial' : 'success';
+  if (command !== 'candles-batch') client?.check();
+  const retrievedAt = new Date().toISOString();
+  const outputData =
+    'priceRequest' in result ? priceAge(result.data, result.priceRequest, retrievedAt) : data;
   const output = JSON.stringify({
     version: 1,
     status,
-    data,
+    data: outputData,
     omissions,
     ...('page' in result ? { page: result.page } : {}),
     source,
-    retrievedAt: new Date().toISOString(),
+    retrievedAt,
   });
   if (client?.containsSecret(output)) throw new TossError('SENSITIVE_OUTPUT');
   console.log(output);
-  process.exitCode = status === 'partial' ? 2 : 0;
+  process.exitCode = status === 'error' ? 1 : status === 'partial' ? 2 : 0;
 } catch (error) {
-  const code = error instanceof TossError ? error.code : 'INTERNAL_ERROR';
-  let detail = {
-    code,
-    ...(error instanceof AmbiguousStock ? { choices: error.choices } : {}),
-    ...(error instanceof TossError
-      ? { providerCode: error.providerCode, requestId: error.requestId }
-      : {}),
-  };
-  if (client?.containsAccountIdentifier(JSON.stringify(detail))) detail = { code };
-  if (client?.containsSecret(JSON.stringify(detail))) detail = { code: 'SENSITIVE_OUTPUT' };
+  const detail = errorDetail(error);
   console.log(
     JSON.stringify({
       version: 1,

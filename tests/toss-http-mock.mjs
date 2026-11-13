@@ -4,12 +4,13 @@ import { mock } from 'node:test';
 import { setInterval as realInterval } from 'node:timers';
 import { setTimeout as realSleep } from 'node:timers/promises';
 
+let clock;
 if (!process.env.TEST_REAL_CLOCK) {
   mock.timers.enable({
     apis: ['Date', 'setTimeout'],
     now: Number(process.env.TEST_CLOCK_START || Date.parse('2026-11-06T15:00:00Z')),
   });
-  const clock = realInterval(() => mock.timers.tick(100), 1);
+  clock = realInterval(() => mock.timers.tick(100), 1);
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = (...args) => {
     clearInterval(clock);
@@ -18,10 +19,12 @@ if (!process.env.TEST_REAL_CLOCK) {
 }
 if (process.env.TEST_CLOCK_JUMP) {
   let calls = 0;
+  const jump = Number(process.env.TEST_CLOCK_JUMP_MS || 60001);
+  const at = Number(process.env.TEST_CLOCK_JUMP_AT || 3);
   if (process.env.TEST_CLOCK_JUMP === 'wall') {
     const original = Date.now.bind(Date);
-    Date.now = () => original() + (++calls >= 3 ? 60001 : 0);
-  } else mock.method(performance, 'now', () => (++calls >= 3 ? 60001 : 0));
+    Date.now = () => original() + (++calls >= at ? jump : 0);
+  } else mock.method(performance, 'now', () => (++calls >= at ? jump : 0));
 }
 const authSteps = JSON.parse(process.env.TEST_AUTH_STEPS || '[]');
 
@@ -98,5 +101,9 @@ globalThis.fetch = async (url, init) => {
   if (step.transport) throw new TypeError('synthetic-secret');
   if (step.hang) return new Promise(() => {});
   if (step.rawBody) return new Response(step.rawBody, { status: step.status || 200 });
+  if (step.freezeAt) {
+    clearInterval(clock);
+    mock.timers.setTime(Date.parse(step.freezeAt));
+  }
   return Response.json(step.body, { status: step.status || 200, headers: step.headers });
 };

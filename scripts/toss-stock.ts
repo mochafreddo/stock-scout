@@ -1,5 +1,5 @@
 import { TossError } from './toss-client.ts';
-import { decimal, record } from './toss-values.ts';
+import { decimal, record, symbolPattern } from './toss-values.ts';
 
 export const securityTypes = new Set([
   'STOCK',
@@ -13,7 +13,7 @@ export const securityTypes = new Set([
   'STOCK_WARRANTS',
 ]);
 export const isinPattern = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
-export const marketPattern = /^[A-Z][A-Z0-9_]*$/;
+const marketPattern = /^[A-Z][A-Z0-9_]*$/;
 type StockChoice = { symbol: string; name: string | null; market: string; isinCode: string | null };
 export class AmbiguousStock extends TossError {
   readonly choices: StockChoice[];
@@ -60,7 +60,22 @@ function stockInfo(row: Record<string, unknown>, choice: StockChoice) {
   };
 }
 
-export function stockResult(rows: unknown[], symbol: string, market?: string, isin?: string) {
+export function stockQuery(symbol: string | undefined, args: string[]) {
+  const [market, isin] = args;
+  if (
+    !symbol ||
+    !symbolPattern.test(symbol) ||
+    args.length > 2 ||
+    (market !== undefined && !marketPattern.test(market)) ||
+    (isin !== undefined && isin !== '-' && !isinPattern.test(isin))
+  )
+    throw new TossError('INPUT_INVALID');
+  return { query: new URLSearchParams({ symbols: symbol }), symbol, market, isin };
+}
+
+export function stockResult(value: unknown, symbol: string, market?: string, isin?: string) {
+  if (!Array.isArray(value)) throw new TossError('RESPONSE_INVALID');
+  const rows: unknown[] = value;
   const listings = new Map<string, { choice: StockChoice; row: Record<string, unknown> | null }>();
   const omissions: { index?: number; symbol?: string; reason: string }[] = [];
   for (const [index, value] of rows.entries()) {

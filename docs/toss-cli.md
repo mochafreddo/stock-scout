@@ -13,9 +13,10 @@ node scripts/toss.ts --help
 node scripts/toss.ts stock AAPL
 node scripts/toss.ts prices AAPL
 node scripts/toss.ts prices AAPL,MSFT
+node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 ```
 
-`--help`는 인증 없이 명령 목록을 JSON으로 출력합니다. `prices`는 공식 API의 `symbols` 식별자 1~200개를 쉼표로 받습니다. 각 식별자는 영문 대소문자·숫자·`.`·`-`만 허용하며 빈 항목과 추가 인수는 거부합니다. 티커 검색·시장 추정·KIS 식별자 변환은 수행하지 않습니다. 공급자가 확인한 식별자를 사용하세요. 미국 장중에도 실행할 수 있으며 증권 유형 관문을 두지 않습니다.
+`--help`는 인증 없이 명령 목록을 JSON으로 출력합니다. `prices`는 공식 API의 `symbols` 식별자 1~200개를 쉼표로 받습니다. 각 식별자는 영문 대소문자·숫자·`.`·`-`만 허용하며 빈 항목과 정의되지 않은 추가 인수는 거부합니다. 티커 검색·시장 추정·KIS 식별자 변환은 수행하지 않습니다. 공급자가 확인한 식별자를 사용하세요. 미국 장중에도 실행할 수 있으며 증권 유형 관문을 두지 않습니다.
 
 [실자료 허용·조회 권한과 접근 준비](toss-access-readiness.md)에서 [#284의 조사](https://github.com/mochafreddo/stock-scout/issues/284) 이후의 사용자 재결정, 제한된 실제 연결 결과와 남은 미확인을 확인하세요. 새 연결이나 범위 변경에는 해당 작업의 별도 승인이 필요합니다. 원자료뿐 아니라 요약·가공 결과의 전달에도 승인 범위가 적용됩니다. 이 문서의 예시는 합성 자료입니다.
 
@@ -231,13 +232,20 @@ node scripts/toss.ts constraints AAPL 2026-11-06
 
 ```sh
 node scripts/toss.ts candles AAPL 1d
+node scripts/toss.ts candles AAPL 1d date=2026-11-06 count=100
 node scripts/toss.ts candles AAPL 1m count=200 adjusted=false
 node scripts/toss.ts candles AAPL 1m count=100 adjusted=true before=2026-11-06T09:31:00.123+09:00
 ```
 
-`candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP]`는 봉 한 페이지를 조회합니다. `INTERVAL`은 일봉 `1d` 또는 1분봉 `1m`이며 두 주기 모두 같은 선택 인수를 지원합니다. 개수는 1~200, 기본값은 100이고 수정주가 요청은 기본 `true`입니다. 선택 인수 순서는 자유롭지만 같은 인수의 반복은 거부합니다. `before`는 오프셋을 포함한 유효한 ISO 8601 시각이며 해당 시각을 포함하는 상한입니다. 생략하면 최신 봉부터 조회합니다. 공급자는 시작일·종료일·다른 봉 주기 인수를 제공하지 않습니다. `from=...`, `to=...`, `cursor=...`나 주봉 요청을 임의로 변환하지 않습니다.
+`candles SYMBOL INTERVAL [count=COUNT] [adjusted=true|false] [before=TIMESTAMP | date=YYYY-MM-DD]`는 봉 한 페이지를 조회합니다. `INTERVAL`은 일봉 `1d` 또는 1분봉 `1m`입니다. 개수는 1~200, 기본값은 100이고 수정주가 요청은 기본 `true`입니다. 선택 인수 순서는 자유롭지만 같은 인수의 반복은 거부합니다. `before`는 오프셋을 포함한 유효한 ISO 8601 시각이며 해당 시각을 포함하는 상한입니다. `date`는 미국 일봉 전용입니다. 두 상한을 모두 생략하면 기존처럼 최신 봉부터 조회하며 시장 확인 호출을 추가하지 않습니다. 공급자는 시작일·종료일·다른 봉 주기 인수를 제공하지 않습니다. `from=...`, `to=...`, `cursor=...`나 주봉 요청을 임의로 변환하지 않습니다.
 
-2026-11-07 KST에 확인한 [공식 REST OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)의 엔드포인트는 `GET /api/v1/candles`이며 호출 제한 그룹은 `MARKET_DATA_CHART`입니다. [공식 FAQ](https://openapi.tossinvest.com/openapi-docs/faq.md)와 함께 다음 의미를 적용합니다. 표의 미국 세션 설명은 미국 종목에 해당하며 심볼의 시장·유형을 이 명령에서 별도로 확인하지 않습니다.
+`date`는 유효한 달력 날짜를 받아 뉴욕 현지 자정으로 변환하고 서머타임을 반영합니다. 지정 거래일의 봉을 포함하며 그 이전 봉을 함께 조회합니다. 예를 들어 `date=2026-03-08`은 `before=2026-03-08T05:00:00.000Z`, 다음 날 `date=2026-03-09`는 `before=2026-03-09T04:00:00.000Z`로 요청합니다. 휴장일은 그날 이하에서 존재하는 봉을 조회하며 오늘 자동 제외·직전 완료 거래일 추정·봉 필터링·개수 보충은 하지 않습니다. 분봉 날짜 선택·잘못된 날짜·`date`와 `before`의 동시 입력은 인증을 포함한 첫 HTTP 호출 전에 `INPUT_INVALID`로 거부합니다.
+
+날짜 옵션을 쓰면 먼저 `GET /api/v1/stocks?symbols=SYMBOL`로 종목을 확인합니다. 공급자가 식별한 시장이 `NYSE`·`NASDAQ`·`AMEX`·`US_ETC` 중 하나일 때만 봉을 조회하며 티커 모양이나 통화로 시장을 추정하지 않습니다. 미국 외 시장과 미확인 시장은 `UNSUPPORTED`, 모호한 식별은 `IDENTITY_AMBIGUOUS`, 정상 빈 종목 목록은 `NOT_FOUND`, 중복·잘못된 식별 자료는 `RESPONSE_INVALID`로 중단합니다. 식별에 영향을 주는 잘못된 항목이 섞여도 봉을 조회하지 않습니다. 증권 유형 미확인만으로 확인된 미국 시장 조회를 막지는 않습니다. 시장 확인·인증·재시도와 대기를 모두 같은 단일 조회의 60초·HTTP 10회 예산에 포함하며 개별 HTTP 최대 15초와 공통 최소 1초 간격을 유지합니다.
+
+`source.date`·`source.dateTimeZone=America/New_York`·`source.market`은 선택한 거래일과 확인한 시장이며 `source.before`는 공급자에게 전송한 시각 상한입니다. 날짜 선택·과거 날짜·반환 개수는 봉 완료나 최종 확정의 근거가 아니며 `completion`·`inProgress`는 계속 `unknown`입니다. 날짜로 첫 페이지를 받은 뒤에는 `date`를 빼고 `page.nextBefore`를 `before`에 그대로 넣어 후속 개별 조회를 요청하세요.
+
+2026-11-12 KST에 확인한 [공식 REST OpenAPI 1.2.28](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)의 엔드포인트는 `GET /api/v1/candles`이며 호출 제한 그룹은 `MARKET_DATA_CHART`입니다. [공식 FAQ](https://openapi.tossinvest.com/openapi-docs/faq.md)와 함께 다음 의미를 적용합니다. 표의 미국 세션 설명은 미국 종목에 해당하며 날짜 옵션이 없으면 심볼의 시장·유형을 별도로 확인하지 않습니다.
 
 | 자료 | 의미와 출력 |
 | --- | --- |
@@ -253,6 +261,29 @@ node scripts/toss.ts candles AAPL 1m count=100 adjusted=true before=2026-11-06T0
 `page.nextBefore`는 공급자의 다음 경계를 그대로 반환합니다. 값이 있으면 빈 페이지라도 `omissions=[{"reason":"next_page"}]`·`partial`·종료 코드 2입니다. 에이전트는 같은 심볼·주기·수정 선택으로 그 값을 다음 `before`에 그대로 넣으세요. 위 마지막 예시처럼 `+09:00`도 입력할 수 있으며 CLI가 `+`를 `%2B`로 인코딩합니다. 1밀리초를 빼거나 마지막 봉에서 경계를 새로 계산하지 마세요. 페이지 사이에 같은 봉이 나타나도 CLI는 임의로 제거하지 않습니다.
 
 `nextBefore=null`이면 마지막 페이지이며, 요청 개수보다 적거나 비어 있어도 다른 누락이 없으면 성공입니다. 필드가 생략되면 `page={}`·`pagination_unknown`·종료 코드 2로 끝나며 마지막 페이지로 추정하지 않습니다. 추가 자동 조회는 하지 않습니다. 예를 들어 합성 응답이 `{"candles":[],"nextBefore":"2026-11-06T09:31:00.123+09:00"}`이면 빈 `data`와 그 경계를 반환하고, 에이전트가 같은 인수에 `before=2026-11-06T09:31:00.123+09:00`을 더해 후속 페이지를 요청합니다.
+
+## 순차 일봉 묶음
+
+```sh
+node scripts/toss.ts candles-batch AAPL,MSFT,BRK.B
+node scripts/toss.ts candles-batch AAPL,MSFT date=2026-11-05 count=100 adjusted=false
+```
+
+`candles-batch SYMBOL[,SYMBOL...] [count=COUNT] [adjusted=true|false] [before=TIMESTAMP | date=YYYY-MM-DD]`는 최대 20종목의 일봉을 요청 순서대로 한 페이지씩 조회합니다. 주기 인수는 받지 않으며 `1d`를 사용합니다. 심볼 형식은 개별 봉 조회와 같고 요청한 표기·순서를 보존합니다. 빈 항목·잘못된 형식·20종목 초과·대소문자만 다른 항목을 포함한 중복 심볼과 잘못된 공통 옵션은 인증을 포함한 첫 HTTP 전에 거부합니다. `count`는 종목당 1~200·기본 100이며 `adjusted` 기본값은 `true`입니다. 날짜·시각 상한과 수정주가 의미는 개별 일봉과 같습니다.
+
+날짜를 지정하면 각 종목의 공급자 식별과 미국 시장을 확인한 뒤 뉴욕 기준 지정일을 포함하는 일봉 상한을 적용합니다. 모호하거나 잘못된 식별·미국 외 또는 미확인 시장에서는 해당 종목의 봉을 조회하지 않고 다음 종목으로 진행합니다. 날짜를 생략하면 시장 확인을 추가하지 않습니다. 오늘 자동 제외·완료 거래일 추정·필터 후 개수 보충·자동 후속 페이지 조회는 하지 않습니다. `completion`·`inProgress`는 계속 `unknown`이며 기존 OHLC·거래량 세션 범위를 유지합니다.
+
+묶음 전체는 최대 120초·HTTP 전송 40회 중 먼저 도달한 한도에서 멈춥니다. 하나의 클라이언트와 예산으로 시장 확인·토큰 발급·인증 복구·재시도 전송을 모두 세고 잠금·공통 간격·재시도 대기를 시간에 포함합니다. 개별 HTTP는 응답 본문까지 최대 15초 또는 남은 전체 시간 중 짧은 쪽을 적용합니다. 같은 보호된 상태 디렉터리를 쓰는 프로세스 간 최소 1초 간격과 더 긴 공급자 대기를 유지합니다. 이 값은 실행 상한이며 12종목이나 20종목의 완료 시각·조회 완료를 보장하지 않습니다. 기존 단일 조회의 60초·HTTP 10회 상한은 유지합니다.
+
+종목 부재·응답 형식 오류·조회별 재시도 후 실패·개별 15초 초과는 해당 종목의 오류로 남기고 예산이 있으면 다음 종목을 조회합니다. 명시적 만료 인증 복구와 일시 오류 재시도는 기존 조회별 정책을 따르며, 토큰 발급·복구 실패나 인증·권한·IP 제한에서는 남은 조회를 중단합니다. `Retry-After`를 지킬 예산이 없으면 추가 전송을 하지 않습니다. 먼저 받은 공급자 제한은 이후 종목과 다른 프로세스에도 공통 상태를 통해 적용합니다.
+
+stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과입니다. 각 항목의 `symbol`·`status`·`data`·`source`·`retrievedAt`을 함께 읽으세요. 성공·부분 결과에는 해당 봉 조회의 `omissions`와 `page`를 포함하며 오류에는 안전한 `error`를 넣습니다. 아직 조회하지 않은 항목은 `status=not_queried`·빈 `data`·중단 코드인 `reason`을 반환합니다. 처리 중이던 항목의 `error`와 이후 항목의 `reason`을 구분하세요. 종목별 `retrievedAt`은 그 결과를 기록한 시각이며 미조회 항목의 시각은 자료 조회 시각을 뜻하지 않습니다.
+
+모든 항목이 성공이면 전체 `success`·종료 코드 0입니다. 정상 빈 페이지와 다음 경계가 있는 유효한 빈 부분 페이지도 사용 가능한 조회 결과입니다. 사용 가능한 성공·부분 결과가 하나라도 있고 다른 부분 결과·오류·미조회가 있으면 전체 `partial`·2, 사용 가능한 조회 결과가 하나도 없으면 전체 `error`·1입니다. 전체 `omissions` 대신 각 항목의 `status`·`omissions`·`error`·`reason`을 검사하세요. 모든 종목이 실패해도 종목별 오류는 `data`에 남으며 최상위 `error`가 필요하지 않습니다. 입력·초기 설정 오류처럼 묶음을 시작하지 못한 실패는 기존 최상위 오류 형식을 사용합니다. stderr에는 실패한 조회의 안전한 오류 코드만 출력합니다.
+
+각 항목의 `page.nextBefore`는 공급자 경계를 그대로 보존합니다. 필요한 종목만 `candles SYMBOL 1d count=COUNT adjusted=VALUE before=NEXT_BEFORE`로 추가 조회하고 `date`는 빼세요. 빈 부분 페이지도 같은 방식으로 이어 갑니다. 봉 timestamp에서 경계를 새로 계산하거나 시간을 빼지 마세요.
+
+한도 도달과 처리 가능한 SIGINT·SIGTERM에서는 확보한 결과를 반환하고 소유한 잠금을 해제합니다. 자동 금융자료 파일 저장·디스크 재개 상태를 만들지 않으며 강제 종료·프로세스 충돌 후 복구는 보장하지 않습니다. 보관이 필요하면 승인된 자료 보관 범위 안에서 stdout을 직접 저장하세요. 기존 출처·시각·필드 검증·출력 가림을 동일하게 적용하며 이 명령의 구현이나 합성 검사 통과가 실제 조회·계좌 접근·새 자료 전달의 승인은 아닙니다.
 
 ## 종목 식별과 선택
 
@@ -306,6 +337,11 @@ node scripts/toss.ts candles AAPL 1m count=100 adjusted=true before=2026-11-06T0
 | `lastPrice` | 필수 소수 문자열, 최대 30자. 숫자로 바꾸거나 반올림하지 않습니다. `0` 문자열은 유효하며 null·누락·숫자 자료형은 오류입니다. |
 | `currency` | 필수 통화 문자열. 공식 값은 `KRW`·`USD`이며 공식 확장 지침에 따라 다른 세 자리 대문자 코드도 원문으로 반환합니다. 서로 다른 통화는 합산하지 않습니다. |
 | `timestamp` | 선택 필드이며 문자열 또는 null입니다. 오프셋이 있는 유효한 날짜·시각 문자열을 검사하고 그대로 반환합니다. 생략과 null을 구분하며 조회 시각으로 채우지 않습니다. |
+| `priceAge` | CLI가 계산한 종목별 경과 시간 정보입니다. `seconds`는 원천 시각부터 결과의 `retrievedAt`까지 지난 초이며 소수초를 포함할 수 있습니다. `thresholdSeconds`는 이번 호출의 임계값, `exceedsThreshold`는 엄격한 초과 여부입니다. `seconds`의 숫자 표현은 JavaScript 정밀도에 따르며 경고 판정은 원천 시각의 소수초를 보존하여 비교합니다. |
+
+`staleAfterSeconds=SECONDS`는 호출별 오래됨 경고 임계값이며 기본 900초입니다. 0~9007199254740991 범위의 정수를 십진 표기로 받으며 선행 0·부호·소수·지수 표기·반복 입력은 HTTP 전에 거부합니다. 공급자 요청에는 이 옵션을 보내지 않습니다. 경과 시간이 임계값과 같으면 `exceedsThreshold=false`, 초과하면 `true`입니다. 예를 들어 조회 시각이 `2026-11-06T15:45:00Z`이고 원천 시각이 `2026-11-06T15:30:00Z`이면 900초이므로 기본 임계값 경고가 없습니다.
+
+시각이 생략·null·미래이면 `seconds`와 `exceedsThreshold`는 null이고 `unavailableReason`은 각각 `timestamp_missing`·`timestamp_null`·`timestamp_future`입니다. 원래 `timestamp`의 생략·null·문자열을 보존합니다. 경고나 판정 불가만으로 유효 가격을 제외하거나 `omissions`에 추가하거나 `partial`로 바꾸지 않습니다. 임계값 이내라는 사실도 최신·실시간 보장이 아니며 이 값은 공급자의 전송 지연 측정값이 아닙니다.
 
 stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·공급자 메시지 없는 오류 코드만 출력합니다. 알려진 자격 증명·사용한 토큰이 결과에 나타나면 `SENSITIVE_OUTPUT`으로 자료 출력을 차단합니다. 공급자 추가 필드는 그대로 전달하지 않습니다.
 
@@ -313,7 +349,7 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 {
   "version": 1,
   "status": "success",
-  "data": [{"symbol":"AAPL","lastPrice":"185.7000","currency":"USD","timestamp":null}],
+  "data": [{"symbol":"AAPL","lastPrice":"185.7000","currency":"USD","timestamp":null,"priceAge":{"seconds":null,"thresholdSeconds":900,"exceedsThreshold":null,"unavailableReason":"timestamp_null"}}],
   "omissions": [],
   "source": {
     "provider":"tossinvest",
@@ -341,7 +377,7 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 
 ## 실행 한도와 재시도
 
-실행 전체는 최대 60초·HTTP 전송 10회, 요청 하나는 응답 본문 수신까지 최대 15초입니다. 인증·재시도는 전송 수에, 잠금·간격·재시도 대기는 전체 시간에 포함하며 남은 시간보다 긴 대기는 시작하지 않습니다. 응답 본문은 최대 1 MiB로 제한합니다. SIGINT·SIGTERM은 안전한 중단 결과로 처리하고 소유한 잠금을 해제합니다. 강제 종료는 이 보장을 적용할 수 없습니다.
+단일 조회 실행 전체는 최대 60초·HTTP 전송 10회이며, `candles-batch`는 위 순차 일봉 묶음의 120초·40회 예산을 사용합니다. 요청 하나는 응답 본문 수신까지 최대 15초입니다. 인증·재시도는 전송 수에, 잠금·간격·재시도 대기는 전체 시간에 포함하며 남은 시간보다 긴 대기는 시작하지 않습니다. 응답 본문은 최대 1 MiB로 제한합니다. SIGINT·SIGTERM은 안전한 중단 결과로 처리하고 소유한 잠금을 해제합니다. 강제 종료는 이 보장을 적용할 수 없습니다.
 
 같은 디렉터리를 사용하는 프로세스는 인증과 조회를 합쳐 최소 1초 간격으로 전송을 예약합니다. `Retry-After`와 `X-RateLimit-Reset`의 초 값이 더 긴 대기를 요구하면 공통 상태에 반영합니다. 시간이 부족하면 종료합니다. 다른 실행에서 받은 제한도 이후 예약에 적용됩니다.
 

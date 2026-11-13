@@ -1,5 +1,25 @@
-import { TossError } from './toss-client.ts';
+import { payload, type TossClient, TossError } from './toss-client.ts';
+import { validDate } from './toss-sessions.ts';
+import { stockResult } from './toss-stock.ts';
 import { decimal, items, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
+
+const newYorkOffset = new Intl.DateTimeFormat('en', {
+  timeZone: 'America/New_York',
+  timeZoneName: 'longOffset',
+});
+
+function tradeDateMidnight(date: string) {
+  const utc = Date.parse(`${date}T00:00:00Z`);
+  let midnight = utc;
+  for (let correction = 0; correction < 2; correction++) {
+    const offset = Object.fromEntries(
+      newYorkOffset.formatToParts(midnight).map(({ type, value }) => [type, value]),
+    ).timeZoneName;
+    const [hours, minutes, seconds = 0] = offset.slice(4).split(':').map(Number);
+    midnight = utc - (offset[3] === '-' ? -1 : 1) * (hours * 3600 + minutes * 60 + seconds) * 1000;
+  }
+  return new Date(midnight).toISOString();
+}
 
 export function candleQuery(symbol: string | undefined, args: string[]) {
   const [interval] = args;
@@ -15,18 +35,28 @@ export function candleQuery(symbol: string | undefined, args: string[]) {
       !(
         (key === 'count' && /^(?:[1-9]\d?|1\d\d|200)$/.test(value)) ||
         (key === 'adjusted' && ['true', 'false'].includes(value)) ||
-        (key === 'before' && validTime(value))
+        (key === 'before' && validTime(value)) ||
+        (key === 'date' && interval === '1d' && validDate(value))
       )
     )
       throw new TossError('INPUT_INVALID');
     seen.add(key);
     query.set(key, value);
   }
+  const date = query.get('date');
+  if (date !== null) {
+    if (query.has('before')) throw new TossError('INPUT_INVALID');
+    query.delete('date');
+    query.set('before', tradeDateMidnight(date));
+  }
   const daily = interval === '1d';
   return {
+    symbol,
     query,
+    date,
     source: {
       ...Object.fromEntries(query),
+      ...(date === null ? {} : { date, dateTimeZone: 'America/New_York' }),
       count: Number(query.get('count')),
       adjusted: query.get('adjusted') === 'true',
       originalPricesGuaranteed: false,
@@ -38,6 +68,26 @@ export function candleQuery(symbol: string | undefined, args: string[]) {
         volume: daily ? 'consolidated_including_extended_hours' : 'selected_US_exchanges',
       },
     },
+  };
+}
+
+export async function queryCandlePage(client: TossClient, request: ReturnType<typeof candleQuery>) {
+  let market: string | undefined;
+  if (request.date !== null) {
+    const { symbol } = request;
+    const rows = payload(
+      await client.get(`/api/v1/stocks?${new URLSearchParams({ symbols: symbol })}`),
+    );
+    const identity = stockResult(rows, symbol);
+    if (identity.omissions.some(({ reason }) => reason === 'invalid_item'))
+      throw new TossError('RESPONSE_INVALID');
+    market = identity.data[0].market;
+    if (!['NYSE', 'NASDAQ', 'AMEX', 'US_ETC'].includes(market)) throw new TossError('UNSUPPORTED');
+  }
+  const value = payload(await client.get(`/api/v1/candles?${request.query}`));
+  return {
+    ...candleResult(value, request),
+    source: { ...request.source, ...(market === undefined ? {} : { market }) },
   };
 }
 
