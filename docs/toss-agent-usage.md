@@ -91,6 +91,23 @@ Keep partial reasons in the item's existing `omissions` (`next_page`, `paginatio
 
 Individual not-found, malformed response, exhausted transient retries or a 15-second request timeout can leave later symbols queryable within the shared budget. Authentication issuance/recovery failures and confirmed authentication, permission or IP restrictions stop later queries. Retry-After applies to subsequent symbols too; if the required wait cannot fit, no further HTTP is sent. Handled SIGINT/SIGTERM and budget stops preserve completed outcomes, distinguish the current attempted error from remaining unqueried symbols, and release owned locks. A per-item timestamp records when that outcome was recorded; a not_queried timestamp is not a data retrieval time. Additional pages must be individual `candles SYMBOL 1d` queries with that item's exact `page.nextBefore` copied to `before`, no `date`, and the same count/adjustment. No automatic financial-data files or disk resume state are created. Forced termination and process crashes have no recovery guarantee; save stdout explicitly only within approved storage scope. Existing masking, safe stderr codes and unknown freshness/completion remain applicable. Synthetic checks do not establish live provider or consumer validation or authorize new real queries/data transmission.
 
+## Classify prices at report time
+
+State one explicit report timestamp, then recalculate elapsed time from each original `timestamp` to that report timestamp. Use that row's `priceAge.thresholdSeconds`, which carries the threshold selected for the query (default 900 seconds). Do not reuse the query-time `seconds` or `exceedsThreshold` as the report-time decision: a price can cross the threshold during analysis. Classify only a strict excess as a **reference price** and separate it from prices within the threshold; equality remains within the threshold. Show the source timestamp, report timestamp, recalculated seconds and applied threshold alongside the price.
+
+Classify a missing, null or report-future source timestamp as a **timestamp-unknown price**, separately from a reference price. Preserve missing versus null and explain the unavailable reason. Never substitute `retrievedAt` for a source timestamp. Preserve the original response, including its `retrievedAt`, `priceAge`, decimal strings, omissions and source metadata. A price within the threshold still has no guarantee of realtime freshness, provider transport delay or a simultaneous snapshot. The agent owns report wording and classification; the CLI does not enforce report compliance.
+
+Use [the executable consumer example](../examples/price-consumer.mjs) with the same code for synthetic and approved real inputs. It reads one usable `prices` CLI JSON response from stdin and requires an explicit report timestamp with an offset. For a synthetic exercise:
+
+```sh
+node tests/toss-agent-cli.mjs success prices DEMO | node examples/price-consumer.mjs 2026-11-06T15:45:00Z
+node --test tests/price-consumer.test.mjs
+```
+
+The first command uses the runner's null source timestamp, so `report.prices[0].classification` is `timestamp_unknown`. The test command runs that same consumer with the actual CLI, isolated synthetic state, mocked HTTP and a substituted clock for threshold boundaries, elapsed analysis time, custom thresholds and unavailable timestamps. Inspect both process exit codes when invoking queries; consumer success does not replace the query's exit code or make partial coverage complete.
+
+The example retains the complete input in `query` and puts the report timestamp in `report.asOf`. Each `report.prices` row retains the price and original `timestamp`, adds `classification` (`reference_price`, `timestamp_unknown` or `within_threshold`), and recalculates `priceAge` at `report.asOf`. Read `timestamp`, `report.asOf`, `priceAge.seconds` and `priceAge.thresholdSeconds` together. This is a consumption example, not a report generator; synthetic checks establish its observed behavior, not every external agent's compliance or live Toss response validity. Real queries and data transmission still require their existing authorization.
+
 ## Verify each consumer separately
 
 In each actual consumer, ask the agent to read this document, discover the CLI, choose arguments for the normal market queries, follow the partial page and interpret the error. Record the consumer and execution host, commands, exit codes and its interpretation. A shell command run by Codex proves only that Codex path. A Node regression test proves the runner behavior, not that dots can discover or execute it.
