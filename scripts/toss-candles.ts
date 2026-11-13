@@ -71,6 +71,94 @@ export function candleQuery(symbol: string | undefined, args: string[]) {
   };
 }
 
+export function candleBatchQuery(symbols: string | undefined, args: string[]) {
+  const requested = symbols?.split(',') ?? [];
+  if (
+    !requested.length ||
+    requested.length > 20 ||
+    new Set(requested.map((symbol) => symbol.toUpperCase())).size !== requested.length
+  )
+    throw new TossError('INPUT_INVALID');
+  return requested.map((symbol) => candleQuery(symbol, ['1d', ...args]));
+}
+
+export async function queryCandleBatch(
+  client: TossClient,
+  requests: ReturnType<typeof candleBatchQuery>,
+  source: Record<string, unknown>,
+  errorDetail: (error: unknown) => { code: string },
+  reportDiagnostic: (code: string) => void,
+) {
+  const data: Record<string, unknown>[] = [];
+  let stopped: string | undefined;
+  for (const request of requests) {
+    const rowSource = { ...source, ...request.source };
+    if (!stopped) {
+      try {
+        client.checkAvailable();
+      } catch (error) {
+        stopped = errorDetail(error).code;
+        if (!data.length) reportDiagnostic(stopped);
+      }
+    }
+    if (stopped) {
+      data.push({
+        symbol: request.symbol,
+        status: 'not_queried',
+        data: [],
+        source: rowSource,
+        retrievedAt: new Date().toISOString(),
+        reason: stopped,
+      });
+      continue;
+    }
+    try {
+      const result = await queryCandlePage(client, request);
+      data.push({
+        symbol: request.symbol,
+        status: result.omissions.length ? 'partial' : 'success',
+        ...result,
+        source: { ...source, ...result.source },
+        retrievedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      const detail = errorDetail(error);
+      data.push({
+        symbol: request.symbol,
+        status: 'error',
+        data: [],
+        source: rowSource,
+        retrievedAt: new Date().toISOString(),
+        error: detail,
+      });
+      reportDiagnostic(detail.code);
+      if (
+        error instanceof TossError &&
+        [
+          'INTERRUPTED',
+          'AUTH_FAILED',
+          'AUTH_STORAGE',
+          'AUTH_CONFIG',
+          'AUTH_ISSUANCE_UNKNOWN',
+          'AUTH_RESPONSE_INVALID',
+          'PERMISSION_DENIED',
+        ].includes(error.code)
+      )
+        stopped = detail.code;
+    }
+  }
+  const usable = data.some((row) => row.status === 'success' || row.status === 'partial');
+  return {
+    data,
+    omissions: [],
+    status: data.every((row) => row.status === 'success')
+      ? 'success'
+      : usable
+        ? 'partial'
+        : 'error',
+  };
+}
+
 export async function queryCandlePage(client: TossClient, request: ReturnType<typeof candleQuery>) {
   let market: string | undefined;
   if (request.date !== null) {

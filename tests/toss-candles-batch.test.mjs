@@ -597,6 +597,24 @@ test('batch validates all symbols and shared daily options before authentication
   assert.equal(r.requests.at(-1).query, '?symbol=S19&interval=1d&count=1&adjusted=false');
 });
 
+test('batch validates every input before reading authentication storage (characterization)', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const env = { TOSS_STATE_DIR: join(f.directory, 'missing') };
+  for (const args of [[], ['AAPL,aapl'], ['AAPL,INVALID/'], ['AAPL', 'count=201']]) {
+    const r = await runCli(f, [], ['candles-batch', ...args], env);
+    assert.equal(r.status, 1, r.stdout);
+    assert.equal(JSON.parse(r.stdout).error.code, 'INPUT_INVALID');
+    assert.equal(r.stderr, 'INPUT_INVALID\n');
+    assert.deepEqual(r.requests, []);
+  }
+  const valid = await runCli(f, [], ['candles-batch', 'AAPL'], env);
+  assert.equal(valid.status, 1, valid.stdout);
+  assert.equal(JSON.parse(valid.stdout).error.code, 'AUTH_STORAGE');
+  assert.equal(valid.stderr, 'AUTH_STORAGE\n');
+  assert.deepEqual(valid.requests, []);
+});
+
 test('daily batch returns twelve ordered single pages under one shared execution', async (t) => {
   const f = fixture();
   t.after(f.close);

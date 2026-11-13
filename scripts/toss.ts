@@ -1,5 +1,10 @@
 import { buyingPowerResult, holdingsResult } from './toss-account.ts';
-import { candleQuery, queryCandlePage } from './toss-candles.ts';
+import {
+  candleBatchQuery,
+  candleQuery,
+  queryCandleBatch,
+  queryCandlePage,
+} from './toss-candles.ts';
 import { payload, TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
@@ -247,83 +252,9 @@ try {
         : constraintResult(value, symbols, date);
     }
     if (command === 'candles-batch') {
-      const requested = symbols?.split(',') ?? [];
-      if (
-        !requested.length ||
-        requested.length > 20 ||
-        new Set(requested.map((symbol) => symbol.toUpperCase())).size !== requested.length
-      )
-        throw new TossError('INPUT_INVALID');
-      const requests = requested.map((symbol) => candleQuery(symbol, ['1d', ...rest]));
+      const requests = candleBatchQuery(symbols, rest);
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal, 'batch');
-      const data: Record<string, unknown>[] = [];
-      let stopped: string | undefined;
-      for (const request of requests) {
-        const rowSource = { ...source, ...request.source };
-        if (!stopped) {
-          try {
-            client.checkAvailable();
-          } catch (error) {
-            stopped = errorDetail(error).code;
-            if (!data.length) console.error(stopped);
-          }
-        }
-        if (stopped) {
-          data.push({
-            symbol: request.symbol,
-            status: 'not_queried',
-            data: [],
-            source: rowSource,
-            retrievedAt: new Date().toISOString(),
-            reason: stopped,
-          });
-          continue;
-        }
-        try {
-          const result = await queryCandlePage(client, request);
-          data.push({
-            symbol: request.symbol,
-            status: result.omissions.length ? 'partial' : 'success',
-            ...result,
-            source: { ...source, ...result.source },
-            retrievedAt: new Date().toISOString(),
-          });
-        } catch (error) {
-          const detail = errorDetail(error);
-          data.push({
-            symbol: request.symbol,
-            status: 'error',
-            data: [],
-            source: rowSource,
-            retrievedAt: new Date().toISOString(),
-            error: detail,
-          });
-          console.error(detail.code);
-          if (
-            error instanceof TossError &&
-            [
-              'INTERRUPTED',
-              'AUTH_FAILED',
-              'AUTH_STORAGE',
-              'AUTH_CONFIG',
-              'AUTH_ISSUANCE_UNKNOWN',
-              'AUTH_RESPONSE_INVALID',
-              'PERMISSION_DENIED',
-            ].includes(error.code)
-          )
-            stopped = detail.code;
-        }
-      }
-      const usable = data.some((row) => row.status === 'success' || row.status === 'partial');
-      return {
-        data,
-        omissions: [],
-        status: data.every((row) => row.status === 'success')
-          ? 'success'
-          : usable
-            ? 'partial'
-            : 'error',
-      };
+      return queryCandleBatch(client, requests, source, errorDetail, (code) => console.error(code));
     }
     if (command === 'candles') {
       const request = candleQuery(symbols, rest);
