@@ -9,7 +9,7 @@
     "pretest": "node scripts/test-preflight.ts",
     "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "biome check scripts tests package.json tsconfig.json biome.json"
+    "check": "biome check scripts tests examples package.json tsconfig.json biome.json"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
