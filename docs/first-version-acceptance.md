@@ -40,11 +40,11 @@
 
 ## 실행과 장애 대응 절차
 
-1. [실행 준비](candidate-universe.md#실행하기)와 [KIS 인증](kis-auth.md#실행과-저장)을 따른다. 기존 KIS 환경 변수, 승인된 저장소 밖 SIWC 인증, 필요한 XML·PDF 도구를 준비한다. 키·토큰을 명령 인수나 진단 기록에 넣지 않는다.
-2. [보고서 실행 안내](buy-candidates.md#준비와-실행)의 명령과 명시적 모델을 사용한다. 실제 명령·시작·종료 시각·종료 코드와 실행 전후 소스 지문을 접근이 제한된 저장소 밖 기록에 남긴다. 원문 인증 파일은 복사하지 않는다. 공유 기록에는 개인 인증 경로를 제외한다.
+1. [실행 준비](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/docs/candidate-universe.md#실행하기)와 [KIS 인증](kis-auth.md#실행과-저장)을 따른다. 기존 KIS 환경 변수, 승인된 저장소 밖 SIWC 인증, 필요한 XML·PDF 도구를 준비한다. 키·토큰을 명령 인수나 진단 기록에 넣지 않는다.
+2. [보고서 실행 안내](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/docs/buy-candidates.md#준비와-실행)의 명령과 명시적 모델을 사용한다. 실제 명령·시작·종료 시각·종료 코드와 실행 전후 소스 지문을 접근이 제한된 저장소 밖 기록에 남긴다. 원문 인증 파일은 복사하지 않는다. 공유 기록에는 개인 인증 경로를 제외한다.
 3. 종료 코드 0과 stdout의 JSON 하나를 확인한다. `dataSession`·`targetSession`과 `sourceUniverse.observations`·각 일봉의 요청·수신 시각, `evaluatedAt`을 구분한다. 후보가 있으면 `referenceClose`·`evidence`·`observation`·`risks`를 확인하고, 후보 없음이면 그 이유를 읽는다. 종료 코드 2의 분석 불충분이나 종료 코드 1의 실패를 후보 없음으로 해석하지 않는다.
-4. [구독 한도 전환](buy-candidates.md#구독-한도-소진-시-유료-전환)에서 적용 단계를 확인한다. 추천·의미 검토의 공식 한도 소진에서만 별도 API 인증을 사용한다. `paid.reservedUsd`는 확보한 최대 비용이며 청구액이 아니다. 인증·네트워크·불명확한 사용량·일반 속도 제한으로 전환하지 않고 예산을 늘리거나 미완료 요청을 자동 반복하지 않는다.
-5. 실패 시 [보고서 오류](buy-candidates.md#실패-확인)의 `error`·`stage`·`usage`·`observation`을 확인한다. `DATA_NOT_READY`는 필수 자료 준비 실패, `MARKET_ACTIVE`·`TARGET_OPEN`은 실행 시간 범위 이탈이다. 부분 출력을 매수 판단에 사용하지 않는다. `AUTH_COOLDOWN`은 남은 시간 뒤 새 실행에서 확인하고, 저장·잠금 오류는 [수동 복구](kis-auth.md#실패-뒤-복구)를 따른다. 통신 오류를 토큰 만료로 추정하지 않는다.
+4. [구독 한도 전환](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/docs/buy-candidates.md#구독-한도-소진-시-유료-전환)에서 적용 단계를 확인한다. 추천·의미 검토의 공식 한도 소진에서만 별도 API 인증을 사용한다. `paid.reservedUsd`는 확보한 최대 비용이며 청구액이 아니다. 인증·네트워크·불명확한 사용량·일반 속도 제한으로 전환하지 않고 예산을 늘리거나 미완료 요청을 자동 반복하지 않는다.
+5. 실패 시 [보고서 오류](https://github.com/mochafreddo/stock-scout/blob/aa914669a4d692891e3683112449149cca6b2512/docs/buy-candidates.md#실패-확인)의 `error`·`stage`·`usage`·`observation`을 확인한다. `DATA_NOT_READY`는 필수 자료 준비 실패, `MARKET_ACTIVE`·`TARGET_OPEN`은 실행 시간 범위 이탈이다. 부분 출력을 매수 판단에 사용하지 않는다. `AUTH_COOLDOWN`은 남은 시간 뒤 새 실행에서 확인하고, 저장·잠금 오류는 [수동 복구](kis-auth.md#실패-뒤-복구)를 따른다. 통신 오류를 토큰 만료로 추정하지 않는다.
 6. 후보가 있으면 표시한 다음 정규장용 검토라는 점과 체결가격 미보장을 확인한다. 토스증권에서 해당 종목의 소수점 거래 가능 여부와 예약 접수 조건을 직접 확인한 뒤 사용자가 단순 매수를 예약한다. 자동 예약·주문은 수행하지 않으며 개장 후 새 판단으로 재사용하지 않는다. 후보 없음이면 예약할 종목을 강제로 만들지 않는다.
 
 ## 2026-11-02 인수 기준 합의
