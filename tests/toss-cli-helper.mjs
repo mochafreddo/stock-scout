@@ -1,7 +1,16 @@
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 export function fixture(clientSecret = 'synthetic-secret') {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-toss-')));
@@ -42,6 +51,7 @@ export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
     },
   );
   const result = new Promise((resolve, reject) => {
+    let failure;
     let stdout = '',
       stderr = '';
     child.stdout.on('data', (data) => {
@@ -51,22 +61,41 @@ export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
       stderr += data;
     });
     const timer = setTimeout(() => {
+      failure ??= new Error('CLI test timed out');
       child.kill('SIGKILL');
-      reject(new Error('CLI test timed out'));
     }, 10000);
-    child.once('error', reject);
+    child.once('error', (error) => {
+      failure ??= error;
+    });
     child.once('close', (status, signal) => {
       clearTimeout(timer);
-      resolve({
-        status,
-        signal,
-        stdout,
-        stderr,
-        requests: readRequests(f.trace),
-      });
+      try {
+        const requests = readRequests(f.trace);
+        if (failure) reject(failure);
+        else resolve({ status, signal, stdout, stderr, requests });
+      } catch (error) {
+        reject(failure ?? error);
+      }
     });
   });
   return Object.assign(result, { child });
+}
+export async function waitForFile(path, run, timeout = 5000) {
+  let failure;
+  run.then(
+    (result) => {
+      failure = new Error(`CLI exited before creating ${path}`, { cause: result });
+    },
+    (error) => {
+      failure = error;
+    },
+  );
+  const deadline = Date.now() + timeout;
+  while (!existsSync(path)) {
+    if (failure) throw failure;
+    assert.ok(Date.now() < deadline, `CLI did not create ${path}`);
+    await sleep(10);
+  }
 }
 export const price = {
   symbol: 'AAPL',

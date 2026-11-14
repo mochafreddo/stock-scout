@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { fixture, price, readRequests, runCli } from './toss-cli-helper.mjs';
+import { fixture, price, readRequests, runCli, waitForFile } from './toss-cli-helper.mjs';
 
 test('Toss CLI preserves decimal prices and data time through real arguments and HTTP', async () => {
   const f = fixture();
@@ -378,11 +378,13 @@ test('Toss CLI classifies HTTP failures and only retries transient reads once', 
 
 test('Toss CLI shares token issuance and one-second HTTP spacing across independent processes', async () => {
   const f = fixture();
+  const runs = [];
   try {
-    const results = await Promise.all([
+    runs.push(
       runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' }),
       runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' }),
-    ]);
+    );
+    const results = await Promise.all(runs);
     for (const r of results) assert.equal(r.status, 0, r.stdout + r.stderr);
     const requests = readRequests(f.trace);
     assert.equal(requests.filter((x) => x.method === 'POST').length, 1);
@@ -393,6 +395,7 @@ test('Toss CLI shares token issuance and one-second HTTP spacing across independ
     assert.equal(again.status, 0, again.stdout);
     assert.equal(again.requests.filter((x) => x.method === 'POST').length, 1);
   } finally {
+    await Promise.allSettled(runs);
     f.close();
   }
 });
@@ -464,8 +467,9 @@ test('Toss CLI includes Retry-After, body reads and lock waits in its time budge
 
 test('Toss CLI reuses a token replaced by a peer before expired-token recovery', async () => {
   const f = fixture();
+  const gate = join(f.directory, 'gate');
+  const runs = [];
   try {
-    const gate = join(f.directory, 'gate');
     const first = runCli(
       f,
       [
@@ -475,10 +479,8 @@ test('Toss CLI reuses a token replaced by a peer before expired-token recovery',
       undefined,
       { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
     );
-    for (let i = 0; !existsSync(`${gate}.ready`); i++) {
-      assert.ok(i < 500);
-      await sleep(10);
-    }
+    runs.push(first);
+    await waitForFile(`${gate}.ready`, first);
     const peer = await runCli(
       f,
       [
@@ -502,6 +504,8 @@ test('Toss CLI reuses a token replaced by a peer before expired-token recovery',
     assert.equal(result.requests.filter((x) => x.method === 'POST').length, 2);
     assert.equal(result.requests.filter((x) => x.method === 'GET').length, 4);
   } finally {
+    writeFileSync(gate, '', { mode: 0o600 });
+    await Promise.allSettled(runs);
     f.close();
   }
 });
@@ -624,10 +628,10 @@ test('Toss CLI rejects oversized rate headers without poisoning shared state', a
 
 test('Toss CLI applies a peer Retry-After while another process is waiting to send', async () => {
   const f = fixture();
-  let first;
+  const gate = join(f.directory, 'cooldown-gate');
+  const runs = [];
   try {
-    const gate = join(f.directory, 'cooldown-gate');
-    first = runCli(
+    const first = runCli(
       f,
       [
         {
@@ -641,11 +645,11 @@ test('Toss CLI applies a peer Retry-After while another process is waiting to se
       undefined,
       { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
     );
-    for (let i = 0; !existsSync(`${gate}.ready`); i++) {
-      assert.ok(i < 500);
-      await sleep(10);
-    }
+    runs.push(first);
+    await waitForFile(`${gate}.ready`, first);
     const peer = runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' });
+    runs.push(peer);
+    peer.catch(() => {});
     await sleep(150);
     const releasedAt = Date.now();
     writeFileSync(gate, '', { mode: 0o600 });
@@ -655,10 +659,8 @@ test('Toss CLI applies a peer Retry-After while another process is waiting to se
     for (const r of requests.slice(2))
       assert.ok(r.at >= releasedAt + 3000, JSON.stringify(requests));
   } finally {
-    if (first) {
-      writeFileSync(join(f.directory, 'cooldown-gate'), '', { mode: 0o600 });
-      await first;
-    }
+    writeFileSync(gate, '', { mode: 0o600 });
+    await Promise.allSettled(runs);
     f.close();
   }
 });

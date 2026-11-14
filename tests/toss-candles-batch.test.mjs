@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { fixture, readRequests, runCli } from './toss-cli-helper.mjs';
+import { fixture, readRequests, runCli, waitForFile } from './toss-cli-helper.mjs';
 
 const candle = {
   timestamp: '2026-11-05T14:00:00+09:00',
@@ -271,7 +271,6 @@ test('help discovers the explicit daily batch limits without authentication', as
 
 test('batch waits for each page before querying the next symbol and preserves requested spelling', async (t) => {
   const f = fixture();
-  t.after(f.close);
   const gate = join(f.directory, 'gate');
   const pending = runCli(
     f,
@@ -279,9 +278,12 @@ test('batch waits for each page before querying the next symbol and preserves re
     ['candles-batch', 'first,BRK.B'],
     { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
   );
-  const deadline = Date.now() + 4000;
-  while (!existsSync(`${gate}.ready`) && Date.now() < deadline) await sleep(10);
-  assert.ok(existsSync(`${gate}.ready`));
+  t.after(async () => {
+    writeFileSync(gate, '', { mode: 0o600 });
+    await Promise.allSettled([pending]);
+    f.close();
+  });
+  await waitForFile(`${gate}.ready`, pending, 4000);
   await sleep(50);
   assert.equal(readRequests(f.trace).length, 2);
   writeFileSync(gate, '', { mode: 0o600 });
@@ -320,12 +322,14 @@ test('batch includes authentication lock waits in its deadline and handles a sig
     assert.equal(r.stderr, 'TIMEOUT\n');
   }
   const f = fixture();
-  t.after(f.close);
   mkdirSync(join(f.directory, 'client.lock'), { mode: 0o700 });
   const pending = runCli(f, [], ['candles-batch', 'FIRST,LATER'], { TEST_REAL_CLOCK: '1' });
-  const deadline = Date.now() + 4000;
-  while (!existsSync(join(f.directory, 'issuance.lock')) && Date.now() < deadline) await sleep(10);
-  assert.ok(existsSync(join(f.directory, 'issuance.lock')));
+  t.after(async () => {
+    pending.child.kill('SIGKILL');
+    await Promise.allSettled([pending]);
+    f.close();
+  });
+  await waitForFile(join(f.directory, 'issuance.lock'), pending, 4000);
   pending.child.kill('SIGINT');
   const r = await pending;
   const out = JSON.parse(r.stdout);

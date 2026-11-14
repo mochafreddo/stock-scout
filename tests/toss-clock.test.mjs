@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
-import { fixture, price, readRequests, runCli } from './toss-cli-helper.mjs';
+import { fixture, price, readRequests, runCli, waitForFile } from './toss-cli-helper.mjs';
 
 test('v2 reservation with incompatible legacy sentinel remains queryable by the current CLI', async () => {
   const f = fixture();
@@ -280,10 +279,7 @@ test('concurrent response cooldowns preserve the longer wait without serializing
         { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
       ),
     );
-    for (let attempt = 0; !gates.every((gate) => existsSync(`${gate}.ready`)); attempt++) {
-      assert.ok(attempt < 500, 'both HTTP requests must start before either response is released');
-      await sleep(10);
-    }
+    await Promise.all(gates.map((gate, index) => waitForFile(`${gate}.ready`, pending[index])));
     for (const gate of gates) writeFileSync(gate, '', { mode: 0o600 });
     const results = await Promise.all(pending);
     for (const result of results) {
@@ -477,8 +473,9 @@ test('independent CLI executions retain actual spacing across a wall-clock corre
 test('independent CLI processes share actual send spacing during clock corrections', async () => {
   for (const jump of [0, 2000, -2000]) {
     const f = fixture();
+    const runs = [];
     try {
-      const results = await Promise.all([
+      runs.push(
         runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' }),
         runCli(f, [], undefined, {
           TEST_REAL_CLOCK: '1',
@@ -486,7 +483,8 @@ test('independent CLI processes share actual send spacing during clock correctio
           TEST_CLOCK_JUMP_MS: String(jump),
           TEST_CLOCK_JUMP_AT: '1',
         }),
-      ]);
+      );
+      const results = await Promise.all(runs);
       for (const result of results) assert.equal(result.status, 0, result.stdout + result.stderr);
       const requests = readRequests(f.trace);
       assert.equal(requests.length, 3);
@@ -496,6 +494,7 @@ test('independent CLI processes share actual send spacing during clock correctio
           BigInt(requests[index].nativeNs) - BigInt(requests[index - 1].nativeNs) >= 1000000000n,
         );
     } finally {
+      await Promise.allSettled(runs);
       f.close();
     }
   }
