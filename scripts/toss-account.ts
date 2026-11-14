@@ -1,5 +1,53 @@
 import { TossError } from './toss-client.ts';
+import { orderQuery, orderResult } from './toss-orders.ts';
+import { transactionQuery, transactionResult } from './toss-transactions.ts';
 import { decimal, record, symbolPattern } from './toss-values.ts';
+
+export function accountQuery(command: string, firstArg: string | undefined, args: string[]) {
+  if (command === 'transactions') {
+    const request = transactionQuery(firstArg, args);
+    return {
+      query: request.query,
+      context: request.context,
+      source: request.source,
+      parse: (value: unknown) => transactionResult(value, request),
+    };
+  }
+  if (command === 'orders' || command === 'conditional-orders') {
+    const request = orderQuery(firstArg, args, command === 'conditional-orders');
+    return {
+      query: request.query,
+      context: request.context,
+      source: request.source,
+      parse: (value: unknown) => orderResult(value, request),
+    };
+  }
+  if (command === 'buying-power') {
+    if (!firstArg || !/^[A-Z]{3}$/.test(firstArg) || args.length)
+      throw new TossError('INPUT_INVALID');
+    return {
+      query: new URLSearchParams({ currency: firstArg }),
+      source: { currency: firstArg, scope: 'cash_based_excluding_margin' },
+      parse: (value: unknown) => buyingPowerResult(value, firstArg),
+    };
+  }
+  if (
+    command !== 'holdings' ||
+    args.length ||
+    (firstArg !== undefined && !symbolPattern.test(firstArg))
+  )
+    throw new TossError('INPUT_INVALID');
+  return {
+    query: new URLSearchParams(firstArg ? { symbol: firstArg } : {}),
+    source: {
+      scope: 'KR_US_stocks_excluding_options_bonds',
+      quantityUnit: 'securities',
+      priceUnit: 'currency_per_security',
+      ...(firstArg ? { symbol: firstArg } : {}),
+    },
+    parse: (value: unknown) => holdingsResult(value, firstArg),
+  };
+}
 
 function decimals(value: unknown, required: string[], optional: string[] = []) {
   if (!record(value)) throw new TossError('RESPONSE_INVALID');
@@ -35,7 +83,7 @@ function daily(value: unknown, overview: boolean) {
     ...decimals(value, ['rate']),
   };
 }
-export function holdingsResult(value: unknown, symbol?: string) {
+function holdingsResult(value: unknown, symbol?: string) {
   if (!record(value)) throw new TossError('RESPONSE_INVALID');
   function parseHolding(row: unknown) {
     if (
@@ -89,7 +137,7 @@ export function holdingsResult(value: unknown, symbol?: string) {
   if (!data.length && !Object.keys(summary).length) throw new TossError('RESPONSE_INVALID');
   return { data: [{ ...summary, ...(rows ? { items: data } : {}) }], omissions };
 }
-export function buyingPowerResult(value: unknown, currency: string) {
+function buyingPowerResult(value: unknown, currency: string) {
   if (
     !record(value) ||
     value.currency !== currency ||

@@ -276,6 +276,24 @@ test('normal empty holdings, nullable optional decimals, invalid rows and summar
   }
 });
 
+test('invalid account query inputs precede missing authentication storage (characterization)', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  for (const args of [
+    ['holdings', 'AAPL', 'extra'],
+    ['buying-power', 'usd'],
+    ['transactions', '2026-11-02', '2026-11-01'],
+    ['orders', 'INVALID'],
+    ['conditional-orders', 'INVALID'],
+  ]) {
+    const result = await runCli(f, [], args, { TOSS_STATE_DIR: join(f.directory, 'missing') });
+    assert.equal(result.status, 1, result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout).error, { code: 'INPUT_INVALID' });
+    assert.equal(result.stderr, 'INPUT_INVALID\n');
+    assert.deepEqual(result.requests, []);
+  }
+});
+
 test('account inputs reject cursor reuse, unsupported filters and malformed selection before HTTP', async () => {
   const f = fixture();
   try {

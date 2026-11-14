@@ -1,4 +1,4 @@
-import { buyingPowerResult, holdingsResult } from './toss-account.ts';
+import { accountQuery } from './toss-account.ts';
 import {
   candleBatchQuery,
   candleQuery,
@@ -8,11 +8,9 @@ import {
 import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
-import { orderQuery, orderResult } from './toss-orders.ts';
 import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
 import { constraintResult, sessionResult, validDate } from './toss-sessions.ts';
 import { AmbiguousStock, stockQuery, stockResult } from './toss-stock.ts';
-import { transactionQuery, transactionResult } from './toss-transactions.ts';
 import { symbolPattern } from './toss-values.ts';
 
 const interruption = new AbortController();
@@ -183,47 +181,16 @@ try {
       command === 'orders' ||
       command === 'conditional-orders'
     ) {
-      const transaction = command === 'transactions' ? transactionQuery(symbols, rest) : undefined;
-      const order =
-        command === 'orders' || command === 'conditional-orders'
-          ? orderQuery(symbols, rest, command === 'conditional-orders')
-          : undefined;
-      const paged = transaction ?? order;
-      if (
-        !paged &&
-        (rest.length ||
-          (command === 'buying-power'
-            ? !symbols || !/^[A-Z]{3}$/.test(symbols)
-            : symbols !== undefined && !symbolPattern.test(symbols)))
-      )
-        throw new TossError('INPUT_INVALID');
+      const request = accountQuery(command, symbols, rest);
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
-      const query = paged?.query ?? new URLSearchParams();
-      if (!paged && symbols) query.set(command === 'buying-power' ? 'currency' : 'symbol', symbols);
       return client.queryAccount(
-        { scope: command, endpoint, query, context: paged?.context },
-        (value) =>
-          transaction
-            ? transactionResult(value, transaction)
-            : order
-              ? orderResult(value, order)
-              : command === 'holdings'
-                ? holdingsResult(value, symbols)
-                : buyingPowerResult(value, symbols),
+        { scope: command, endpoint, query: request.query, context: request.context },
+        (value) => request.parse(value),
         (alias) =>
           Object.assign(source, {
             accountAlias: alias,
             snapshot: 'unknown',
-            ...(paged
-              ? paged.source
-              : command === 'buying-power'
-                ? { currency: symbols, scope: 'cash_based_excluding_margin' }
-                : {
-                    scope: 'KR_US_stocks_excluding_options_bonds',
-                    quantityUnit: 'securities',
-                    priceUnit: 'currency_per_security',
-                    ...(symbols ? { symbol: symbols } : {}),
-                  }),
+            ...request.source,
           }),
       );
     }

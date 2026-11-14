@@ -32,7 +32,7 @@ flowchart TD
 | [toss-market.ts](../scripts/toss-market.ts) | 호가와 최근 체결의 검증·공급자 순서 보존 | [시장 자료](../tests/toss-market.test.mjs) |
 | [toss-candles.ts](../scripts/toss-candles.ts) | 봉 조건·응답, 거래일 선택, 순차 일봉 묶음 조립 | [봉](../tests/toss-candles.test.mjs), [날짜](../tests/toss-candle-date.test.mjs), [묶음](../tests/toss-candles-batch.test.mjs) |
 | [toss-sessions.ts](../scripts/toss-sessions.ts) | 날짜·세션 검증과 문서상 거래 규칙·미확인 구분 | [세션·제약](../tests/toss-sessions.test.mjs) |
-| [toss-account.ts](../scripts/toss-account.ts) | 보유와 통화별 현금 기반 매수 가능 금액 | [계좌](../tests/toss-account.test.mjs) |
+| [toss-account.ts](../scripts/toss-account.ts) | 계좌 조회의 입력·응답 검증 함수·출처 조립, 보유와 통화별 현금 기반 매수 가능 금액 검증 | [계좌](../tests/toss-account.test.mjs), 거래내역·주문 검사 |
 | [toss-transactions.ts](../scripts/toss-transactions.ts) | 결제 기준 거래내역과 페이지 | [거래내역](../tests/toss-transactions.test.mjs) |
 | [toss-orders.ts](../scripts/toss-orders.ts) | 일반·조건 주문의 조회 조건·상태·페이지 | [주문](../tests/toss-orders.test.mjs) |
 
@@ -61,6 +61,8 @@ flowchart TD
 ## 계좌 조회와 출력 경계
 
 계좌 조회는 저장된 별칭·선택 계좌·허용 명령 범위를 확인한 뒤 계좌 목록에서 선택 계좌의 유효성을 대조한다. 목록 요청에는 계좌 헤더를 붙이지 않고, 대상 자료 요청에 선택 계좌 헤더를 붙인다. 첫 계좌나 다른 계좌로 자동 대체하지 않는다.
+
+`toss-account.ts`는 계좌 조회 명령을 해석해 검증된 조회 조건·응답 검증 함수·출처 정보를 함께 준비한다. 거래내역과 주문의 세부 검증은 각 명령 모듈에 둔다. 진입점은 입력 검증 후 클라이언트를 만들고, 클라이언트가 저장된 계좌 선택과 범위를 확인한 뒤에만 별칭과 명령별 출처를 붙인다.
 
 다음 페이지 문맥은 계좌·자격 증명·조회 조건·공급자 커서를 HMAC으로 연결한다. 소비자는 반환된 `cursor`와 `context`를 함께 전달하며, 필터나 계좌가 바뀐 문맥을 재사용하지 않는다. 봉의 `nextBefore`는 이 계좌 커서와 다른 방식이다.
 
