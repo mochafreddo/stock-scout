@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, price, runCli } from './toss-cli-helper.mjs';
@@ -23,7 +23,6 @@ for (const boundary of ['directory', 'worktree-file'])
       assert.equal(rejected.stderr, 'AUTH_STORAGE\n');
       assert.equal(JSON.parse(rejected.stdout).error.code, 'AUTH_STORAGE');
       assert.equal(rejected.requests.length, 0);
-      assert.equal(existsSync(join(directory, 'state.json')), false);
       assert.deepEqual(readdirSync(directory), ['credentials.json']);
       assert.doesNotMatch(rejected.stdout + rejected.stderr, /synthetic-client|synthetic-secret/);
 

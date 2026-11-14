@@ -82,7 +82,6 @@ if (process.env.TEST_WAIT_GATE) {
       }, milliseconds);
       publishJson(`${process.env.TEST_WAIT_GATE}.ready`, {
         ...observedDeadline,
-        waitNs: waitNs.toString(),
         milliseconds,
       });
       return timer;
