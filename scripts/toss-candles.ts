@@ -1,6 +1,6 @@
 import { type TossClient, TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
-import { stockResult } from './toss-stock.ts';
+import { confirmUsMarket } from './toss-stock.ts';
 import { decimal, items, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
 
 const newYorkOffset = new Intl.DateTimeFormat('en', {
@@ -178,15 +178,7 @@ export async function queryCandleBatch(
 
 export async function queryCandlePage(client: TossClient, request: ReturnType<typeof candleQuery>) {
   let market: string | undefined;
-  if (request.date !== null) {
-    const { symbol } = request;
-    const rows = await client.get(`/api/v1/stocks?${new URLSearchParams({ symbols: symbol })}`);
-    const identity = stockResult(rows, symbol);
-    if (identity.omissions.some(({ reason }) => reason === 'invalid_item'))
-      throw new TossError('RESPONSE_INVALID');
-    market = identity.data[0].market;
-    if (!['NYSE', 'NASDAQ', 'AMEX', 'US_ETC'].includes(market)) throw new TossError('UNSUPPORTED');
-  }
+  if (request.date !== null) market = await confirmUsMarket(client, request.symbol);
   const value = await client.get(`/api/v1/candles?${request.query}`);
   return {
     ...candleResult(value, request),

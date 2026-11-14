@@ -26,7 +26,7 @@ flowchart TD
 | [toss.ts](../scripts/toss.ts) | 명령 발견·분기, 출처·결과 조립, 중단 신호와 안전한 오류 출력 | [공통 CLI](../tests/toss.test.mjs), [에이전트 소비](../tests/toss-agent-cli.test.mjs) |
 | [toss-client.ts](../scripts/toss-client.ts) | 토큰 발급·복구 판단, 계좌 선택·범위, 커서 문맥, HTTP·실행 예산과 내부 공유 요청 조정 | [공통 CLI](../tests/toss.test.mjs), [시계](../tests/toss-clock.test.mjs), [응답·상태 크기](../tests/toss-auth-size.test.mjs), 계좌·주문 검사 |
 | [toss-values.ts](../scripts/toss-values.ts) | 소수 문자열·시각·객체·심볼 검증과 유효 항목/누락 분류 | 명령별 공개 CLI 검사 |
-| [toss-stock.ts](../scripts/toss-stock.ts) | 종목 식별과 모호한 후보의 선택 요구 | [종목](../tests/toss-stock.test.mjs) |
+| [toss-stock.ts](../scripts/toss-stock.ts) | 종목 식별과 모호한 후보의 선택 요구, 날짜 지정 봉의 미국 시장 확인 | [종목](../tests/toss-stock.test.mjs), [봉 날짜](../tests/toss-candle-date.test.mjs) |
 | [toss-discovery.ts](../scripts/toss-discovery.ts) | 순위와 거래 가능 종목 목록의 조건·집계 범위 | [탐색](../tests/toss-discovery.test.mjs) |
 | [toss-prices.ts](../scripts/toss-prices.ts) | 가격 조회와 원천 시각 경과 시간 | [공통 CLI](../tests/toss.test.mjs), [보고 시점 소비](../tests/price-consumer.test.mjs) |
 | [toss-market.ts](../scripts/toss-market.ts) | 호가와 최근 체결의 검증·공급자 순서 보존 | [시장 자료](../tests/toss-market.test.mjs) |

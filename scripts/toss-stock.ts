@@ -1,4 +1,4 @@
-import { TossError } from './toss-client.ts';
+import { type TossClient, TossError } from './toss-client.ts';
 import { decimal, record, symbolPattern } from './toss-values.ts';
 
 export const securityTypes = new Set([
@@ -71,6 +71,16 @@ export function stockQuery(symbol: string | undefined, args: string[]) {
   )
     throw new TossError('INPUT_INVALID');
   return { query: new URLSearchParams({ symbols: symbol }), symbol, market, isin };
+}
+
+export async function confirmUsMarket(client: TossClient, symbol: string) {
+  const rows = await client.get(`/api/v1/stocks?${stockQuery(symbol, []).query}`);
+  const identity = stockResult(rows, symbol);
+  if (identity.omissions.some(({ reason }) => reason === 'invalid_item'))
+    throw new TossError('RESPONSE_INVALID');
+  const market = identity.data[0].market;
+  if (!['NYSE', 'NASDAQ', 'AMEX', 'US_ETC'].includes(market)) throw new TossError('UNSUPPORTED');
+  return market;
 }
 
 export function stockResult(value: unknown, symbol: string, market?: string, isin?: string) {
