@@ -9,6 +9,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -18,6 +19,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+
+const STORAGE_BYTES = 16384;
 
 export class TossError extends Error {
   readonly code: string;
@@ -92,7 +95,11 @@ function clockIdentity() {
     } else if (process.platform === 'linux') {
       boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
       const namespace = readlinkSync('/proc/self/ns/time');
-      if (!/^time:\[\d+\]$/.test(namespace)) throw new TossError('CLOCK_UNCERTAIN');
+      if (
+        !/^time:\[\d+\]$/.test(namespace) ||
+        readlinkSync('/proc/self/ns/time_for_children') !== namespace
+      )
+        throw new TossError('CLOCK_UNCERTAIN');
       const offset = readFileSync('/proc/self/timens_offsets', 'utf8').match(
         /^monotonic[ \t]+(-?\d{1,19})[ \t]+(\d{1,9})[ \t]*$/m,
       );
@@ -134,7 +141,7 @@ function read(path: string) {
       stat.nlink !== 1 ||
       stat.uid !== process.getuid?.() ||
       (stat.mode & 0o777) !== 0o600 ||
-      stat.size > 16384
+      stat.size > STORAGE_BYTES
     )
       throw new TossError('AUTH_STORAGE');
     return parseJson(readFileSync(fd, 'utf8'));
@@ -149,7 +156,7 @@ function save(
   sizeError = 'AUTH_STORAGE',
 ) {
   const serialized = JSON.stringify(value);
-  if (Buffer.byteLength(serialized, 'utf8') > 16384) throw new TossError(sizeError);
+  if (Buffer.byteLength(serialized, 'utf8') > STORAGE_BYTES) throw new TossError(sizeError);
   const target = join(directory, filename);
   if (existsSync(target)) secure(target);
   const temporary = join(directory, `${randomUUID()}.tmp`);
@@ -417,27 +424,30 @@ export class TossClient {
           fingerprint: this.fingerprint,
           version: 2,
           nextAt: null,
-          clock: { id: this.clockId, nextNs: '0' },
+          clock: { id: this.clockId, nextNs: '0'.repeat(30) },
           pending: false,
         };
       throw error;
     }
     const state = read(path);
-    if (state && state.version === undefined && Number.isFinite(state.nextAt))
-      throw new TossError('AUTH_STATE_TRANSITION_REQUIRED');
     if (
       !state ||
       state.fingerprint !== this.fingerprint ||
-      state.version !== 2 ||
-      state.nextAt !== null ||
-      typeof state.clock?.id !== 'string' ||
-      typeof state.clock?.nextNs !== 'string' ||
-      !/^(?:0|[1-9]\d{0,29})$/.test(state.clock.nextNs) ||
       typeof state.pending !== 'boolean' ||
       (state.token !== undefined &&
         (typeof state.token?.value !== 'string' ||
           !/^[A-Za-z0-9._~+/-]+=*$/.test(state.token.value) ||
           !Number.isFinite(state.token.expiresAt)))
+    )
+      throw new TossError('AUTH_STORAGE');
+    if (state.version === undefined && Number.isFinite(state.nextAt) && state.nextAt >= 0)
+      throw new TossError('AUTH_STATE_TRANSITION_REQUIRED');
+    if (
+      state.version !== 2 ||
+      state.nextAt !== null ||
+      typeof state.clock?.id !== 'string' ||
+      typeof state.clock?.nextNs !== 'string' ||
+      !/^\d{30}$/.test(state.clock.nextNs)
     )
       throw new TossError('AUTH_STORAGE');
     if (state.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
@@ -467,14 +477,37 @@ export class TossClient {
     }
   }
   private locked<T>(operation: (state: State) => Promise<T>) {
-    return this.withLock('client.lock', () => operation(this.load()));
+    return this.withLock('client.lock', () => {
+      const state = this.load();
+      const records = readdirSync(this.directory).filter((name) =>
+        /^cooldown-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/.test(name),
+      );
+      for (const name of records) {
+        const record = read(join(this.directory, name));
+        if (
+          record?.fingerprint !== this.fingerprint ||
+          typeof record.clock?.id !== 'string' ||
+          typeof record.clock?.nextNs !== 'string' ||
+          !/^\d{30}$/.test(record.clock.nextNs)
+        )
+          throw new TossError('AUTH_STORAGE');
+        if (record.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
+        if (BigInt(record.clock.nextNs) > BigInt(state.clock.nextNs))
+          state.clock.nextNs = record.clock.nextNs;
+      }
+      if (records.length) {
+        save(this.directory, state);
+        for (const name of records) unlinkSync(join(this.directory, name));
+      }
+      return operation(state);
+    });
   }
   private reserve(state: State, milliseconds: number) {
     const now = process.hrtime.bigint();
     const next = now + BigInt(milliseconds) * 1000000n;
-    state.clock.nextNs = (
-      next > BigInt(state.clock.nextNs) ? next : BigInt(state.clock.nextNs)
-    ).toString();
+    state.clock.nextNs = (next > BigInt(state.clock.nextNs) ? next : BigInt(state.clock.nextNs))
+      .toString()
+      .padStart(30, '0');
     save(this.directory, state);
   }
   private async transmit(path: string, token?: string, account?: string) {
@@ -561,7 +594,6 @@ export class TossClient {
         (async () => {
           const response = await flight;
           if (!response) throw new TossError('NETWORK_ERROR');
-          checkRequest();
           const seconds = Math.max(
             0,
             ...['Retry-After', 'X-RateLimit-Reset'].map((name) => {
@@ -572,11 +604,20 @@ export class TossClient {
           if (!Number.isSafeInteger(Math.ceil(seconds * 1000)))
             throw new TossError('RESPONSE_INVALID');
           if (seconds)
-            await this.locked(async (state) => {
-              this.check();
-              signal.throwIfAborted();
-              this.reserve(state, Math.ceil(seconds * 1000));
-            });
+            save(
+              this.directory,
+              {
+                fingerprint: this.fingerprint,
+                clock: {
+                  id: this.clockId,
+                  nextNs: (process.hrtime.bigint() + BigInt(Math.ceil(seconds * 1000)) * 1000000n)
+                    .toString()
+                    .padStart(30, '0'),
+                },
+              },
+              `cooldown-${randomUUID()}.json`,
+            );
+          checkRequest();
           const reader = response.body?.getReader();
           const chunks: Uint8Array[] = [];
           let bytes = 0;

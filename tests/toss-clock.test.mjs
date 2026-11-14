@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fixture, price, runCli } from './toss-cli-helper.mjs';
 
 test('v2 reservation with incompatible legacy sentinel remains queryable by the current CLI', async () => {
@@ -16,7 +17,10 @@ test('v2 reservation with incompatible legacy sentinel remains queryable by the 
           .digest('hex'),
         version: 2,
         nextAt: null,
-        clock: { id: 'darwin-mach-continuous:11111111-1111-4111-8111-111111111111', nextNs: '0' },
+        clock: {
+          id: 'darwin-mach-continuous:11111111-1111-4111-8111-111111111111',
+          nextNs: '000000000000000000000000000000',
+        },
         pending: false,
         token: { value: 'synthetic-token', expiresAt: Date.parse('2026-11-07T15:00:00Z') },
       }),
@@ -88,6 +92,36 @@ test('legacy state and changed boot identity block without changing state or iss
   }
 });
 
+test('malformed legacy state is storage failure rather than an approved-transition candidate', async () => {
+  for (const invalid of [
+    { fingerprint: 'wrong-client' },
+    { pending: 'false' },
+    { pending: undefined },
+    { token: { value: 'invalid token', expiresAt: 1794063600000 } },
+    { token: { value: 'synthetic-token', expiresAt: 'invalid' } },
+    { nextAt: -1 },
+  ]) {
+    const f = fixture();
+    try {
+      const initial = await runCli(f);
+      assert.equal(initial.status, 0, initial.stdout + initial.stderr);
+      const path = join(f.directory, 'state.json');
+      const state = JSON.parse(readFileSync(path, 'utf8'));
+      delete state.version;
+      delete state.clock;
+      const before = JSON.stringify({ ...state, nextAt: 0, ...invalid });
+      writeFileSync(path, before);
+      const result = await runCli(f);
+      assert.equal(result.status, 1);
+      assert.equal(JSON.parse(result.stdout).error.code, 'AUTH_STORAGE');
+      assert.equal(result.requests.length, initial.requests.length);
+      assert.equal(readFileSync(path, 'utf8'), before);
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test('unavailable clock and unsupported platforms block before authentication HTTP', async () => {
   for (const extra of [
     { TEST_CLOCK_UNAVAILABLE: '1' },
@@ -119,6 +153,21 @@ test('Linux clock state rejects a different time namespace before HTTP', async (
     assert.equal(second.status, 1);
     assert.equal(JSON.parse(second.stdout).error.code, 'CLOCK_UNCERTAIN');
     assert.equal(second.requests.length, 2);
+  } finally {
+    f.close();
+  }
+});
+
+test('Linux clock rejects offsets belonging to a different child time namespace before HTTP', async () => {
+  const f = fixture();
+  try {
+    const result = await runCli(f, [], undefined, {
+      TEST_PLATFORM: 'linux',
+      TEST_CHILD_TIME_NAMESPACE: 'time:[456]',
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.equal(JSON.parse(result.stdout).error.code, 'CLOCK_UNCERTAIN');
+    assert.equal(result.requests.length, 0);
   } finally {
     f.close();
   }
@@ -169,6 +218,157 @@ test('provider cooldown persists across wall corrections and expires on the shar
     assert.equal(late.status, 0, late.stdout + late.stderr);
     assert.equal(late.requests.length, 3);
     assert.equal(late.requests.filter((request) => request.method === 'POST').length, 1);
+  } finally {
+    f.close();
+  }
+});
+
+for (const wallJump of [16000, 60001])
+  test(`provider cooldown survives a ${wallJump}ms wall jump at response-header handoff`, async () => {
+    const f = fixture();
+    try {
+      const first = await runCli(f, [
+        {
+          status: 429,
+          headers: { 'Retry-After': '80' },
+          body: {},
+          responseWallJump: wallJump,
+        },
+      ]);
+      assert.equal(first.status, 1);
+      assert.equal(JSON.parse(first.stdout).error.code, 'TIMEOUT');
+      assert.equal(first.requests.length, 2);
+      const early = await runCli(f);
+      assert.equal(early.status, 1, early.stdout + early.stderr);
+      assert.equal(JSON.parse(early.stdout).error.code, 'TIMEOUT');
+      assert.equal(early.requests.length, 2);
+      const late = await runCli(f, [], undefined, {
+        TEST_CLOCK_START: String(Date.parse('2026-11-06T15:01:30Z')),
+      });
+      assert.equal(late.status, 0, late.stdout + late.stderr);
+      assert.equal(late.requests.length, 3);
+      assert.equal(late.requests.filter((request) => request.method === 'POST').length, 1);
+      assert.equal(
+        readdirSync(f.directory).filter((name) => name.startsWith('cooldown-')).length,
+        0,
+      );
+    } finally {
+      f.close();
+    }
+  });
+
+test('concurrent response cooldowns preserve the longer wait without serializing in-flight requests', async () => {
+  const f = fixture();
+  const gates = [join(f.directory, 'first'), join(f.directory, 'second')];
+  let pending = [];
+  try {
+    const initial = await runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' });
+    assert.equal(initial.status, 0, initial.stdout + initial.stderr);
+    pending = gates.map((gate, index) =>
+      runCli(
+        f,
+        [
+          {
+            gate: true,
+            status: 429,
+            headers: { 'Retry-After': index === 0 ? '80' : '70' },
+            body: {},
+            responseWallJump: 16000,
+          },
+        ],
+        undefined,
+        { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
+      ),
+    );
+    for (let attempt = 0; !gates.every((gate) => existsSync(`${gate}.ready`)); attempt++) {
+      assert.ok(attempt < 500, 'both HTTP requests must start before either response is released');
+      await sleep(10);
+    }
+    for (const gate of gates) writeFileSync(gate, '', { mode: 0o600 });
+    const results = await Promise.all(pending);
+    for (const result of results) {
+      assert.equal(result.status, 1);
+      assert.equal(JSON.parse(result.stdout).error.code, 'TIMEOUT');
+    }
+    const sends = results[1].requests;
+    assert.equal(sends.length, 4);
+    const firstResponseSend = sends[2];
+    const afterShortWait = BigInt(firstResponseSend.sharedNs) + 75000000000n;
+    const resumed = await runCli(f, [], undefined, {
+      TEST_SHARED_CLOCK_START_NS: afterShortWait.toString(),
+    });
+    assert.equal(resumed.status, 0, resumed.stdout + resumed.stderr);
+    assert.equal(resumed.requests.length, 5);
+    assert.ok(
+      BigInt(resumed.requests[4].sharedNs) - BigInt(firstResponseSend.sharedNs) >= 80000000000n,
+      JSON.stringify(resumed.requests),
+    );
+    assert.equal(readdirSync(f.directory).filter((name) => name.startsWith('cooldown-')).length, 0);
+  } finally {
+    for (const gate of gates) writeFileSync(gate, '', { mode: 0o600 });
+    await Promise.allSettled(pending);
+    f.close();
+  }
+});
+
+test('unsafe cooldown observations block before HTTP and remain available for approved recovery', async () => {
+  for (const kind of ['json', 'permissions', 'fingerprint', 'deadline', 'clock']) {
+    const f = fixture();
+    try {
+      const initial = await runCli(f);
+      assert.equal(initial.status, 0, initial.stdout + initial.stderr);
+      const state = JSON.parse(readFileSync(join(f.directory, 'state.json'), 'utf8'));
+      const record = { fingerprint: state.fingerprint, clock: { ...state.clock } };
+      if (kind === 'fingerprint') record.fingerprint = 'wrong-client';
+      if (kind === 'deadline') record.clock.nextNs = 'invalid';
+      if (kind === 'clock') record.clock.id = 'different-clock';
+      const path = join(f.directory, 'cooldown-11111111-1111-4111-8111-111111111111.json');
+      const before = kind === 'json' ? '{' : JSON.stringify(record);
+      writeFileSync(path, before, { mode: 0o600 });
+      if (kind === 'permissions') chmodSync(path, 0o644);
+      const result = await runCli(f);
+      assert.equal(result.status, 1);
+      assert.equal(
+        JSON.parse(result.stdout).error.code,
+        kind === 'clock' ? 'CLOCK_UNCERTAIN' : 'AUTH_STORAGE',
+      );
+      assert.equal(result.requests.length, initial.requests.length);
+      assert.equal(readFileSync(path, 'utf8'), before);
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic-secret/);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('failed cooldown merge preserves the observation for a later execution without restarting its wait', async () => {
+  const f = fixture();
+  try {
+    const received = await runCli(f, [
+      {
+        status: 429,
+        headers: { 'Retry-After': '80' },
+        body: {},
+        responseWallJump: 16000,
+      },
+    ]);
+    assert.equal(JSON.parse(received.stdout).error.code, 'TIMEOUT');
+    const records = readdirSync(f.directory).filter((name) => name.startsWith('cooldown-'));
+    assert.equal(records.length, 1);
+    const before = readFileSync(join(f.directory, records[0]));
+    const failed = await runCli(f, [], undefined, { TEST_FAIL_STATE_SAVE: '1' });
+    assert.equal(failed.status, 1);
+    assert.equal(JSON.parse(failed.stdout).error.code, 'AUTH_STORAGE');
+    assert.equal(failed.requests.length, 2);
+    assert.deepEqual(readFileSync(join(f.directory, records[0])), before);
+    const early = await runCli(f);
+    assert.equal(JSON.parse(early.stdout).error.code, 'TIMEOUT');
+    assert.equal(early.requests.length, 2);
+    const late = await runCli(f, [], undefined, {
+      TEST_CLOCK_START: String(Date.parse('2026-11-06T15:01:30Z')),
+    });
+    assert.equal(late.status, 0, late.stdout + late.stderr);
+    assert.equal(late.requests.length, 3);
   } finally {
     f.close();
   }

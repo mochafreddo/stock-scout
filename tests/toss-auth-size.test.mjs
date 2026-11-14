@@ -91,3 +91,59 @@ test('Toss CLI applies the 16384-byte limit to the whole UTF-8 state including m
     }
   }
 });
+
+for (const operation of ['reuse', 'cooldown'])
+  test(`exact-limit token state preserves ${operation} when reservation digits grow`, async () => {
+    const f = fixture();
+    try {
+      const initial = await runCli(f, [], undefined, { TEST_SHARED_CLOCK_START_NS: '1000000000' });
+      assert.equal(initial.status, 0, initial.stdout + initial.stderr);
+      const path = join(f.directory, 'state.json');
+      const state = JSON.parse(readFileSync(path, 'utf8'));
+      delete state.token;
+      const candidate = {
+        ...state,
+        token: { value: '', expiresAt: Date.parse('2026-11-07T15:00:00Z') },
+      };
+      const token = 'x'.repeat(16384 - Buffer.byteLength(JSON.stringify(candidate)));
+      writeFileSync(path, JSON.stringify(state));
+      const issued = await runCli(
+        f,
+        [{ expectedToken: token, body: { result: [price] } }],
+        undefined,
+        {
+          TEST_SHARED_CLOCK_START_NS: '3000000000',
+          TEST_AUTH_STEPS: JSON.stringify([
+            { body: { access_token: token, token_type: 'Bearer', expires_in: 86400 } },
+          ]),
+        },
+      );
+      assert.equal(issued.status, 0, issued.stdout + issued.stderr);
+      assert.equal(readFileSync(path).length, 16384);
+      const next = await runCli(
+        f,
+        [
+          {
+            expectedToken: token,
+            status: operation === 'cooldown' ? 429 : 200,
+            headers: operation === 'cooldown' ? { 'Retry-After': '80' } : {},
+            body: { result: [price] },
+          },
+        ],
+        undefined,
+        { TEST_SHARED_CLOCK_START_NS: operation === 'cooldown' ? '6000000000' : '98000000000' },
+      );
+      assert.equal(next.status, operation === 'cooldown' ? 1 : 0, next.stdout + next.stderr);
+      assert.equal(next.stderr, operation === 'cooldown' ? 'TIMEOUT\n' : '');
+      assert.equal(readFileSync(path).length, 16384);
+      assert.equal(next.requests.filter((request) => request.method === 'POST').length, 2);
+      if (operation === 'cooldown') {
+        const early = await runCli(f, [], undefined, { TEST_SHARED_CLOCK_START_NS: '6000000000' });
+        assert.equal(early.status, 1, early.stdout + early.stderr);
+        assert.equal(early.stderr, 'TIMEOUT\n');
+        assert.equal(early.requests.length, next.requests.length);
+      }
+    } finally {
+      f.close();
+    }
+  });

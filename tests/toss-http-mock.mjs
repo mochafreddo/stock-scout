@@ -31,11 +31,18 @@ mock.method(fs, 'readFileSync', (file, ...args) => {
   return readFileSync(file, ...args);
 });
 const readlinkSync = fs.readlinkSync;
-mock.method(fs, 'readlinkSync', (file, ...args) =>
-  file === '/proc/self/ns/time'
-    ? process.env.TEST_TIME_NAMESPACE || 'time:[123]'
-    : readlinkSync(file, ...args),
-);
+const renameSync = fs.renameSync;
+mock.method(fs, 'renameSync', (source, target) => {
+  if (process.env.TEST_FAIL_STATE_SAVE && target === `${process.env.TOSS_STATE_DIR}/state.json`)
+    throw new Error('synthetic-secret');
+  return renameSync(source, target);
+});
+mock.method(fs, 'readlinkSync', (file, ...args) => {
+  if (file === '/proc/self/ns/time') return process.env.TEST_TIME_NAMESPACE || 'time:[123]';
+  if (file === '/proc/self/ns/time_for_children')
+    return process.env.TEST_CHILD_TIME_NAMESPACE || process.env.TEST_TIME_NAMESPACE || 'time:[123]';
+  return readlinkSync(file, ...args);
+});
 syncBuiltinESMExports();
 let clock;
 if (!process.env.TEST_REAL_CLOCK) {
@@ -44,7 +51,13 @@ if (!process.env.TEST_REAL_CLOCK) {
     now: Number(process.env.TEST_CLOCK_START || Date.parse('2026-11-06T15:00:00Z')),
   });
   const sharedNow = Date.now.bind(Date);
-  mock.method(process.hrtime, 'bigint', () => BigInt(sharedNow()) * 1000000n);
+  const sharedStart = sharedNow();
+  mock.method(process.hrtime, 'bigint', () =>
+    process.env.TEST_SHARED_CLOCK_START_NS
+      ? BigInt(process.env.TEST_SHARED_CLOCK_START_NS) +
+        BigInt(sharedNow() - sharedStart) * 1000000n
+      : BigInt(sharedNow()) * 1000000n,
+  );
   clock = realInterval(() => mock.timers.tick(100), 1);
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = (...args) => {
@@ -74,7 +87,7 @@ globalThis.fetch = async (url, init) => {
   assert.equal(init.redirect, 'error');
   appendFileSync(
     process.env.TEST_TRACE,
-    `${JSON.stringify({ path: address.pathname, query: address.search, method: init.method, at: Date.now(), nativeNs: nativeHrtime().toString(), authorization: init.headers.authorization, account: init.headers['X-Tossinvest-Account'], body: init.body })}\n`,
+    `${JSON.stringify({ path: address.pathname, query: address.search, method: init.method, at: Date.now(), nativeNs: nativeHrtime().toString(), sharedNs: process.hrtime.bigint().toString(), authorization: init.headers.authorization, account: init.headers['X-Tossinvest-Account'], body: init.body })}\n`,
   );
   if (address.pathname === '/oauth2/token') {
     assert.equal(init.headers['content-type'], 'application/x-www-form-urlencoded');
@@ -141,6 +154,10 @@ globalThis.fetch = async (url, init) => {
     mock.timers.setTime(Date.parse(step.freezeAt));
   }
   const response = Response.json(step.body, { status: step.status || 200, headers: step.headers });
+  if (step.responseWallJump) {
+    const original = Date.now.bind(Date);
+    Date.now = () => original() + step.responseWallJump;
+  }
   if (step.wallJump) {
     const getReader = response.body.getReader.bind(response.body);
     mock.method(response.body, 'getReader', () => {
