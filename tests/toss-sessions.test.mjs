@@ -65,6 +65,12 @@ test('constraints distinguishes documented API rules from unprovided symbol elig
   assert.equal(c.regular.availability, 'unknown');
   assert.equal(c.conditional.availability, 'unknown');
   assert.equal(c.fractional.availability, 'unknown');
+  assert.equal(c.regular.acceptanceWindow, 'unknown');
+  assert.equal(c.regular.minimumQuantity, 'unknown');
+  assert.equal(c.regular.maximumQuantity, 'unknown');
+  assert.equal(c.conditional.acceptanceWindow, 'unknown');
+  assert.equal(c.conditional.minimumQuantity, 'unknown');
+  assert.equal(c.conditional.maximumQuantity, 'unknown');
   assert.deepEqual(c.fractional.acceptanceWindow, {
     status: 'documented_schedule',
     startTime: '2026-03-25T22:30:00+09:00',
@@ -73,6 +79,9 @@ test('constraints distinguishes documented API rules from unprovided symbol elig
   });
   assert.equal(c.fractional.quantitySellMaxScale, 6);
   assert.equal(c.fractional.minimumAmount, 'unknown');
+  assert.equal(c.fractional.maximumAmount, 'unknown');
+  assert.equal(c.fractional.minimumQuantity, 'unknown');
+  assert.equal(c.fractional.maximumQuantity, 'unknown');
   assert.equal(c.conditional.fractionalQuantity, 'unknown');
   assert.deepEqual(c.regular.orderTypes, ['LIMIT', 'MARKET']);
   assert.deepEqual(c.regular.timeInForce, { DAY: 'default', CLS: 'US_LIMIT_only', OPG: 'KR_only' });
@@ -99,6 +108,11 @@ test('constraints distinguishes documented API rules from unprovided symbol elig
     conversion: 'unknown',
   });
   assert.equal(c.regular.amountAndQuantity, 'exactly_one');
+  assert.equal(r.out.status, 'partial');
+  assert.deepEqual(r.out.omissions, [
+    { field: 'eligibility', reason: 'constraint_lookup_not_provided' },
+    { field: 'appConditions', reason: 'not_verified' },
+  ]);
   assert.equal(r.out.source.rulesVersion, '1.2.28');
   assert.equal(r.requests.at(-1).query, '?date=2026-03-25');
   assert.deepEqual(
@@ -108,6 +122,25 @@ test('constraints distinguishes documented API rules from unprovided symbol elig
       ['GET', '/api/v1/market-calendar/US'],
     ],
   );
+});
+
+test('sessions excludes only adjacent days that equal the requested date or point in the wrong direction', async (t) => {
+  for (const [role, invalidDate, expected] of [
+    ['previousBusinessDay', '2026-03-25', { today: day, nextBusinessDay: closed('2026-03-26') }],
+    ['previousBusinessDay', '2026-03-26', { today: day, nextBusinessDay: closed('2026-03-26') }],
+    ['nextBusinessDay', '2026-03-25', { today: day, previousBusinessDay: closed('2026-03-24') }],
+    ['nextBusinessDay', '2026-03-24', { today: day, previousBusinessDay: closed('2026-03-24') }],
+  ]) {
+    await t.test(`${role} ${invalidDate}`, async (t) => {
+      const r = await lookup(t, { ...calendar, [role]: closed(invalidDate) });
+      assert.equal(r.status, 2, r.stdout);
+      assert.equal(r.stderr, '');
+      assert.equal(r.out.status, 'partial');
+      assert.deepEqual(r.out.data, [expected]);
+      assert.deepEqual(r.out.omissions, [{ field: role, reason: 'invalid_day' }]);
+      assert.equal(r.requests.at(-1).query, '?date=2026-03-25');
+    });
+  }
 });
 
 test('sessions preserves positive submillisecond intervals across offsets and fractional precision', async (t) => {
