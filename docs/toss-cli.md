@@ -325,11 +325,24 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 
 같은 클라이언트를 사용하는 모든 로컬 실행은 같은 `TOSS_STATE_DIR`를 사용해야 합니다. 별도 디렉터리·다른 프로그램·다른 기기는 이 공통 제한에 포함되지 않습니다. 승인된 위치 외에 실제 자격 증명이나 토큰을 복사하지 마세요.
 
-공통 모듈이 `state.json`·`client.lock`·`issuance.lock`의 쓰기를 소유합니다. 상태 파일에는 자격 증명 지문·토큰·만료 시각·다음 호출 가능 시각·발급 결과 미확인 표시만 저장합니다. 금융 응답은 별도 파일이나 로그에 기본 저장하지 않습니다. 토큰 만료는 발급 시작 시각과 공식 `expires_in` 초로 보수적으로 계산하며 KIS의 KST 해석·5분 제한을 사용하지 않습니다. 잠금 안에서 캐시를 다시 읽고 유효 토큰을 재사용하며, 토큰 발급에는 자동 재시도를 하지 않습니다.
+공통 모듈이 `state.json`·`client.lock`·`issuance.lock`의 쓰기를 소유합니다. 상태 파일에는 자격 증명 지문·토큰·만료 시각·예약 규약 버전·부팅과 시계 기준·다음 호출 가능 시각·발급 결과 미확인 표시를 저장합니다. 금융 응답은 별도 파일이나 로그에 기본 저장하지 않습니다. 토큰 만료는 발급 시작 시각과 공식 `expires_in` 초로 보수적으로 계산하며 KIS의 KST 해석·5분 제한을 사용하지 않습니다. 잠금 안에서 캐시를 다시 읽고 유효 토큰을 재사용하며, 토큰 발급에는 자동 재시도를 하지 않습니다.
 
 상태 파일의 읽기·저장 상한은 전체 JSON을 UTF-8로 직렬화한 16,384바이트입니다. 토큰과 만료 시각뿐 아니라 모든 상태 메타데이터를 포함하며, 한도와 같은 크기는 허용합니다. 발급 응답을 반영한 전체 상태가 상한을 넘으면 첫 실행은 `AUTH_RESPONSE_INVALID`로 실패합니다. 토큰을 잘라 저장하거나 읽을 수 없는 상태를 게시하지 않으며, 읽을 수 있는 발급 결과 미확인 상태를 보존합니다.
 
 발급 도중 통신·응답·저장 오류가 발생하면 `AUTH_ISSUANCE_UNKNOWN`으로 후속 자동 발급을 막습니다. 크기 초과 응답으로 실패한 뒤에도 같은 차단을 적용합니다. 강제 종료로 남은 잠금은 자동으로 빼앗지 않고 전체 실행 한도까지 기다립니다. 복구 전 같은 디렉터리를 사용하는 프로세스가 모두 끝났는지 확인하고 공급자 발급 상태와 토큰 교체 영향을 점검하세요. 실행 중 상태·잠금을 삭제하거나 자격 증명 지문을 수동으로 고치지 마세요. 보관 위치나 자격 증명 변경과 미확인 발급의 재시도는 별도 승인·상태 확인 후 진행하세요.
+
+### 예약 상태와 복구
+
+조회 실행은 macOS와 Linux를 지원하며 다른 운영체제에서는 HTTP 전송 전에 중단합니다. 기존 보호 저장소 검사에서 먼저 실패할 수 있으므로 미지원 운영체제의 오류 코드가 같다는 보장은 없습니다. 부팅·시계 기준을 확인할 수 없으면 `CLOCK_UNCERTAIN`입니다. macOS는 `kern.bootsessionuuid`, Linux는 `/proc/sys/kernel/random/boot_id`, `/proc/self/ns/time`의 시간 네임스페이스 식별자와 `/proc/self/timens_offsets`의 단조 시계 오프셋을 사용합니다. Linux에서 이 정보를 읽을 수 없어도 전송하지 않습니다. 서로 다른 시간 네임스페이스나 오프셋에서 같은 상태를 사용하면 기준 불일치로 중단합니다. 오프셋을 함께 비교하므로 네임스페이스 식별자가 재사용되더라도 다른 시계 기준을 정상으로 받아들이지 않습니다.
+
+예약 규약 v2는 `version:2`, `nextAt:null`, `clock.id`, `clock.nextNs`를 사용합니다. `clock.nextNs`는 같은 부팅·시계 기준의 나노초 마감을 십진 문자열로 저장합니다. `nextAt:null`은 구버전이 새 상태를 정상 벽시계 예약으로 읽지 못하게 하는 값입니다. 구버전은 `AUTH_STORAGE`, 새 버전은 구형 벽시계 상태에 `AUTH_STATE_TRANSITION_REQUIRED`를 반환합니다. 새 버전은 구형 상태를 자동 변환하거나 삭제하지 않으며 토큰을 자동 재발급하지 않습니다. 부팅·시계 기준이 저장된 기준과 다르면 `CLOCK_UNCERTAIN`입니다.
+
+두 오류의 복구에는 별도로 승인된 상태 전환이 필요합니다.
+
+1. 같은 클라이언트와 상태를 쓰는 구버전·새 버전 실행을 모두 종료하고, 이후 실행기가 새 버전만 사용하도록 확인하세요. 남은 잠금의 삭제도 실행 종료 확인과 별도 승인 없이 수행하지 마세요.
+2. 공급자가 요구한 남은 대기를 확인하고 실제 대기를 마치세요. 구형 상태의 벽시계 마감만으로 시계 보정 이전의 잔여 시간을 복원할 수 없습니다. 남은 대기를 확인할 수 없으면 전환과 조회를 보류하세요.
+3. 실제 보호 상태의 읽기·수정 승인을 받은 뒤, 자격 증명 지문·토큰·만료 시각·`pending`과 다른 상태 필드는 보존하고 예약 필드만 현재 부팅·시계 기준의 v2로 원자적으로 바꾸세요. 이미 대기를 마친 상태의 `clock.nextNs`는 `"0"`으로 시작할 수 있습니다. `account.json`과 자격 증명은 바꾸지 마세요. `pending:true`는 이 전환으로 해소되지 않습니다.
+4. 새 실행기로 다시 조회하세요. 이 안내는 전환 명령이나 실제 상태 변경의 승인이 아닙니다. 상태 파일을 삭제하여 인증을 다시 시작하는 방법으로 대체하지 마세요.
 
 ## 응답 계약
 
@@ -381,13 +394,19 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 
 오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다.
 
-오류 코드는 `IDENTITY_AMBIGUOUS`, `INPUT_INVALID`, `ACCOUNT_SELECTION_REQUIRED`, `ACCOUNT_SCOPE_DENIED`, `AUTH_CONFIG`, `AUTH_STORAGE`, `AUTH_FAILED`, `AUTH_RESPONSE_INVALID`, `AUTH_ISSUANCE_UNKNOWN`, `PERMISSION_DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `RESPONSE_INVALID`, `RATE_LIMIT`, `NETWORK_ERROR`, `UPSTREAM_ERROR`, `REQUEST_LIMIT`, `TIMEOUT`, `INTERRUPTED`, `SENSITIVE_OUTPUT`, `INTERNAL_ERROR`입니다. 인증·권한·미지원·한도 오류는 정상 빈 결과로 바꾸지 않습니다.
+오류 코드는 `IDENTITY_AMBIGUOUS`, `INPUT_INVALID`, `ACCOUNT_SELECTION_REQUIRED`, `ACCOUNT_SCOPE_DENIED`, `AUTH_CONFIG`, `AUTH_STORAGE`, `AUTH_STATE_TRANSITION_REQUIRED`, `CLOCK_UNCERTAIN`, `AUTH_FAILED`, `AUTH_RESPONSE_INVALID`, `AUTH_ISSUANCE_UNKNOWN`, `PERMISSION_DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `RESPONSE_INVALID`, `RATE_LIMIT`, `NETWORK_ERROR`, `UPSTREAM_ERROR`, `REQUEST_LIMIT`, `TIMEOUT`, `INTERRUPTED`, `SENSITIVE_OUTPUT`, `INTERNAL_ERROR`입니다. 인증·권한·미지원·한도 오류는 정상 빈 결과로 바꾸지 않습니다.
 
 ## 실행 한도와 재시도
 
 단일 조회 실행 전체는 최대 60초·HTTP 전송 10회이며, `candles-batch`는 위 순차 일봉 묶음의 120초·40회 예산을 사용합니다. 요청 하나는 응답 본문 수신까지 최대 15초입니다. 인증·재시도는 전송 수에, 잠금·간격·재시도 대기는 전체 시간에 포함하며 남은 시간보다 긴 대기는 시작하지 않습니다. 응답 본문은 최대 1 MiB로 제한합니다. SIGINT·SIGTERM은 안전한 중단 결과로 처리하고 소유한 잠금을 해제합니다. 강제 종료는 이 보장을 적용할 수 없습니다.
 
 같은 디렉터리를 사용하는 프로세스는 인증과 조회를 합쳐 최소 1초 간격으로 전송을 예약합니다. `Retry-After`와 `X-RateLimit-Reset`의 초 값이 더 긴 대기를 요구하면 공통 상태에 반영합니다. 시간이 부족하면 종료합니다. 다른 실행에서 받은 제한도 이후 예약에 적용됩니다.
+
+예약은 `process.hrtime.bigint()`의 공유 단조 기준을 사용하며 벽시계 전진·후진 보정으로 대기를 줄이지 않습니다. 매 전송 직전 잠금 안에서 최신 상태를 다시 읽고 대기 후에도 재검사합니다. 공급자 대기는 새 실행에서도 같은 마감으로 이어지므로 매번 전체 길이를 다시 시작하지 않습니다. 실행·개별 HTTP 예산의 기존 벽시계·프로세스 경과 검사도 유지하며 실행 예산에는 공유 시계의 경과를 함께 반영합니다.
+
+근거를 확인한 [Node.js 24.0.0의 Darwin libuv](https://github.com/nodejs/node/blob/v24.0.0/deps/uv/src/unix/darwin.c)와 [로컬 libuv 1.52.1](https://github.com/libuv/libuv/blob/v1.52.1/src/unix/darwin.c)은 `mach_continuous_time()`을 사용합니다. [Apple 헤더](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/mach/mach_time.h)는 이 시계가 절전 중에도 진행한다고 명시합니다. [Linux libuv](https://github.com/libuv/libuv/blob/v1.x/src/unix/linux.c)의 고해상도 시계는 `CLOCK_MONOTONIC`이며 [공식 매뉴얼](https://man7.org/linux/man-pages/man3/clock_gettime.3.html)에 따라 벽시계의 불연속 보정을 따르지 않고 절전 시간은 세지 않습니다. Linux 절전은 예약 대기를 더 길게 만드는 보수적인 방향입니다. NTP의 점진적 속도 보정까지 영향을 받지 않는 시계라는 뜻은 아닙니다. [시간 네임스페이스](https://man7.org/linux/man-pages/man7/time_namespaces.7.html)가 다르면 같은 부팅이어도 직접 비교하지 않습니다.
+
+2026-11-14 로컬 macOS arm64의 Node.js 26.12.1·libuv 1.52.1에서 독립 자식 프로세스의 시각이 부모의 호출 전후 시각 사이에 드는지 확인했습니다. 프로세스별 상대 시계로 바꾼 음성 대조는 비교를 거부했습니다. 이는 같은 부팅에서의 로컬 비교 실험이며 실제 운영체제 시각 변경·절전·재부팅 실험이나 Linux 실행 검증은 아닙니다. 회귀 검사는 실제 CLI에 합성 HTTP·시계 보정·부팅 기준 변경을 적용합니다.
 
 조회 중 `401 expired-token`에만 한 번 복구하며 다른 프로세스의 교체 토큰을 먼저 사용합니다. `invalid-token`·권한 오류는 재발급하지 않습니다. 일시 통신 오류·5xx·429에는 한 번 재시도합니다. 만료 복구와 일시 오류를 합쳐 조회는 최대 세 번 전송합니다. 현재가 한 번의 경로는 인증을 포함해 최대 다섯 번이므로 공통 HTTP 10회 상한에 먼저 도달하지 않습니다. 시간 초과·잘못된 성공 응답·토큰 발급의 불명확한 결과는 자동 반복하지 않습니다.
 

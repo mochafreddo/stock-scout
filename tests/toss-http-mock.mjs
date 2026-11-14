@@ -1,15 +1,50 @@
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import childProcess from 'node:child_process';
+import fs, { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { mock } from 'node:test';
 import { setInterval as realInterval } from 'node:timers';
 import { setTimeout as realSleep } from 'node:timers/promises';
 
+const nativeHrtime = process.hrtime.bigint.bind(process.hrtime);
+if (process.env.TEST_PLATFORM)
+  Object.defineProperty(process, 'platform', { value: process.env.TEST_PLATFORM });
+const boot = process.env.TEST_BOOT_ID || '11111111-1111-4111-8111-111111111111';
+const execFileSync = childProcess.execFileSync;
+mock.method(childProcess, 'execFileSync', (file, args, options) => {
+  if (file === '/usr/sbin/sysctl' && args.join(' ') === '-n kern.bootsessionuuid') {
+    if (process.env.TEST_CLOCK_UNAVAILABLE) throw new Error('synthetic-secret');
+    return `${boot}\n`;
+  }
+  return execFileSync(file, args, options);
+});
+const readFileSync = fs.readFileSync;
+mock.method(fs, 'readFileSync', (file, ...args) => {
+  if (file === '/proc/sys/kernel/random/boot_id') {
+    if (process.env.TEST_CLOCK_UNAVAILABLE) throw new Error('synthetic-secret');
+    return `${boot}\n`;
+  }
+  if (file === '/proc/self/timens_offsets') {
+    if (process.env.TEST_TIME_OFFSET_UNAVAILABLE) throw new Error('synthetic-secret');
+    return process.env.TEST_TIME_OFFSET || 'monotonic 0 0\nboottime 0 0\n';
+  }
+  return readFileSync(file, ...args);
+});
+const readlinkSync = fs.readlinkSync;
+mock.method(fs, 'readlinkSync', (file, ...args) =>
+  file === '/proc/self/ns/time'
+    ? process.env.TEST_TIME_NAMESPACE || 'time:[123]'
+    : readlinkSync(file, ...args),
+);
+syncBuiltinESMExports();
 let clock;
 if (!process.env.TEST_REAL_CLOCK) {
   mock.timers.enable({
     apis: ['Date', 'setTimeout'],
     now: Number(process.env.TEST_CLOCK_START || Date.parse('2026-11-06T15:00:00Z')),
   });
+  const sharedNow = Date.now.bind(Date);
+  mock.method(process.hrtime, 'bigint', () => BigInt(sharedNow()) * 1000000n);
   clock = realInterval(() => mock.timers.tick(100), 1);
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = (...args) => {
@@ -39,7 +74,7 @@ globalThis.fetch = async (url, init) => {
   assert.equal(init.redirect, 'error');
   appendFileSync(
     process.env.TEST_TRACE,
-    `${JSON.stringify({ path: address.pathname, query: address.search, method: init.method, at: Date.now(), authorization: init.headers.authorization, account: init.headers['X-Tossinvest-Account'], body: init.body })}\n`,
+    `${JSON.stringify({ path: address.pathname, query: address.search, method: init.method, at: Date.now(), nativeNs: nativeHrtime().toString(), authorization: init.headers.authorization, account: init.headers['X-Tossinvest-Account'], body: init.body })}\n`,
   );
   if (address.pathname === '/oauth2/token') {
     assert.equal(init.headers['content-type'], 'application/x-www-form-urlencoded');
@@ -105,5 +140,24 @@ globalThis.fetch = async (url, init) => {
     clearInterval(clock);
     mock.timers.setTime(Date.parse(step.freezeAt));
   }
-  return Response.json(step.body, { status: step.status || 200, headers: step.headers });
+  const response = Response.json(step.body, { status: step.status || 200, headers: step.headers });
+  if (step.wallJump) {
+    const getReader = response.body.getReader.bind(response.body);
+    mock.method(response.body, 'getReader', () => {
+      const reader = getReader();
+      const read = reader.read.bind(reader);
+      let changed = false;
+      mock.method(reader, 'read', async () => {
+        const result = await read();
+        if (!changed) {
+          changed = true;
+          const original = Date.now.bind(Date);
+          Date.now = () => original() + step.wallJump;
+        }
+        return result;
+      });
+      return reader;
+    });
+  }
+  return response;
 };

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -9,6 +10,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmdirSync,
@@ -69,10 +71,44 @@ function accountSelection(value: unknown): AccountSelection {
 
 type State = {
   fingerprint: string;
-  nextAt: number;
+  version: 2;
+  nextAt: null;
+  clock: { id: string; nextNs: string };
   pending: boolean;
   token?: { value: string; expiresAt: number };
 };
+function clockIdentity() {
+  try {
+    let boot: string;
+    let family: string;
+    if (process.platform === 'darwin') {
+      boot = execFileSync('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid'], {
+        encoding: 'utf8',
+        timeout: 1000,
+        maxBuffer: 128,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      family = 'darwin-mach-continuous';
+    } else if (process.platform === 'linux') {
+      boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      const namespace = readlinkSync('/proc/self/ns/time');
+      if (!/^time:\[\d+\]$/.test(namespace)) throw new TossError('CLOCK_UNCERTAIN');
+      const offset = readFileSync('/proc/self/timens_offsets', 'utf8').match(
+        /^monotonic[ \t]+(-?\d{1,19})[ \t]+(\d{1,9})[ \t]*$/m,
+      );
+      if (!offset || Number(offset[2]) >= 1000000000) throw new TossError('CLOCK_UNCERTAIN');
+      family = `linux-monotonic:${namespace}:${BigInt(offset[1])}:${BigInt(offset[2])}`;
+    } else throw new TossError('CLOCK_UNCERTAIN');
+    if (
+      !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(boot) ||
+      boot === '00000000-0000-0000-0000-000000000000'
+    )
+      throw new TossError('CLOCK_UNCERTAIN');
+    return `${family}:${boot.toLowerCase()}`;
+  } catch {
+    throw new TossError('CLOCK_UNCERTAIN');
+  }
+}
 function secure(path: string, directory = false) {
   const stat = lstatSync(path);
   if (
@@ -186,6 +222,8 @@ export class TossClient {
   private readonly signal: AbortSignal;
   private readonly startedWall = Date.now();
   private readonly started = performance.now();
+  private readonly startedShared = process.hrtime.bigint();
+  private readonly clockId: string;
   private readonly timeout: number;
   private readonly maxRequests: number;
   private requests = 0;
@@ -221,6 +259,7 @@ export class TossClient {
         .update(JSON.stringify([this.clientId, this.clientSecret]))
         .digest('hex');
       this.secrets.add(this.clientId).add(this.clientSecret);
+      this.clockId = clockIdentity();
     } catch (error) {
       throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
     }
@@ -337,6 +376,7 @@ export class TossClient {
     return Math.min(
       this.timeout - (performance.now() - this.started),
       this.startedWall + this.timeout - Date.now(),
+      this.timeout - Number(process.hrtime.bigint() - this.startedShared) / 1000000,
     );
   }
   check() {
@@ -373,15 +413,26 @@ export class TossClient {
       secure(path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-        return { fingerprint: this.fingerprint, nextAt: 0, pending: false };
+        return {
+          fingerprint: this.fingerprint,
+          version: 2,
+          nextAt: null,
+          clock: { id: this.clockId, nextNs: '0' },
+          pending: false,
+        };
       throw error;
     }
     const state = read(path);
+    if (state && state.version === undefined && Number.isFinite(state.nextAt))
+      throw new TossError('AUTH_STATE_TRANSITION_REQUIRED');
     if (
       !state ||
       state.fingerprint !== this.fingerprint ||
-      !Number.isFinite(state.nextAt) ||
-      state.nextAt < 0 ||
+      state.version !== 2 ||
+      state.nextAt !== null ||
+      typeof state.clock?.id !== 'string' ||
+      typeof state.clock?.nextNs !== 'string' ||
+      !/^(?:0|[1-9]\d{0,29})$/.test(state.clock.nextNs) ||
       typeof state.pending !== 'boolean' ||
       (state.token !== undefined &&
         (typeof state.token?.value !== 'string' ||
@@ -389,6 +440,7 @@ export class TossClient {
           !Number.isFinite(state.token.expiresAt)))
     )
       throw new TossError('AUTH_STORAGE');
+    if (state.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
     if (state.token) this.secrets.add(state.token.value);
     return state;
   }
@@ -417,6 +469,14 @@ export class TossClient {
   private locked<T>(operation: (state: State) => Promise<T>) {
     return this.withLock('client.lock', () => operation(this.load()));
   }
+  private reserve(state: State, milliseconds: number) {
+    const now = process.hrtime.bigint();
+    const next = now + BigInt(milliseconds) * 1000000n;
+    state.clock.nextNs = (
+      next > BigInt(state.clock.nextNs) ? next : BigInt(state.clock.nextNs)
+    ).toString();
+    save(this.directory, state);
+  }
   private async transmit(path: string, token?: string, account?: string) {
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, this.signal]);
@@ -444,7 +504,7 @@ export class TossClient {
         this.check();
         const delay = await this.locked(async (state) => {
           this.check();
-          const delay = state.nextAt - Date.now();
+          const delay = Number(BigInt(state.clock.nextNs) - process.hrtime.bigint()) / 1000000;
           if (delay > 0) return delay;
           if (this.requests >= this.maxRequests) throw new TossError('REQUEST_LIMIT');
           const previousToken = state.token;
@@ -453,8 +513,7 @@ export class TossClient {
             state.pending = true;
             delete state.token;
           }
-          state.nextAt = Date.now() + 1000;
-          save(this.directory, state);
+          this.reserve(state, 1000);
           try {
             this.check();
           } catch (error) {
@@ -491,8 +550,7 @@ export class TossClient {
                 }),
           });
           void flight.catch(() => {});
-          state.nextAt = Date.now() + 1000;
-          save(this.directory, state);
+          this.reserve(state, 1000);
           return 0;
         });
         if (!delay) break;
@@ -511,14 +569,13 @@ export class TossClient {
               return value !== null && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : 0;
             }),
           );
-          if (!Number.isSafeInteger(Math.ceil(Date.now() + seconds * 1000)))
+          if (!Number.isSafeInteger(Math.ceil(seconds * 1000)))
             throw new TossError('RESPONSE_INVALID');
           if (seconds)
             await this.locked(async (state) => {
               this.check();
               signal.throwIfAborted();
-              state.nextAt = Math.max(state.nextAt, Date.now() + seconds * 1000);
-              save(this.directory, state);
+              this.reserve(state, Math.ceil(seconds * 1000));
             });
           const reader = response.body?.getReader();
           const chunks: Uint8Array[] = [];
@@ -651,7 +708,13 @@ export class TossClient {
     } catch (error) {
       if (
         error instanceof TossError &&
-        ['AUTH_FAILED', 'AUTH_STORAGE', 'PERMISSION_DENIED'].includes(error.code)
+        [
+          'AUTH_FAILED',
+          'AUTH_STORAGE',
+          'AUTH_STATE_TRANSITION_REQUIRED',
+          'CLOCK_UNCERTAIN',
+          'PERMISSION_DENIED',
+        ].includes(error.code)
       )
         this.stopped = error;
       throw error;
