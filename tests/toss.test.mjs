@@ -665,7 +665,36 @@ test('Toss CLI applies a peer Retry-After while another process is waiting to se
   }
 });
 
-test('Toss CLI enforces request deadlines even when timers run late and masks stream cancellation errors', async () => {
+for (const [bytes, expectedStatus] of [
+  [1048576, 0],
+  [1048577, 1],
+])
+  test(`Toss CLI enforces the total response byte limit across chunks at ${bytes} bytes`, async () => {
+    const f = fixture();
+    try {
+      const json = JSON.stringify({ result: [price], privateNote: 'synthetic-response-body' });
+      const responseChunks = [json, 524288, bytes - Buffer.byteLength(json) - 524288];
+      const r = await runCli(f, [{ responseChunks }]);
+      assert.equal(r.status, expectedStatus, r.stdout + r.stderr);
+      const out = JSON.parse(r.stdout);
+      if (expectedStatus === 0) {
+        assert.equal(out.status, 'success');
+        assert.deepEqual(
+          out.data.map(({ priceAge, ...row }) => row),
+          [price],
+        );
+      } else {
+        assert.equal(out.status, 'error');
+        assert.equal(out.error.code, 'RESPONSE_INVALID');
+      }
+      assert.equal(r.requests.filter((request) => request.method === 'GET').length, 1);
+      assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(response-body|secret|token|client)/);
+    } finally {
+      f.close();
+    }
+  });
+
+test('Toss CLI rejects late or oversized responses without exposing response content', async () => {
   for (const [step, expected] of [
     [{ monotonicAdvance: 16000, body: { result: [price] } }, 'TIMEOUT'],
     [{ oversizedCancel: true }, 'RESPONSE_INVALID'],
