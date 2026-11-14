@@ -3,7 +3,11 @@ import { orderQuery, orderResult } from './toss-orders.ts';
 import { transactionQuery, transactionResult } from './toss-transactions.ts';
 import { decimal, record, symbolPattern } from './toss-values.ts';
 
-export function accountQuery(command: string, firstArg: string | undefined, args: string[]) {
+export function accountQuery(
+  command: 'holdings' | 'buying-power' | 'transactions' | 'orders' | 'conditional-orders',
+  firstArg: string | undefined,
+  args: string[],
+) {
   if (command === 'transactions') {
     const request = transactionQuery(firstArg, args);
     return {
@@ -31,11 +35,7 @@ export function accountQuery(command: string, firstArg: string | undefined, args
       parse: (value: unknown) => buyingPowerResult(value, firstArg),
     };
   }
-  if (
-    command !== 'holdings' ||
-    args.length ||
-    (firstArg !== undefined && !symbolPattern.test(firstArg))
-  )
+  if (args.length || (firstArg !== undefined && !symbolPattern.test(firstArg)))
     throw new TossError('INPUT_INVALID');
   return {
     query: new URLSearchParams(firstArg ? { symbol: firstArg } : {}),

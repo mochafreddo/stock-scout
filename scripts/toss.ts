@@ -185,7 +185,7 @@ try {
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
       return client.queryAccount(
         { scope: command, endpoint, query: request.query, context: request.context },
-        (value) => request.parse(value),
+        request.parse,
         (alias) =>
           Object.assign(source, {
             accountAlias: alias,
