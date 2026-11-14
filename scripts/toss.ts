@@ -166,7 +166,7 @@ try {
     );
     process.exit(0);
   }
-  async function read(query: URLSearchParams) {
+  function read(query: URLSearchParams) {
     client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
     return client.get(`${source.endpoint}?${query}`);
   }
