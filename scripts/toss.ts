@@ -5,7 +5,7 @@ import {
   queryCandleBatch,
   queryCandlePage,
 } from './toss-candles.ts';
-import { payload, TossClient, TossError } from './toss-client.ts';
+import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
 import { orderQuery, orderResult } from './toss-orders.ts';
@@ -168,7 +168,7 @@ try {
   }
   async function read(query: URLSearchParams) {
     client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
-    return payload(await client.get(`${source.endpoint}?${query}`));
+    return client.get(`${source.endpoint}?${query}`);
   }
   async function lookup() {
     if (command === 'account-select') {

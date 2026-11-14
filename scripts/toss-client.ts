@@ -45,11 +45,6 @@ function contains(json: string, values: Set<string>) {
   for (const value of values) if (json.includes(JSON.stringify(value).slice(1, -1))) return true;
   return false;
 }
-export function payload(body: unknown) {
-  if (!body || typeof body !== 'object' || !('result' in body) || 'error' in body)
-    throw new TossError('RESPONSE_INVALID');
-  return body.result;
-}
 function accountId(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -523,7 +518,7 @@ export class TossClient {
     )
       throw new TossError('INPUT_INVALID');
     onSelected(account.alias);
-    const accounts = payload(await this.get('/api/v1/accounts'));
+    const accounts = await this.get('/api/v1/accounts');
     if (
       !Array.isArray(accounts) ||
       accounts.some(
@@ -543,7 +538,7 @@ export class TossClient {
     const matches = accounts.filter((row) => row.accountSeq === account.accountSeq);
     if (!matches.length) throw new TossError('ACCOUNT_SELECTION_REQUIRED');
     if (matches.length !== 1) throw new TossError('RESPONSE_INVALID');
-    const result = parse(payload(await this.request(`${endpoint}?${query}`, account.accountSeq)));
+    const result = parse(await this.request(`${endpoint}?${query}`, account.accountSeq));
     const cursor = result.page?.nextCursor;
     if (typeof cursor !== 'string') return result;
     if (this.accountIdentifiers.has(cursor)) throw new TossError('SENSITIVE_OUTPUT');
@@ -815,7 +810,11 @@ export class TossClient {
           throw error;
         }
         const { response, body } = result;
-        if (response.ok) return body;
+        if (response.ok) {
+          if (!body || typeof body !== 'object' || !('result' in body) || 'error' in body)
+            throw new TossError('RESPONSE_INVALID');
+          return body.result;
+        }
         const error = failure(response, body);
         if (response.status === 401 && error.providerCode === 'expired-token' && !recovered) {
           recovered = true;

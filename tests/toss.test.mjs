@@ -328,6 +328,7 @@ test('Toss CLI distinguishes empty, partial and malformed prices without losing 
     }
     for (const body of [{}, { result: null }, { result: [], error: {} }]) {
       const r = await runCli(f, [{ body }]);
+      assert.equal(r.status, 1, r.stdout);
       assert.equal(JSON.parse(r.stdout).error.code, 'RESPONSE_INVALID');
     }
     const leak = await runCli(
