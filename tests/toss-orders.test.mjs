@@ -69,6 +69,56 @@ function page(command, rows, extra = {}) {
   };
 }
 
+test('regular and conditional order symbol filters reject other securities', async (t) => {
+  for (const [command, row] of [
+    ['orders', order],
+    ['conditional-orders', conditional],
+  ]) {
+    await t.test(command, async () => {
+      const other = { ...row, symbol: 'MSFT' };
+      for (const [rows, status, expected, omissions] of [
+        [[row], 'success', [row], []],
+        [[row, other], 'partial', [row], [{ index: 1, reason: 'invalid_item' }]],
+        [[other], 'error', [], undefined],
+      ]) {
+        const f = fixture();
+        try {
+          const selected = await select(f);
+          assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+          const result = await runCli(
+            f,
+            [accounts, page(command, rows)],
+            [command, 'OPEN', 'symbol=AAPL'],
+          );
+          const output = JSON.parse(result.stdout);
+          assert.equal(
+            result.status,
+            status === 'error' ? 1 : status === 'partial' ? 2 : 0,
+            result.stdout + result.stderr,
+          );
+          assert.equal(output.status, status);
+          assert.deepEqual(output.data, expected);
+          assert.deepEqual(output.omissions, omissions);
+          assert.equal(result.stderr, status === 'error' ? 'RESPONSE_INVALID\n' : '');
+          if (status === 'error') assert.equal(output.error.code, 'RESPONSE_INVALID');
+          assert.equal(result.requests.at(-1).path, `/api/v1/${command}`);
+          assert.equal(
+            result.requests.at(-1).query,
+            command === 'orders' ? '?status=OPEN&symbol=AAPL' : '?status=OPEN&limit=20&symbol=AAPL',
+          );
+          assert.equal(result.requests.at(-1).account, '741');
+          assert.doesNotMatch(
+            result.stdout + result.stderr,
+            /accountSeq|accountNo|99887766554|synthetic-token|synthetic-secret/,
+          );
+        } finally {
+          f.close();
+        }
+      }
+    });
+  }
+});
+
 test('regular and conditional order scopes authorize only their own query', async () => {
   for (const [allowed, denied, row] of [
     ['orders', 'conditional-orders', order],
