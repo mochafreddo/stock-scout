@@ -25,19 +25,25 @@ for (const failure of ['readiness timeout', 'assertion failure'])
         remove();
       }
     };
-    await assert.rejects(
-      async () => {
-        try {
-          await waitForFile(`${gate}.ready`, pending);
+    try {
+      await waitForFile(`${gate}.ready`, pending);
+      await assert.rejects(
+        async () => {
           if (failure === 'readiness timeout')
             await waitForFile(join(f.directory, 'missing.ready'), pending, 20);
           else assert.fail('synthetic assertion failure');
-        } finally {
-          await closeRuns(f, [pending], [gate]);
-        }
-      },
-      { code: 'ERR_ASSERTION' },
-    );
+        },
+        {
+          code: 'ERR_ASSERTION',
+          message:
+            failure === 'readiness timeout'
+              ? `CLI did not create ${join(f.directory, 'missing.ready')}`
+              : 'synthetic assertion failure',
+        },
+      );
+    } finally {
+      await closeRuns(f, [pending], [gate]);
+    }
     assert.equal(reaped, true);
     assert.throws(() => process.kill(pending.child.pid, 0), { code: 'ESRCH' });
     assert.equal(existsSync(f.directory), false);

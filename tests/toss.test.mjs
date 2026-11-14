@@ -756,6 +756,8 @@ test('Toss CLI applies a peer Retry-After while another process is waiting to se
     const cooldown = JSON.parse(readFileSync(published, 'utf8'));
     assert.ok(BigInt(cooldown.clock.nextNs) > BigInt(waiting.nextNs));
     const frozenClock = JSON.parse(readFileSync(sharedClock, 'utf8'));
+    const minimumSendNs = BigInt(frozenClock.nowNs) + 3_000_000_000n;
+    assert.equal(BigInt(cooldown.clock.nextNs), minimumSendNs);
     const runningClock = `${sharedClock}.running`;
     writeFileSync(
       runningClock,
@@ -768,7 +770,7 @@ test('Toss CLI applies a peer Retry-After while another process is waiting to se
     for (const r of results) assert.equal(r.status, 0, r.stdout + r.stderr);
     const requests = readRequests(f.trace);
     for (const r of requests.slice(2))
-      assert.ok(BigInt(r.sharedNs) >= BigInt(cooldown.clock.nextNs), JSON.stringify(requests));
+      assert.ok(BigInt(r.sharedNs) >= minimumSendNs, JSON.stringify(requests));
   } finally {
     await closeRuns(f, runs, [gate, waitGate]);
   }
