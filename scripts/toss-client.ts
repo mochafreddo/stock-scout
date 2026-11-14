@@ -110,7 +110,7 @@ function clockIdentity() {
       const offset = readFileSync('/proc/self/timens_offsets', 'utf8').match(
         /^monotonic[ \t]+(-?\d{1,19})[ \t]+(\d{1,9})[ \t]*$/m,
       );
-      if (!offset || Number(offset[2]) >= 1000000000) throw new TossError('CLOCK_UNCERTAIN');
+      if (!offset) throw new TossError('CLOCK_UNCERTAIN');
       family = `linux-monotonic:${namespace}:${BigInt(offset[1])}:${BigInt(offset[2])}`;
     } else throw new TossError('CLOCK_UNCERTAIN');
     if (
@@ -513,12 +513,8 @@ export class TossClient {
       return operation(state);
     });
   }
-  private reserve(state: State, milliseconds: number) {
-    const now = process.hrtime.bigint();
-    const next = now + BigInt(milliseconds) * 1000000n;
-    state.clock.nextNs = (next > BigInt(state.clock.nextNs) ? next : BigInt(state.clock.nextNs))
-      .toString()
-      .padStart(30, '0');
+  private reserve(state: State) {
+    state.clock.nextNs = (process.hrtime.bigint() + 1000000000n).toString().padStart(30, '0');
     save(this.directory, state);
   }
   private async transmit(path: string, token?: string, account?: string) {
@@ -557,7 +553,7 @@ export class TossClient {
             state.pending = true;
             delete state.token;
           }
-          this.reserve(state, 1000);
+          this.reserve(state);
           try {
             this.check();
           } catch (error) {
@@ -594,7 +590,7 @@ export class TossClient {
                 }),
           });
           void flight.catch(() => {});
-          this.reserve(state, 1000);
+          this.reserve(state);
           return 0;
         });
         if (!delay) break;

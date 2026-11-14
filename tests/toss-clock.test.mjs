@@ -4,7 +4,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { fixture, price, runCli } from './toss-cli-helper.mjs';
+import { fixture, price, readRequests, runCli } from './toss-cli-helper.mjs';
 
 test('v2 reservation with incompatible legacy sentinel remains queryable by the current CLI', async () => {
   const f = fixture();
@@ -290,7 +290,7 @@ test('concurrent response cooldowns preserve the longer wait without serializing
       assert.equal(result.status, 1);
       assert.equal(JSON.parse(result.stdout).error.code, 'TIMEOUT');
     }
-    const sends = results[1].requests;
+    const sends = readRequests(f.trace);
     assert.equal(sends.length, 4);
     const firstResponseSend = sends[2];
     const afterShortWait = BigInt(firstResponseSend.sharedNs) + 75000000000n;
@@ -488,7 +488,8 @@ test('independent CLI processes share actual send spacing during clock correctio
         }),
       ]);
       for (const result of results) assert.equal(result.status, 0, result.stdout + result.stderr);
-      const requests = results.find((result) => result.requests.length === 3).requests;
+      const requests = readRequests(f.trace);
+      assert.equal(requests.length, 3);
       assert.equal(requests.filter((request) => request.method === 'POST').length, 1);
       for (let index = 1; index < requests.length; index++)
         assert.ok(
