@@ -69,6 +69,35 @@ function page(command, rows, extra = {}) {
   };
 }
 
+test('regular and conditional order scopes authorize only their own query', async () => {
+  for (const [allowed, denied, row] of [
+    ['orders', 'conditional-orders', order],
+    ['conditional-orders', 'orders', conditional],
+  ]) {
+    const f = fixture();
+    try {
+      const selected = await select(f, [allowed]);
+      assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+      const rejected = await runCli(f, [], [denied, 'OPEN']);
+      assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+      assert.equal(JSON.parse(rejected.stdout).error.code, 'ACCOUNT_SCOPE_DENIED');
+      assert.equal(rejected.stderr, 'ACCOUNT_SCOPE_DENIED\n');
+      assert.deepEqual(rejected.requests, []);
+      const accepted = await runCli(f, [accounts, page(allowed, [row])], [allowed, 'OPEN']);
+      assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+      assert.equal(accepted.stderr, '');
+      assert.deepEqual(JSON.parse(accepted.stdout).data, [row]);
+      assert.equal(accepted.requests.at(-1).account, '741');
+      assert.doesNotMatch(
+        rejected.stdout + rejected.stderr + accepted.stdout + accepted.stderr,
+        /accountSeq|741|99887766554|synthetic-token|synthetic-secret/,
+      );
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test('orders preserve current state, decimal strings and execution on the selected account', async () => {
   const f = fixture();
   try {

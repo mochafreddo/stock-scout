@@ -23,6 +23,61 @@ const buying = {
   body: { result: { currency: 'USD', cashBuyingPower: '3500.5000' } },
 };
 
+test('only financial requests receive the selected account header, including auth recovery', async () => {
+  const expired = { status: 401, body: { error: { code: 'expired-token' } } };
+  for (const [steps, expected] of [
+    [
+      [accounts, buying],
+      [
+        ['POST', '/oauth2/token', undefined],
+        ['GET', '/api/v1/accounts', undefined],
+        ['GET', '/api/v1/buying-power', '852'],
+      ],
+    ],
+    [
+      [{ ...accounts, ...expired }, accounts, buying],
+      [
+        ['POST', '/oauth2/token', undefined],
+        ['GET', '/api/v1/accounts', undefined],
+        ['POST', '/oauth2/token', undefined],
+        ['GET', '/api/v1/accounts', undefined],
+        ['GET', '/api/v1/buying-power', '852'],
+      ],
+    ],
+    [
+      [accounts, { ...buying, ...expired }, buying],
+      [
+        ['POST', '/oauth2/token', undefined],
+        ['GET', '/api/v1/accounts', undefined],
+        ['GET', '/api/v1/buying-power', '852'],
+        ['POST', '/oauth2/token', undefined],
+        ['GET', '/api/v1/buying-power', '852'],
+      ],
+    ],
+  ]) {
+    const f = fixture();
+    try {
+      const selected = await selection(f, 852, ['buying-power'], 'secondary');
+      assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+      const result = await runCli(f, steps, ['buying-power', 'USD']);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(result.stderr, '');
+      assert.deepEqual(JSON.parse(result.stdout).data, [buying.body.result]);
+      assert.equal(JSON.parse(result.stdout).source.accountAlias, 'secondary');
+      assert.deepEqual(
+        result.requests.map(({ method, path, account }) => [method, path, account]),
+        expected,
+      );
+      assert.doesNotMatch(
+        result.stdout + result.stderr,
+        /741|852|99887766554|11223344556|synthetic-secret|synthetic-token/,
+      );
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test('explicit account selection persists scopes and uses only selected account header', async () => {
   const f = fixture();
   try {
