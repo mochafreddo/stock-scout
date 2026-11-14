@@ -1,8 +1,54 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, price, runCli } from './toss-cli-helper.mjs';
+
+for (const boundary of ['directory', 'worktree-file'])
+  test(`Toss CLI rejects protected authentication storage below a Git ${boundary} boundary before HTTP`, async () => {
+    const f = fixture();
+    try {
+      const repository = join(f.directory, 'repository');
+      const directory = join(repository, 'nested', 'auth');
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      if (boundary === 'directory') mkdirSync(join(repository, '.git'), { mode: 0o700 });
+      else writeFileSync(join(repository, '.git'), 'gitdir: ../git/worktrees/synthetic\n');
+      writeFileSync(
+        join(directory, 'credentials.json'),
+        JSON.stringify({ clientId: 'synthetic-client', clientSecret: 'synthetic-secret' }),
+        { mode: 0o600 },
+      );
+      const rejected = await runCli(f, [], undefined, { TOSS_STATE_DIR: directory });
+      assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+      assert.equal(rejected.stderr, 'AUTH_STORAGE\n');
+      assert.equal(JSON.parse(rejected.stdout).error.code, 'AUTH_STORAGE');
+      assert.equal(rejected.requests.length, 0);
+      assert.equal(existsSync(join(directory, 'state.json')), false);
+      assert.deepEqual(readdirSync(directory), ['credentials.json']);
+      assert.doesNotMatch(rejected.stdout + rejected.stderr, /synthetic-client|synthetic-secret/);
+
+      const outside = await runCli(f, [{ body: { result: [price] } }]);
+      assert.equal(outside.status, 0, outside.stdout + outside.stderr);
+      assert.equal(outside.stderr, '');
+      assert.deepEqual(JSON.parse(outside.stdout).data, [
+        {
+          ...price,
+          priceAge: {
+            seconds: null,
+            thresholdSeconds: 900,
+            exceedsThreshold: null,
+            unavailableReason: 'timestamp_future',
+          },
+        },
+      ]);
+      assert.deepEqual(
+        outside.requests.map((request) => request.path),
+        ['/oauth2/token', '/api/v1/prices'],
+      );
+    } finally {
+      f.close();
+    }
+  });
 
 test('Toss CLI rejects an oversized issued token and preserves unknown issuance for the next execution', async () => {
   const f = fixture();

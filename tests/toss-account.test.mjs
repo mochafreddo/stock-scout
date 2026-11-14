@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, runCli } from './toss-cli-helper.mjs';
@@ -396,9 +396,15 @@ test('KRW buying power rejects fractional won and selection cannot expose cached
     );
     assert.equal(result.status, 1, result.stdout);
     assert.equal(JSON.parse(result.stdout).error.code, 'RESPONSE_INVALID');
+    const preserved = readFileSync(join(f.directory, 'account.json'));
+    writeFileSync(f.trace, '');
     const alias = await selection(f, 741, ['holdings'], 'synthetic-token');
     assert.equal(alias.status, 1);
-    assert.doesNotMatch(alias.stdout, /synthetic-token/);
+    assert.equal(alias.stderr, 'SENSITIVE_OUTPUT\n');
+    assert.equal(JSON.parse(alias.stdout).error.code, 'SENSITIVE_OUTPUT');
+    assert.equal(alias.requests.length, 0);
+    assert.doesNotMatch(alias.stdout + alias.stderr, /synthetic-token/);
+    assert.deepEqual(readFileSync(join(f.directory, 'account.json')), preserved);
     const again = await runCli(f, [accounts, holdings(overview)], ['holdings']);
     assert.equal(JSON.parse(again.stdout).source.accountAlias, 'primary');
   } finally {
@@ -406,16 +412,43 @@ test('KRW buying power rejects fractional won and selection cannot expose cached
   }
 });
 
-test('cached authentication tokens cannot become account aliases', async () => {
-  const f = fixture();
-  try {
-    await selection(f);
-    await runCli(f, [accounts, buying], ['buying-power', 'USD']);
-    const alias = await selection(f, 741, ['holdings'], 'synthetic-token');
-    assert.equal(alias.status, 1);
-    assert.doesNotMatch(alias.stdout, /synthetic-token/);
-  } finally {
-    f.close();
+test('unsafe selection input files are rejected before HTTP and preserve the default account', async () => {
+  for (const boundary of ['permissions', 'symlink']) {
+    const f = fixture();
+    try {
+      const selected = await selection(f);
+      assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+      const preserved = readFileSync(join(f.directory, 'account.json'));
+      const input = join(f.directory, 'replacement.json');
+      writeFileSync(
+        input,
+        JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['holdings'] }),
+        { mode: 0o600 },
+      );
+      let unsafe = input;
+      if (boundary === 'permissions') chmodSync(input, 0o644);
+      else {
+        unsafe = join(f.directory, 'selection-link.json');
+        symlinkSync(input, unsafe);
+      }
+      const rejected = await runCli(f, [], ['account-select', unsafe]);
+      assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+      assert.equal(rejected.stderr, 'ACCOUNT_SELECTION_REQUIRED\n');
+      assert.equal(JSON.parse(rejected.stdout).error.code, 'ACCOUNT_SELECTION_REQUIRED');
+      assert.equal(rejected.requests.length, 0);
+      assert.doesNotMatch(
+        rejected.stdout + rejected.stderr,
+        /741|852|synthetic-secret|synthetic-token/,
+      );
+      assert.deepEqual(readFileSync(join(f.directory, 'account.json')), preserved);
+      const retained = await runCli(f, [accounts, buying], ['buying-power', 'USD']);
+      assert.equal(retained.status, 0, retained.stdout + retained.stderr);
+      assert.equal(retained.stderr, '');
+      assert.equal(retained.requests.at(-1).account, '741');
+      assert.equal(JSON.parse(retained.stdout).source.accountAlias, 'primary');
+    } finally {
+      f.close();
+    }
   }
 });
 
