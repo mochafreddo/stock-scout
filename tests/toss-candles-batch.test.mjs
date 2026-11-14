@@ -498,12 +498,15 @@ test('batch shares a 120-second deadline across requests and truncates the last 
 });
 
 test('batch stops after token issuance or recovery fails and retains nested errors when nothing is usable', async (t) => {
-  for (const auth of [
-    { transport: true },
-    { status: 503, body: {} },
-    { status: 400, body: {} },
-    { status: 429, headers: { 'Retry-After': '3' }, body: {} },
-    { body: { access_token: 'synthetic-token', token_type: 'Bearer', expires_in: 'bad' } },
+  for (const [auth, code] of [
+    [{ transport: true }, 'NETWORK_ERROR'],
+    [{ status: 503, body: {} }, 'UPSTREAM_ERROR'],
+    [{ status: 400, body: {} }, 'INPUT_INVALID'],
+    [{ status: 429, headers: { 'Retry-After': '3' }, body: {} }, 'RATE_LIMIT'],
+    [
+      { body: { access_token: 'synthetic-token', token_type: 'Bearer', expires_in: 'bad' } },
+      'AUTH_RESPONSE_INVALID',
+    ],
   ]) {
     const f = fixture();
     t.after(f.close);
@@ -517,9 +520,10 @@ test('batch stops after token issuance or recovery fails and retains nested erro
       out.data.map(({ status }) => status),
       ['error', 'not_queried'],
     );
-    assert.equal(out.data[1].reason, out.data[0].error.code);
+    assert.equal(out.data[0].error.code, code);
+    assert.equal(out.data[1].reason, code);
     assert.equal(r.requests.length, 1);
-    assert.equal(r.stderr, `${out.data[0].error.code}\n`);
+    assert.equal(r.stderr, `${code}\n`);
     assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
   }
   const f = fixture();
@@ -834,9 +838,22 @@ test('daily batch returns twelve ordered single pages under one shared execution
     'MA',
     'XOM',
   ];
+  const candles = [
+    candle,
+    {
+      timestamp: '2026-11-04T14:00:00+09:00',
+      openPrice: '420.1000',
+      highPrice: '430.2500',
+      lowPrice: '410.0000',
+      closePrice: '425.5000',
+      volume: '12345',
+      currency: 'USD',
+    },
+    ...symbols.slice(2).map(() => candle),
+  ];
   const r = await runCli(
     f,
-    symbols.map(() => page()),
+    candles.map((value) => page([value])),
     ['candles-batch', symbols.join(',')],
   );
   const out = JSON.parse(r.stdout);
@@ -850,17 +867,39 @@ test('daily batch returns twelve ordered single pages under one shared execution
     symbols,
   );
   assert.equal(out.data.length, 12);
-  for (const row of out.data) {
+  for (const [index, row] of out.data.entries()) {
+    const symbol = symbols[index];
+    const expectedCandle = candles[index];
+    assert.equal(row.symbol, symbol);
     assert.equal(row.status, 'success');
-    assert.deepEqual(row.data, [{ ...candle, completion: 'unknown', inProgress: 'unknown' }]);
+    assert.deepEqual(row.data, [
+      { ...expectedCandle, completion: 'unknown', inProgress: 'unknown' },
+    ]);
     assert.deepEqual(row.page, { nextBefore: null });
     assert.deepEqual(row.omissions, []);
-    assert.equal(row.source.symbol, row.symbol);
-    assert.equal(row.source.provider, 'tossinvest');
-    assert.equal(row.source.endpoint, '/api/v1/candles');
-    assert.equal(row.source.interval, '1d');
-    assert.equal(row.source.count, 100);
-    assert.equal(row.source.adjusted, true);
+    assert.deepEqual(row.source, {
+      provider: 'tossinvest',
+      endpoint: '/api/v1/candles',
+      freshness: 'unknown',
+      symbol,
+      interval: '1d',
+      count: 100,
+      adjusted: true,
+      originalPricesGuaranteed: false,
+      priceUnit: 'currency_per_security',
+      volumeUnit: 'securities',
+      timestampMeaning: 'trade_date_local_midnight',
+      usSessionSemantics: {
+        ohlc: 'regular',
+        volume: 'consolidated_including_extended_hours',
+      },
+    });
+    assert.deepEqual(row.summary, {
+      returnedCount: 1,
+      latestTimestamp: expectedCandle.timestamp,
+      latestTradeDate: null,
+      tradeDateUnavailableReason: 'market_timezone_unconfirmed',
+    });
     assert.ok(Number.isFinite(Date.parse(row.retrievedAt)));
   }
   assert.equal(r.requests.length, 13);

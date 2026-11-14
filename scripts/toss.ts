@@ -29,7 +29,12 @@ function errorDetail(error: unknown) {
       ? { providerCode: error.providerCode, requestId: error.requestId }
       : {}),
   };
-  if (client?.containsAccountIdentifier(JSON.stringify(detail))) detail = { code };
+  for (const field of ['choices', 'providerCode', 'requestId'] as const)
+    if (
+      detail[field] !== undefined &&
+      client?.containsAccountIdentifier(JSON.stringify(detail[field]))
+    )
+      delete detail[field];
   if (client?.containsSecret(JSON.stringify(detail))) detail = { code: 'SENSITIVE_OUTPUT' };
   return detail;
 }

@@ -131,6 +131,41 @@ const overview = {
 };
 const holdings = (result) => ({ path: '/api/v1/holdings', body: { result } });
 
+test('holdings symbol filter rejects other securities while preserving usable summaries', async () => {
+  const other = { ...holding, symbol: 'MSFT', name: 'Microsoft' };
+  for (const [rows, expected, omissions] of [
+    [[holding], [holding], []],
+    [[other, holding], [holding], [{ index: 0, reason: 'invalid_item' }]],
+    [[other], [], [{ index: 0, reason: 'invalid_item' }]],
+  ]) {
+    const f = fixture();
+    try {
+      const selected = await selection(f);
+      assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+      const result = await runCli(
+        f,
+        [accounts, holdings({ ...overview, items: rows })],
+        ['holdings', 'AAPL'],
+      );
+      const output = JSON.parse(result.stdout);
+      assert.equal(result.status, omissions.length ? 2 : 0, result.stdout + result.stderr);
+      assert.equal(result.stderr, '');
+      assert.equal(output.status, omissions.length ? 'partial' : 'success');
+      assert.deepEqual(output.data, [{ ...overview, items: expected }]);
+      assert.deepEqual(output.omissions, omissions);
+      assert.equal(result.requests.at(-1).path, '/api/v1/holdings');
+      assert.equal(result.requests.at(-1).query, '?symbol=AAPL');
+      assert.equal(result.requests.at(-1).account, '741');
+      assert.doesNotMatch(
+        result.stdout + result.stderr,
+        /accountSeq|accountNo|99887766554|11223344556|synthetic-secret|synthetic-token/,
+      );
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test('holdings preserves official monetary fields and filters unknown identifiers', async () => {
   const f = fixture();
   try {
@@ -409,8 +444,82 @@ test('account identifiers in provider error metadata are redacted while financia
       [accounts, { ...buying, status: 403, body: { error: { code: 'denied', requestId: '741' } } }],
       ['buying-power', 'USD'],
     );
-    assert.equal(JSON.parse(result.stdout).error.code, 'PERMISSION_DENIED');
-    assert.doesNotMatch(result.stdout, /741/);
+    assert.deepEqual(JSON.parse(result.stdout).error, {
+      code: 'PERMISSION_DENIED',
+      providerCode: 'denied',
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr, 'PERMISSION_DENIED\n');
+    assert.doesNotMatch(result.stdout + result.stderr, /741/);
+    for (const [metadata, expected] of [
+      [{ code: 'account-741', requestId: 'SAFE_REQUEST' }, { requestId: 'SAFE_REQUEST' }],
+      [
+        { code: 'denied', requestId: 'SAFE_REQUEST' },
+        { providerCode: 'denied', requestId: 'SAFE_REQUEST' },
+      ],
+      [{ code: 'account-852', requestId: 'REQ-741' }, {}],
+      [{ requestId: 'SAFE_REQUEST' }, { requestId: 'SAFE_REQUEST' }],
+      [{ code: 'denied' }, { providerCode: 'denied' }],
+      [{ requestId: 'REQ-741' }, {}],
+      [{ code: 'account-852' }, {}],
+      [{}, {}],
+    ]) {
+      const failed = await runCli(
+        f,
+        [
+          accounts,
+          {
+            ...buying,
+            status: 403,
+            body: { error: { ...metadata, message: 'private-response-body' } },
+          },
+        ],
+        ['buying-power', 'USD'],
+      );
+      assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+      assert.equal(failed.stderr, 'PERMISSION_DENIED\n');
+      assert.deepEqual(JSON.parse(failed.stdout).error, { code: 'PERMISSION_DENIED', ...expected });
+      assert.deepEqual(JSON.parse(failed.stdout).data, []);
+      assert.equal(failed.requests.at(-1).account, '741');
+      assert.equal(failed.requests.at(-1).path, '/api/v1/buying-power');
+      assert.doesNotMatch(
+        failed.stdout + failed.stderr,
+        /741|852|99887766554|11223344556|synthetic-(client|secret|token)|private-response-body/,
+      );
+    }
+    for (const secret of [
+      'synthetic-client',
+      'synthetic-secret',
+      'synthetic-token',
+      'account-99887766554',
+      'account-11223344556',
+    ]) {
+      for (const metadata of [
+        { code: secret, requestId: 'SAFE_REQUEST' },
+        { code: 'denied', requestId: secret },
+      ]) {
+        const failed = await runCli(
+          f,
+          [
+            accounts,
+            {
+              ...buying,
+              status: 403,
+              body: { error: { ...metadata, message: 'private-response-body' } },
+            },
+          ],
+          ['buying-power', 'USD'],
+        );
+        assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+        assert.equal(failed.stderr, 'SENSITIVE_OUTPUT\n');
+        assert.deepEqual(JSON.parse(failed.stdout).error, { code: 'SENSITIVE_OUTPUT' });
+        assert.deepEqual(JSON.parse(failed.stdout).data, []);
+        assert.doesNotMatch(
+          failed.stdout + failed.stderr,
+          /741|852|99887766554|11223344556|synthetic-(client|secret|token)|private-response-body/,
+        );
+      }
+    }
     const financial = await runCli(
       f,
       [accounts, { ...buying, body: { result: { currency: 'USD', cashBuyingPower: '741' } } }],
