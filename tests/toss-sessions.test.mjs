@@ -22,10 +22,13 @@ const calendar = {
   previousBusinessDay: closed('2026-03-24'),
   nextBusinessDay: closed('2026-03-26'),
 };
-const sessionSource = {
+const baseSource = {
   provider: 'tossinvest',
   endpoint: '/api/v1/market-calendar/US',
   freshness: 'unknown',
+};
+const sessionSource = {
+  ...baseSource,
   date: day.date,
   dateTimeZone: 'America/New_York',
   sessionTimeZone: 'Asia/Seoul',
@@ -365,35 +368,21 @@ test('session inputs and source attribution precede missing authentication stora
   const f = fixture();
   t.after(f.close);
   const extra = { TOSS_STATE_DIR: join(f.directory, 'missing') };
-  for (const args of [
-    ['sessions', '2026-02-29'],
-    ['sessions', day.date, 'extra'],
-    ['constraints', 'AAPL'],
-    ['constraints', 'AAPL,MSFT', day.date],
+  for (const [args, code, source] of [
+    [['sessions', '2026-02-29'], 'INPUT_INVALID', baseSource],
+    [['sessions', day.date, 'extra'], 'INPUT_INVALID', baseSource],
+    [['constraints', 'AAPL'], 'INPUT_INVALID', baseSource],
+    [['constraints', 'AAPL,MSFT', day.date], 'INPUT_INVALID', baseSource],
+    [['sessions', day.date], 'AUTH_STORAGE', sessionSource],
+    [['constraints', 'AAPL', day.date], 'AUTH_STORAGE', constraintSource],
   ]) {
     const r = await runCli(f, [], args, extra);
     const out = JSON.parse(r.stdout);
     assert.equal(r.status, 1, r.stdout);
-    assert.deepEqual(out.error, { code: 'INPUT_INVALID' });
-    assert.equal(r.stderr, 'INPUT_INVALID\n');
+    assert.deepEqual(out.error, { code });
+    assert.equal(r.stderr, `${code}\n`);
     assert.deepEqual(r.requests, []);
-    assert.deepEqual(out.source, {
-      provider: 'tossinvest',
-      endpoint: '/api/v1/market-calendar/US',
-      freshness: 'unknown',
-    });
-  }
-  for (const args of [
-    ['sessions', day.date],
-    ['constraints', 'AAPL', day.date],
-  ]) {
-    const r = await runCli(f, [], args, extra);
-    const out = JSON.parse(r.stdout);
-    assert.equal(r.status, 1, r.stdout);
-    assert.deepEqual(out.error, { code: 'AUTH_STORAGE' });
-    assert.equal(r.stderr, 'AUTH_STORAGE\n');
-    assert.deepEqual(r.requests, []);
-    assert.deepEqual(out.source, args[0] === 'constraints' ? constraintSource : sessionSource);
+    assert.deepEqual(out.source, source);
   }
 });
 
