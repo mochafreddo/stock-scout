@@ -253,12 +253,7 @@ class SharedRequestCoordinator {
   withTokenIssuance(operation: () => Promise<string>) {
     return withLock(this.directory, 'issuance.lock', this.check, this.wait, operation);
   }
-  selectToken(
-    select: (
-      token: Readonly<{ value: string; expiresAt: number }> | undefined,
-      pending: boolean,
-    ) => string | undefined,
-  ) {
+  selectToken(select: (token: Readonly<State['token']>, pending: boolean) => string | undefined) {
     return this.locked(async (state) =>
       select(state.token ? { ...state.token } : undefined, state.pending),
     );
