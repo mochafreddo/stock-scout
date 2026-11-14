@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import test from 'node:test';
-import { fixture } from './toss-cli-helper.mjs';
+import { fixture, runCli } from './toss-cli-helper.mjs';
 
 function run(...args) {
   return spawnSync(process.execPath, ['tests/toss-agent-cli.mjs', ...args], {
@@ -19,6 +20,89 @@ function consume(result) {
     env: { PATH: process.env.PATH },
   });
 }
+
+test('consumer preserves early daily input errors without candle source metadata', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  for (const args of [
+    ['candles', 'DEMO/', '1d'],
+    ['candles-batch', 'DEMO/'],
+  ]) {
+    const result = await runCli(f, [], args);
+    assert.equal(result.status, 1, result.stderr);
+    const original = JSON.parse(result.stdout);
+    assert.equal(original.source.interval, undefined);
+    assert.deepEqual(original.error, { code: 'INPUT_INVALID' });
+    assert.deepEqual(result.requests, []);
+    const consumed = consume(result);
+    assert.equal(consumed.status, 0, consumed.stderr);
+    assert.deepEqual(JSON.parse(consumed.stdout), {
+      status: 'error',
+      data: [],
+      error: { code: 'INPUT_INVALID' },
+    });
+  }
+});
+
+test('consumer preserves isolated daily authentication storage failures', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  for (const args of [
+    ['candles', 'DEMO', '1d'],
+    ['candles-batch', 'DEMO,LATER'],
+  ]) {
+    const result = await runCli(f, [], args, { TOSS_STATE_DIR: join(f.directory, 'missing') });
+    assert.equal(result.status, 1, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).error, { code: 'AUTH_STORAGE' });
+    assert.deepEqual(result.requests, []);
+    const consumed = consume(result);
+    assert.equal(consumed.status, 0, consumed.stderr);
+    const output = JSON.parse(consumed.stdout);
+    assert.equal(output.status, 'error');
+    assert.deepEqual(output.error, { code: 'AUTH_STORAGE' });
+    assert.ok(output.data.every((row) => row.analysis === null && row.bars.length === 0));
+  }
+});
+
+test('consumer forwards only CLI-safe provider error details', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const result = await runCli(
+    f,
+    [
+      {
+        path: '/api/v1/candles',
+        status: 403,
+        body: {
+          error: {
+            code: 'ip-not-allowed',
+            requestId: 'SAFE_REQUEST_312',
+            message: 'private upstream message synthetic-secret synthetic-token',
+          },
+          privateBody: 'private upstream body',
+        },
+      },
+    ],
+    ['candles', 'DEMO', '1d'],
+  );
+  assert.equal(result.status, 1, result.stderr);
+  const expected = {
+    code: 'PERMISSION_DENIED',
+    providerCode: 'ip-not-allowed',
+    requestId: 'SAFE_REQUEST_312',
+  };
+  assert.deepEqual(JSON.parse(result.stdout).error, expected);
+  const consumed = consume(result);
+  assert.equal(consumed.status, 0, consumed.stderr);
+  const output = JSON.parse(consumed.stdout);
+  assert.equal(output.status, 'error');
+  assert.deepEqual(output.error, expected);
+  assert.deepEqual(output.data[0].error, expected);
+  assert.doesNotMatch(
+    result.stdout + result.stderr + consumed.stdout + consumed.stderr,
+    /private upstream|synthetic-(secret|token|client)/,
+  );
+});
 
 test('daily synthetic stdout runs through the executable analysis consumer', () => {
   const result = run('success', 'candles', 'DEMO', '1d', 'date=2026-11-05', 'count=3');
