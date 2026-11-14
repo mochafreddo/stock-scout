@@ -24,7 +24,7 @@ flowchart TD
 | 모듈 | 책임 | 주요 검사 |
 | --- | --- | --- |
 | [toss.ts](../scripts/toss.ts) | 명령 발견·분기, 출처·결과 조립, 중단 신호와 안전한 오류 출력 | [공통 CLI](../tests/toss.test.mjs), [에이전트 소비](../tests/toss-agent-cli.test.mjs) |
-| [toss-client.ts](../scripts/toss-client.ts) | 보호 상태, 토큰 발급·복구, 계좌 선택·범위, 커서 문맥, HTTP·한도·잠금 | [공통 CLI](../tests/toss.test.mjs), [시계](../tests/toss-clock.test.mjs), [응답·상태 크기](../tests/toss-auth-size.test.mjs), 계좌·주문 검사 |
+| [toss-client.ts](../scripts/toss-client.ts) | 토큰 발급·복구 판단, 계좌 선택·범위, 커서 문맥, HTTP·실행 예산과 내부 공유 요청 조정 | [공통 CLI](../tests/toss.test.mjs), [시계](../tests/toss-clock.test.mjs), [응답·상태 크기](../tests/toss-auth-size.test.mjs), 계좌·주문 검사 |
 | [toss-values.ts](../scripts/toss-values.ts) | 소수 문자열·시각·객체·심볼 검증과 유효 항목/누락 분류 | 명령별 공개 CLI 검사 |
 | [toss-stock.ts](../scripts/toss-stock.ts) | 종목 식별과 모호한 후보의 선택 요구 | [종목](../tests/toss-stock.test.mjs) |
 | [toss-discovery.ts](../scripts/toss-discovery.ts) | 순위와 거래 가능 종목 목록의 조건·집계 범위 | [탐색](../tests/toss-discovery.test.mjs) |
@@ -42,6 +42,8 @@ flowchart TD
 
 각 CLI 프로세스는 자신의 `TossClient`와 실행 예산을 가진다. 같은 보호 디렉터리를 쓰는 프로세스들은 디스크의 인증·호출 간격 상태를 공유한다. 상주 서버나 별도 요청 큐는 없다.
 
+`toss-client.ts` 내부의 공유 요청 조정 모듈은 인증·호출 간격 상태의 읽기·쓰기, 발급 잠금, 전송 시작과 예약, 공급자 대기 기록의 게시·병합을 소유한다. `TossClient`는 인증·호출 간격의 원시 공유 상태나 해당 잠금 이름을 다루지 않고, 토큰 발급 필요 여부·응답 검증·재시도와 실행 예산을 판단한다. 계좌 선택과 계좌 잠금은 기존 클라이언트 책임이다.
+
 `TossClient`는 `TOSS_STATE_DIR`의 절대·정규 경로, 저장소 밖 위치, 디렉터리·파일 소유자와 권한을 확인한다. 파일 이름과 준비·복구 절차는 [보호 상태 계약](toss-cli.md)에 있다. 실제 비밀값이나 개인별 저장 위치를 이 문서에 기록하지 않는다.
 
 | 잠금 | 보호하는 작업 |
@@ -49,6 +51,8 @@ flowchart TD
 | `issuance.lock` | 토큰 재확인과 필요한 발급·명시적 만료 복구 |
 | `client.lock` | 상태 읽기·쓰기, 공유 호출 간격 예약, 다음 예약에 적용할 공급자 대기 기록 병합 |
 | `account.lock` | 명시적인 기본 계좌 선택 저장 |
+
+공유 요청 조정은 짧은 호출 잠금 안에서 예약을 저장하고 실제 전송을 시작한 뒤 예약을 다시 저장한다. 응답을 기다리는 동안에는 호출 잠금을 유지하지 않는다. 응답 헤더에서 얻은 공급자 대기 기록은 요청 시간 초과를 검사하기 전에 게시하며, 병합한 공유 상태를 저장한 뒤에만 개별 기록을 삭제한다.
 
 상태 저장은 새 임시 파일에 기록하고 동기화한 뒤 이름을 교체하는 방식이다. 응답별 공급자 대기 파일은 잠금 밖에서 게시하며 다음 잠금 소유자가 공유 상태에 병합한다. 발급 요청을 보내기 전에 `pending`을 기록하며, 발급 결과가 불명확하면 자동 재발급하지 않는다. 비정상 종료로 남은 잠금도 자동 삭제하지 않는다. 저장소 밖 파일이므로 Git 복원으로 복구할 수 없으며, 복구 전 실행 종료와 기존 상태 보존을 확인해야 한다.
 

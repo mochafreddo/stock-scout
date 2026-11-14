@@ -197,6 +197,205 @@ function save(
     throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
   }
 }
+async function withLock<T>(
+  directory: string,
+  name: string,
+  check: () => void,
+  wait: (milliseconds: number) => Promise<void>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const lock = join(directory, name);
+  try {
+    for (;;) {
+      check();
+      try {
+        mkdirSync(lock, { mode: 0o700 });
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        await wait(25);
+      }
+    }
+    try {
+      return await operation();
+    } finally {
+      rmdirSync(lock);
+    }
+  } catch (error) {
+    throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
+  }
+}
+
+class SharedRequestCoordinator {
+  private readonly directory: string;
+  private readonly fingerprint: string;
+  private readonly clockId: string;
+  private readonly check: () => void;
+  private readonly wait: (milliseconds: number) => Promise<void>;
+  private readonly observeToken: (token: string) => void;
+  constructor(
+    directory: string,
+    fingerprint: string,
+    check: () => void,
+    wait: (milliseconds: number) => Promise<void>,
+    observeToken: (token: string) => void,
+  ) {
+    this.directory = directory;
+    this.fingerprint = fingerprint;
+    this.clockId = clockIdentity();
+    this.check = check;
+    this.wait = wait;
+    this.observeToken = observeToken;
+  }
+  validateForAccountSelection() {
+    this.load();
+  }
+  withTokenIssuance(operation: () => Promise<string>) {
+    return withLock(this.directory, 'issuance.lock', this.check, this.wait, operation);
+  }
+  selectToken(
+    select: (
+      token: Readonly<{ value: string; expiresAt: number }> | undefined,
+      pending: boolean,
+    ) => string | undefined,
+  ) {
+    return this.locked(async (state) =>
+      select(state.token ? { ...state.token } : undefined, state.pending),
+    );
+  }
+  recordRejectedIssuance() {
+    return this.locked(async (state) => {
+      state.pending = false;
+      save(this.directory, state);
+    });
+  }
+  recordIssuedToken(value: string, expiresAt: number) {
+    return this.locked(async (state) => {
+      state.token = { value, expiresAt };
+      state.pending = false;
+      save(this.directory, state, 'state.json', 'AUTH_RESPONSE_INVALID');
+    });
+  }
+  async startRequest(issuingToken: boolean, checkRequestLimit: () => void, startFetch: () => void) {
+    for (;;) {
+      this.check();
+      const delay = await this.locked(async (state) => {
+        this.check();
+        const delay = Number(BigInt(state.clock.nextNs) - process.hrtime.bigint()) / 1000000;
+        if (delay > 0) return delay;
+        checkRequestLimit();
+        const previousToken = state.token;
+        const previousPending = state.pending;
+        if (issuingToken) {
+          state.pending = true;
+          delete state.token;
+        }
+        this.reserve(state);
+        try {
+          this.check();
+        } catch (error) {
+          if (issuingToken) {
+            state.pending = previousPending;
+            state.token = previousToken;
+            save(this.directory, state);
+          }
+          throw error;
+        }
+        startFetch();
+        this.reserve(state);
+        return 0;
+      });
+      if (!delay) return;
+      await this.wait(delay);
+    }
+  }
+  publishCooldown(milliseconds: number) {
+    save(
+      this.directory,
+      {
+        fingerprint: this.fingerprint,
+        clock: {
+          id: this.clockId,
+          nextNs: (process.hrtime.bigint() + BigInt(milliseconds) * 1000000n)
+            .toString()
+            .padStart(30, '0'),
+        },
+      },
+      `cooldown-${randomUUID()}.json`,
+    );
+  }
+  private load(): State {
+    const path = join(this.directory, 'state.json');
+    try {
+      secure(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+        return {
+          fingerprint: this.fingerprint,
+          version: 2,
+          nextAt: null,
+          clock: { id: this.clockId, nextNs: '0'.repeat(30) },
+          pending: false,
+        };
+      throw error;
+    }
+    const state = read(path);
+    if (
+      !state ||
+      state.fingerprint !== this.fingerprint ||
+      typeof state.pending !== 'boolean' ||
+      (state.token !== undefined &&
+        (typeof state.token?.value !== 'string' ||
+          !/^[A-Za-z0-9._~+/-]+=*$/.test(state.token.value) ||
+          !Number.isFinite(state.token.expiresAt)))
+    )
+      throw new TossError('AUTH_STORAGE');
+    if (state.version === undefined && Number.isFinite(state.nextAt) && state.nextAt >= 0)
+      throw new TossError('AUTH_STATE_TRANSITION_REQUIRED');
+    if (
+      state.version !== 2 ||
+      state.nextAt !== null ||
+      typeof state.clock?.id !== 'string' ||
+      typeof state.clock?.nextNs !== 'string' ||
+      !/^\d{30}$/.test(state.clock.nextNs)
+    )
+      throw new TossError('AUTH_STORAGE');
+    if (state.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
+    if (state.token) this.observeToken(state.token.value);
+    return state;
+  }
+  private locked<T>(operation: (state: State) => Promise<T>) {
+    return withLock(this.directory, 'client.lock', this.check, this.wait, () => {
+      const state = this.load();
+      const records = readdirSync(this.directory).filter((name) =>
+        /^cooldown-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/.test(name),
+      );
+      for (const name of records) {
+        const record = read(join(this.directory, name));
+        if (
+          record?.fingerprint !== this.fingerprint ||
+          typeof record.clock?.id !== 'string' ||
+          typeof record.clock?.nextNs !== 'string' ||
+          !/^\d{30}$/.test(record.clock.nextNs)
+        )
+          throw new TossError('AUTH_STORAGE');
+        if (record.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
+        if (BigInt(record.clock.nextNs) > BigInt(state.clock.nextNs))
+          state.clock.nextNs = record.clock.nextNs;
+      }
+      if (records.length) {
+        save(this.directory, state);
+        for (const name of records) unlinkSync(join(this.directory, name));
+      }
+      return operation(state);
+    });
+  }
+  private reserve(state: State) {
+    state.clock.nextNs = (process.hrtime.bigint() + 1000000000n).toString().padStart(30, '0');
+    save(this.directory, state);
+  }
+}
+
 function failure(response: Response, body: unknown) {
   const envelope = body && typeof body === 'object' && 'error' in body ? body.error : undefined;
   const raw =
@@ -241,7 +440,7 @@ export class TossClient {
   private readonly startedWall = Date.now();
   private readonly started = performance.now();
   private readonly startedShared = process.hrtime.bigint();
-  private readonly clockId: string;
+  private readonly coordination: SharedRequestCoordinator;
   private readonly timeout: number;
   private readonly maxRequests: number;
   private requests = 0;
@@ -277,7 +476,13 @@ export class TossClient {
         .update(JSON.stringify([this.clientId, this.clientSecret]))
         .digest('hex');
       this.secrets.add(this.clientId).add(this.clientSecret);
-      this.clockId = clockIdentity();
+      this.coordination = new SharedRequestCoordinator(
+        directory,
+        this.fingerprint,
+        () => this.check(),
+        (milliseconds) => this.wait(milliseconds),
+        (token) => this.secrets.add(token),
+      );
     } catch (error) {
       throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
     }
@@ -289,12 +494,18 @@ export class TossClient {
     } catch {
       throw new TossError('ACCOUNT_SELECTION_REQUIRED');
     }
-    this.load();
+    this.coordination.validateForAccountSelection();
     for (const secret of this.secrets)
       if (selected.alias.includes(secret)) throw new TossError('SENSITIVE_OUTPUT');
-    await this.withLock('account.lock', async () => {
-      save(this.directory, { ...selected, fingerprint: this.fingerprint }, 'account.json');
-    });
+    await withLock(
+      this.directory,
+      'account.lock',
+      () => this.check(),
+      (milliseconds) => this.wait(milliseconds),
+      async () => {
+        save(this.directory, { ...selected, fingerprint: this.fingerprint }, 'account.json');
+      },
+    );
     return { alias: selected.alias, scopes: selected.scopes };
   }
   containsSecret(json: string) {
@@ -425,98 +636,6 @@ export class TossClient {
     });
     this.check();
   }
-  private load(): State {
-    const path = join(this.directory, 'state.json');
-    try {
-      secure(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-        return {
-          fingerprint: this.fingerprint,
-          version: 2,
-          nextAt: null,
-          clock: { id: this.clockId, nextNs: '0'.repeat(30) },
-          pending: false,
-        };
-      throw error;
-    }
-    const state = read(path);
-    if (
-      !state ||
-      state.fingerprint !== this.fingerprint ||
-      typeof state.pending !== 'boolean' ||
-      (state.token !== undefined &&
-        (typeof state.token?.value !== 'string' ||
-          !/^[A-Za-z0-9._~+/-]+=*$/.test(state.token.value) ||
-          !Number.isFinite(state.token.expiresAt)))
-    )
-      throw new TossError('AUTH_STORAGE');
-    if (state.version === undefined && Number.isFinite(state.nextAt) && state.nextAt >= 0)
-      throw new TossError('AUTH_STATE_TRANSITION_REQUIRED');
-    if (
-      state.version !== 2 ||
-      state.nextAt !== null ||
-      typeof state.clock?.id !== 'string' ||
-      typeof state.clock?.nextNs !== 'string' ||
-      !/^\d{30}$/.test(state.clock.nextNs)
-    )
-      throw new TossError('AUTH_STORAGE');
-    if (state.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
-    if (state.token) this.secrets.add(state.token.value);
-    return state;
-  }
-  private async withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
-    const lock = join(this.directory, name);
-    try {
-      for (;;) {
-        this.check();
-        try {
-          mkdirSync(lock, { mode: 0o700 });
-          break;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-          await this.wait(25);
-        }
-      }
-      try {
-        return await operation();
-      } finally {
-        rmdirSync(lock);
-      }
-    } catch (error) {
-      throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
-    }
-  }
-  private locked<T>(operation: (state: State) => Promise<T>) {
-    return this.withLock('client.lock', () => {
-      const state = this.load();
-      const records = readdirSync(this.directory).filter((name) =>
-        /^cooldown-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/.test(name),
-      );
-      for (const name of records) {
-        const record = read(join(this.directory, name));
-        if (
-          record?.fingerprint !== this.fingerprint ||
-          typeof record.clock?.id !== 'string' ||
-          typeof record.clock?.nextNs !== 'string' ||
-          !/^\d{30}$/.test(record.clock.nextNs)
-        )
-          throw new TossError('AUTH_STORAGE');
-        if (record.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
-        if (BigInt(record.clock.nextNs) > BigInt(state.clock.nextNs))
-          state.clock.nextNs = record.clock.nextNs;
-      }
-      if (records.length) {
-        save(this.directory, state);
-        for (const name of records) unlinkSync(join(this.directory, name));
-      }
-      return operation(state);
-    });
-  }
-  private reserve(state: State) {
-    state.clock.nextNs = (process.hrtime.bigint() + 1000000000n).toString().padStart(30, '0');
-    save(this.directory, state);
-  }
   private async transmit(path: string, token?: string, account?: string) {
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, this.signal]);
@@ -540,30 +659,12 @@ export class TossClient {
         throw new TossError('TIMEOUT');
     };
     try {
-      for (;;) {
-        this.check();
-        const delay = await this.locked(async (state) => {
-          this.check();
-          const delay = Number(BigInt(state.clock.nextNs) - process.hrtime.bigint()) / 1000000;
-          if (delay > 0) return delay;
+      await this.coordination.startRequest(
+        !token,
+        () => {
           if (this.requests >= this.maxRequests) throw new TossError('REQUEST_LIMIT');
-          const previousToken = state.token;
-          const previousPending = state.pending;
-          if (!token) {
-            state.pending = true;
-            delete state.token;
-          }
-          this.reserve(state);
-          try {
-            this.check();
-          } catch (error) {
-            if (!token) {
-              state.pending = previousPending;
-              state.token = previousToken;
-              save(this.directory, state);
-            }
-            throw error;
-          }
+        },
+        () => {
           this.requests++;
           requestWall = Date.now();
           requestStarted = performance.now();
@@ -590,12 +691,8 @@ export class TossClient {
                 }),
           });
           void flight.catch(() => {});
-          this.reserve(state);
-          return 0;
-        });
-        if (!delay) break;
-        await this.wait(delay);
-      }
+        },
+      );
       const result = await Promise.race([
         deadline,
         (async () => {
@@ -610,20 +707,7 @@ export class TossClient {
           );
           if (!Number.isSafeInteger(Math.ceil(seconds * 1000)))
             throw new TossError('RESPONSE_INVALID');
-          if (seconds)
-            save(
-              this.directory,
-              {
-                fingerprint: this.fingerprint,
-                clock: {
-                  id: this.clockId,
-                  nextNs: (process.hrtime.bigint() + BigInt(Math.ceil(seconds * 1000)) * 1000000n)
-                    .toString()
-                    .padStart(30, '0'),
-                },
-              },
-              `cooldown-${randomUUID()}.json`,
-            );
+          if (seconds) this.coordination.publishCooldown(Math.ceil(seconds * 1000));
           checkRequest();
           const reader = response.body?.getReader();
           const chunks: Uint8Array[] = [];
@@ -672,56 +756,47 @@ export class TossClient {
     }
   }
   private async token(rejected?: string): Promise<string> {
-    return this.withLock('issuance.lock', async () => {
-      const cached = await this.locked(async (state) => {
+    return this.coordination
+      .withTokenIssuance(async () => {
+        const cached = await this.coordination.selectToken((token, pending) => {
+          if (token && token.value !== rejected && token.expiresAt > Date.now() + 15000)
+            return token.value;
+          if (pending) throw new TossError('AUTH_ISSUANCE_UNKNOWN');
+          return undefined;
+        });
+        if (cached) return cached;
+        const issuedAt = Date.now();
+        const { response, body } = await this.transmit('/oauth2/token');
+        if (!response.ok) {
+          if (response.status >= 400 && response.status < 500)
+            await this.coordination.recordRejectedIssuance();
+          throw failure(response, body);
+        }
         if (
-          state.token &&
-          state.token.value !== rejected &&
-          state.token.expiresAt > Date.now() + 15000
+          !body ||
+          typeof body !== 'object' ||
+          !('access_token' in body) ||
+          !('token_type' in body) ||
+          !('expires_in' in body) ||
+          typeof body.expires_in !== 'number' ||
+          typeof body.access_token !== 'string' ||
+          !/^[A-Za-z0-9._~+/-]+=*$/.test(body.access_token) ||
+          body.token_type !== 'Bearer' ||
+          !Number.isSafeInteger(body.expires_in) ||
+          body.expires_in <= 0 ||
+          !Number.isSafeInteger(issuedAt + body.expires_in * 1000)
         )
-          return state.token.value;
-        if (state.pending) throw new TossError('AUTH_ISSUANCE_UNKNOWN');
-        return undefined;
+          throw new TossError('AUTH_RESPONSE_INVALID');
+        const token = body.access_token;
+        const expiresAt = issuedAt + body.expires_in * 1000;
+        this.secrets.add(token);
+        await this.coordination.recordIssuedToken(token, expiresAt);
+        return token;
+      })
+      .catch((error: TossError) => {
+        this.stopped = error;
+        throw error;
       });
-      if (cached) return cached;
-      const issuedAt = Date.now();
-      const { response, body } = await this.transmit('/oauth2/token');
-      if (!response.ok) {
-        if (response.status >= 400 && response.status < 500)
-          await this.locked(async (state) => {
-            state.pending = false;
-            save(this.directory, state);
-          });
-        throw failure(response, body);
-      }
-      if (
-        !body ||
-        typeof body !== 'object' ||
-        !('access_token' in body) ||
-        !('token_type' in body) ||
-        !('expires_in' in body) ||
-        typeof body.expires_in !== 'number' ||
-        typeof body.access_token !== 'string' ||
-        !/^[A-Za-z0-9._~+/-]+=*$/.test(body.access_token) ||
-        body.token_type !== 'Bearer' ||
-        !Number.isSafeInteger(body.expires_in) ||
-        body.expires_in <= 0 ||
-        !Number.isSafeInteger(issuedAt + body.expires_in * 1000)
-      )
-        throw new TossError('AUTH_RESPONSE_INVALID');
-      const token = body.access_token;
-      const expiresAt = issuedAt + body.expires_in * 1000;
-      this.secrets.add(token);
-      await this.locked(async (state) => {
-        state.token = { value: token, expiresAt };
-        state.pending = false;
-        save(this.directory, state, 'state.json', 'AUTH_RESPONSE_INVALID');
-      });
-      return token;
-    }).catch((error: TossError) => {
-      this.stopped = error;
-      throw error;
-    });
   }
   get(path: string) {
     return this.request(path);
