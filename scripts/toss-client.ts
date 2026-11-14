@@ -155,35 +155,39 @@ function save(
   filename = 'state.json',
   sizeError = 'AUTH_STORAGE',
 ) {
-  const serialized = JSON.stringify(value);
-  if (Buffer.byteLength(serialized, 'utf8') > STORAGE_BYTES) throw new TossError(sizeError);
-  const target = join(directory, filename);
-  if (existsSync(target)) secure(target);
-  const temporary = join(directory, `${randomUUID()}.tmp`);
-  const fd = openSync(
-    temporary,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-    0o600,
-  );
   try {
-    try {
-      writeFileSync(fd, serialized);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    renameSync(temporary, target);
-    const directoryFd = openSync(
-      directory,
-      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    const serialized = JSON.stringify(value);
+    if (Buffer.byteLength(serialized, 'utf8') > STORAGE_BYTES) throw new TossError(sizeError);
+    const target = join(directory, filename);
+    if (existsSync(target)) secure(target);
+    const temporary = join(directory, `${randomUUID()}.tmp`);
+    const fd = openSync(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
     );
     try {
-      fsyncSync(directoryFd);
+      try {
+        writeFileSync(fd, serialized);
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+      renameSync(temporary, target);
+      const directoryFd = openSync(
+        directory,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      try {
+        fsyncSync(directoryFd);
+      } finally {
+        closeSync(directoryFd);
+      }
     } finally {
-      closeSync(directoryFd);
+      if (existsSync(temporary)) unlinkSync(temporary);
     }
-  } finally {
-    if (existsSync(temporary)) unlinkSync(temporary);
+  } catch (error) {
+    throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
   }
 }
 function failure(response: Response, body: unknown) {

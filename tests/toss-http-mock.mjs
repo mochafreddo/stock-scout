@@ -32,7 +32,16 @@ mock.method(fs, 'readFileSync', (file, ...args) => {
 });
 const readlinkSync = fs.readlinkSync;
 const renameSync = fs.renameSync;
+let cooldownSaveFailed = false;
 mock.method(fs, 'renameSync', (source, target) => {
+  if (
+    process.env.TEST_FAIL_COOLDOWN_SAVE_ONCE &&
+    !cooldownSaveFailed &&
+    /\/cooldown-[0-9a-f-]{36}\.json$/.test(target)
+  ) {
+    cooldownSaveFailed = true;
+    throw Object.assign(new Error('synthetic-secret'), { code: 'EIO' });
+  }
   if (process.env.TEST_FAIL_STATE_SAVE && target === `${process.env.TOSS_STATE_DIR}/state.json`)
     throw new Error('synthetic-secret');
   return renameSync(source, target);
