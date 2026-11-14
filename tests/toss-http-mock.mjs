@@ -159,6 +159,19 @@ globalThis.fetch = async (url, init) => {
   }
   if (step.transport) throw new TypeError('synthetic-secret');
   if (step.hang) return new Promise(() => {});
+  if (step.responseChunks)
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const chunk of step.responseChunks)
+            controller.enqueue(
+              new TextEncoder().encode(typeof chunk === 'number' ? ' '.repeat(chunk) : chunk),
+            );
+          controller.close();
+        },
+      }),
+      { status: step.status || 200, headers: step.headers },
+    );
   if (step.rawBody) return new Response(step.rawBody, { status: step.status || 200 });
   if (step.freezeAt) {
     clearInterval(clock);
