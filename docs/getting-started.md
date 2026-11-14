@@ -1,14 +1,47 @@
 # 처음 실행하고 검증하기
 
+인증 없이 CLI의 명령과 성공·오류 출력을 확인하는 안내입니다. 저장소 루트의 터미널에서 시작하세요. 실제 시장·계좌 조회 준비는 아래 [실제 조회 준비하기](#실제-조회-준비하기)에서 구분합니다.
+
 ## 로컬 테스트로 시작하기
 
-[package.json](../package.json)의 Node.js 버전 조건을 확인하세요. 선택 사항인 mise의 개발 버전은 [mise.toml](../mise.toml)에 있습니다. 개발 의존성이 준비되지 않았다면 저장소 루트에서 `npm ci`를 실행하세요. 이 명령은 패키지를 다운로드하고 기존 `node_modules/`를 다시 구성합니다. 런타임 조회는 Node.js 기본 기능을 사용하며 내장 모델이나 OpenAI 인증이 필요하지 않습니다.
+[package.json](../package.json)은 Node.js 24 이상을 요구합니다. 다음 명령으로 설치된 버전을 확인하세요. 선택 사항인 mise의 개발 버전은 [mise.toml](../mise.toml)에 있습니다.
 
-1. `node scripts/toss.ts --help`로 인증 없이 명령 JSON을 확인하세요.
-2. `node tests/toss-agent-cli.mjs success prices DEMO`로 합성 가격 JSON과 종료 코드 0을 확인하세요. stderr의 `SYNTHETIC` 표시는 실제 시세가 아님을 뜻합니다.
-3. `node tests/toss-agent-cli.mjs error prices DEMO`로 합성 권한 오류와 종료 코드 1을 확인하세요. 오류를 정상 빈 결과로 해석하지 마세요.
+```sh
+node --version
+```
 
-합성 실행기는 격리된 임시 상태와 합성 자격 증명·HTTP 응답만 사용합니다. 실제 인증이나 시장·계좌 자료는 사용하지 않습니다. [에이전트 지침](toss-agent-usage.md)에서 빈 부분 페이지의 후속 조회·계좌 자료 예제를 확인하세요.
+아래 연습은 Node.js 기본 기능과 저장소 코드만 사용하므로 `npm ci`, 실제 자격 증명, `TOSS_STATE_DIR` 설정이 필요하지 않습니다. macOS 또는 Linux에서 실행하세요. 내장 모델이나 OpenAI 인증도 필요하지 않습니다.
+
+### 1. 명령 찾기
+
+```sh
+node scripts/toss.ts --help
+echo $?
+```
+
+stdout의 JSON에서 `version=1`, `status="success"`, `data.commands`의 명령 목록을 확인하세요. 다음 줄의 `0`은 종료 코드입니다. 도움말은 인증이나 HTTP 없이 출력됩니다. 명령 인수와 한도는 [CLI 레퍼런스의 명령 목록](toss-cli.md#명령-목록)에서 찾을 수 있습니다.
+
+### 2. 합성 성공 결과 읽기
+
+```sh
+node tests/toss-agent-cli.mjs success prices DEMO
+echo $?
+```
+
+종료 코드는 `0`입니다. stdout의 JSON은 `status="success"`이며 `data` 배열에 `symbol="DEMO"`인 합성 가격을 담습니다. 가격 `lastPrice`는 숫자가 아닌 문자열이고, `source.endpoint`는 `/api/v1/prices`입니다. `retrievedAt`과 공급자 `timestamp`의 의미는 [응답 계약](toss-cli.md#응답-계약)을 확인하세요. 실행 시각에 따라 달라지는 값을 고정된 기대값으로 비교하지 마세요.
+
+stderr의 `SYNTHETIC` 표시는 실제 시세가 아님을 뜻합니다. 합성 실행기는 격리된 임시 상태와 합성 자격 증명·HTTP 응답만 사용하고 종료할 때 임시 상태를 정리합니다. 실제 인증이나 시장·계좌 자료는 사용하지 않습니다.
+
+### 3. 오류와 빈 결과 구분하기
+
+```sh
+node tests/toss-agent-cli.mjs error prices DEMO
+echo $?
+```
+
+종료 코드는 `1`입니다. stdout의 JSON에서 `status="error"`, `data=[]`, `error.code="PERMISSION_DENIED"`를 확인하세요. stderr에는 합성 표시와 안전한 오류 코드가 나옵니다. 빈 `data`만 보고 정상 빈 결과로 해석하지 마세요. 부분 결과는 별도로 `status="partial"`·종료 코드 `2`를 사용합니다.
+
+이 연습은 로컬 CLI 연결과 출력 형식을 확인합니다. 빈 부분 페이지의 후속 조회·계좌 자료·소비 예시로 이어가려면 [에이전트 지침](toss-agent-usage.md)을 읽으세요. 실제 공급자 연결을 확인한 결과와는 구분하세요.
 
 ## 실제 조회 준비하기
 

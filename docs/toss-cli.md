@@ -1,4 +1,4 @@
-# 토스 미국 종목 조회 JSON CLI
+# 토스 조회 JSON CLI 레퍼런스
 
 시장·계좌 조회의 명령 인수·JSON 필드·기본값·한도·오류 계약을 설명합니다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따라 외부 에이전트가 분석·추천을 맡고 CLI는 조회·검증·오류 처리를 맡습니다. 조회 선택·소비 코드 검증·보고서 가격 분류는 [에이전트 사용 지침](toss-agent-usage.md), 개념의 정의는 [용어집](../GLOSSARY.md)을 따릅니다. 기존 KIS·내장 모델 명령의 제거 범위는 [전환 기록](toss-transition.md)에 있습니다.
 
@@ -19,6 +19,49 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 `--help`는 인증 없이 명령 목록을 JSON으로 출력합니다. `prices`는 공식 API의 `symbols` 식별자 1~200개를 쉼표로 받습니다. 각 식별자는 영문 대소문자·숫자·`.`·`-`만 허용하며 빈 항목과 정의되지 않은 추가 인수는 거부합니다. 티커 검색·시장 추정·KIS 식별자 변환은 수행하지 않습니다. 공급자가 확인한 식별자를 사용하세요. 미국 장중에도 실행할 수 있으며 증권 유형 관문을 두지 않습니다.
 
 [실자료 허용·조회 권한과 접근 준비](toss-access-readiness.md)에서 [#284의 조사](https://github.com/mochafreddo/stock-scout/issues/284) 이후의 사용자 재결정, 제한된 실제 연결 결과와 남은 미확인을 확인하세요. 새 연결이나 범위 변경에는 해당 작업의 별도 승인이 필요합니다. 원자료뿐 아니라 요약·가공 결과의 전달에도 승인 범위가 적용됩니다. JSON 예시는 합성 자료이지만 `node scripts/toss.ts`의 조회 명령은 실행 시 실제 인증·공급자 연결을 사용합니다. 인증 없는 연습은 [합성 실행기](toss-agent-usage.md#synthetic-connection-exercise)를 사용하세요.
+
+## 명령 목록
+
+아래 인수 앞에 `node scripts/toss.ts`를 붙이세요. `[]`는 생략 가능한 인수이고 `|`는 선택입니다. `--help`의 `data.commands`와 같은 16개 명령이며, 값의 의미·기본값·응답 필드는 연결된 상세 계약에서 확인하세요.
+
+| 명령과 인수 | 상세 계약 |
+| --- | --- |
+| `prices SYMBOL[,SYMBOL...] [staleAfterSeconds=SECONDS]` | [현재가와 가격 시각](#응답-계약) |
+| `tradable MARKET [status=STATUS] [securityType=TYPE] [commonShare=true\|false]` | [거래 가능 종목](#미국-시장-순위와-거래-가능-종목) |
+| `rankings TYPE DURATION [COUNT]` | [미국 시장 순위](#미국-시장-순위와-거래-가능-종목) |
+| `stock SYMBOL [MARKET [ISIN]]` | [종목 식별](#종목-식별과-선택) |
+| `orderbook SYMBOL` | [호가](#호가와-최근-체결) |
+| `candles SYMBOL INTERVAL [count=COUNT] [adjusted=true\|false] [before=TIMESTAMP \| date=YYYY-MM-DD]` | [일봉과 분봉](#일봉과-분봉) |
+| `candles-batch SYMBOL[,SYMBOL...] [count=COUNT] [adjusted=true\|false] [before=TIMESTAMP \| date=YYYY-MM-DD]` | [순차 일봉 묶음](#순차-일봉-묶음) |
+| `trades SYMBOL [COUNT]` | [최근 체결](#호가와-최근-체결) |
+| `account-select PROTECTED_JSON_FILE` | [기본 계좌 선택](#기본-계좌와-보유매수-가능-금액) |
+| `transactions FROM TO [limit=COUNT] [transactionTypes=TYPE,...] [cursor=CURSOR context=CONTEXT]` | [기간별 거래내역](#기간별-거래내역) |
+| `orders OPEN [symbol=SYMBOL] [from=DATE] [to=DATE]` 또는 `orders CLOSED [symbol=SYMBOL] [from=DATE] [to=DATE] [limit=COUNT] [cursor=CURSOR context=CONTEXT]` | [일반 주문](#일반조건-주문의-현재-상태) |
+| `conditional-orders OPEN\|CLOSED [symbol=SYMBOL] [limit=COUNT] [cursor=CURSOR context=CONTEXT]` | [조건 주문](#일반조건-주문의-현재-상태) |
+| `holdings [SYMBOL]` | [보유](#기본-계좌와-보유매수-가능-금액) |
+| `buying-power CURRENCY` | [매수 가능 금액](#기본-계좌와-보유매수-가능-금액) |
+| `sessions DATE` | [미국 세션](#미국-세션과-거래-제약) |
+| `constraints SYMBOL DATE` | [문서상 거래 제약](#거래-제약-응답-해석) |
+
+`--help`는 위 명령을 발견하는 별도 입력입니다. `account-select`는 HTTP 없이 로컬 선택 상태를 저장하고, 나머지 명령은 공급자 조회를 수행합니다. 주문 제출·정정·취소는 제공하지 않습니다.
+
+## 공통 출력과 종료 코드
+
+stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·공급자 메시지 없는 오류 코드만 출력합니다. 알려진 자격 증명·사용한 토큰이 결과에 나타나면 `SENSITIVE_OUTPUT`으로 자료 출력을 차단합니다. 공급자 추가 필드는 그대로 전달하지 않습니다.
+
+조회 결과는 `version`, `status`, `data`, `source`, `retrievedAt`을 포함합니다. 성공·부분 결과에는 `omissions`, 페이지가 있는 명령에는 `page`, 일반 오류에는 `error`가 있습니다. `data`는 명령별 배열이며 일봉 묶음은 그 안에 종목별 결과를 담습니다. 도움말은 예외로 `data={"commands":[...]}` 형식의 객체를 반환하며 조회 결과의 `source`·`retrievedAt`을 포함하지 않습니다.
+
+| 상태·종료 코드 | 의미 |
+| --- | --- |
+| `success`·0 | 유효한 응답입니다. `prices`의 정상 빈 배열은 성공, `stock`의 정상 빈 배열은 `NOT_FOUND`입니다. |
+| `partial`·2 | 개별 조회는 유효 자료가 남지만 잘못된 행, 요청 종목 누락, 요청보다 짧은 순위, 종목 유형 미확인, 후속 페이지 또는 페이지 정보 미확인 등이 있습니다. `omissions`의 `reason`을 확인하세요. 특정 행이나 심볼에 해당하면 0부터 시작하는 `index` 또는 요청 `symbol`도 반환합니다. 일봉 묶음은 종목별 실패·미조회도 집계하므로 [묶음 계약](#순차-일봉-묶음)에 따라 각 항목을 확인하세요. `constraints`는 유효한 달력 조회 결과를 받으면 종목별 제약과 앱 조건을 미확인으로 표시하는 부분 결과입니다. 입력·인증·권한·한도 등 조회 실패는 오류·종료 코드 1입니다. |
+| `error`·1 | 입력·조회 실패 또는 유효 자료가 없는 잘못된 응답입니다. 개별 조회는 빈 `data`와 `error.code`를 반환합니다. 일봉 묶음은 시작 전 실패와 종목별 실패의 형식이 다르므로 [묶음 계약](#순차-일봉-묶음)을 따르세요. |
+
+빈 배열이나 반환 개수만으로 조회 완료를 판단하지 마세요. 봉은 `page.nextBefore`, 계좌 페이지는 `page.hasNext`·`nextCursor`·`context`를 명령별 계약에 따라 읽으세요. 일부 페이지는 0건이어도 다음 페이지가 있거나 페이지 정보가 미확인인 부분 결과입니다. 자동 후속 페이지 조회는 하지 않습니다.
+
+오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다.
+
+오류 코드는 `IDENTITY_AMBIGUOUS`, `INPUT_INVALID`, `ACCOUNT_SELECTION_REQUIRED`, `ACCOUNT_SCOPE_DENIED`, `AUTH_CONFIG`, `AUTH_STORAGE`, `AUTH_STATE_TRANSITION_REQUIRED`, `CLOCK_UNCERTAIN`, `AUTH_FAILED`, `AUTH_RESPONSE_INVALID`, `AUTH_ISSUANCE_UNKNOWN`, `PERMISSION_DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `RESPONSE_INVALID`, `RATE_LIMIT`, `NETWORK_ERROR`, `UPSTREAM_ERROR`, `REQUEST_LIMIT`, `TIMEOUT`, `INTERRUPTED`, `SENSITIVE_OUTPUT`, `INTERNAL_ERROR`입니다. 인증·권한·미지원·한도 오류는 정상 빈 결과로 바꾸지 않습니다. 실행 예산과 자동 반복 범위는 [실행 한도와 재시도](#실행-한도와-재시도), 보호 상태 오류의 복구는 [예약 상태와 복구](#예약-상태와-복구)를 확인하세요.
 
 ## 기본 계좌와 보유·매수 가능 금액
 
@@ -84,8 +127,8 @@ node scripts/toss.ts transactions 2026-09-01 2026-10-31 transactionTypes=BUY,SEL
 | --- | --- |
 | `transactionType`, `marketCountry`, `currency` | 필수 문자열입니다. 응답의 미지 열거값도 보존합니다. 현재 시장은 KR·US, 통화는 KRW·USD입니다. |
 | `symbol`, `assetClass`, `isinCode` | 필수 nullable 문자열입니다. 상품은 STOCK·OPTION·BOND 또는 현금 거래의 null입니다. 옵션 심볼을 주식 조회에 그대로 쓰지 마세요. ISIN은 거래 당시 식별자이며 현재 값과 다를 수 있습니다. |
-| `quantity`, `filledPrice`, `amount`, `netAmount`, `exchangeRate` | 필수 nullable 소수 문자열이며 최대 30자입니다. 수량은 주식 수·옵션 계약 수·채권 개수입니다. 금액·단가는 currency 통화, 환율은 1 USD당 KRW입니다. |
-| `commission`, `tax` | null을 허용하지 않는 필수 소수 문자열입니다. 값이 없으면 공급자의 `"0"`을 보존합니다. |
+| `quantity`, `filledPrice`, `amount`, `netAmount`, `exchangeRate` | 필수 nullable 소수 문자열이며 최대 30자입니다. CLI는 음수 표기를 거부합니다. 수량은 주식 수·옵션 계약 수·채권 개수입니다. 금액·단가는 currency 통화, 환율은 1 USD당 KRW입니다. |
+| `commission`, `tax` | null을 허용하지 않는 필수 소수 문자열이며 최대 30자입니다. CLI는 음수 표기를 거부합니다. 값이 없으면 공급자의 `"0"`을 보존합니다. |
 | `settlementDate`, `settled` | 필수 KST 결제일과 결제 완료 불리언입니다. 미결제의 날짜는 예상 결제일이며 날짜만으로 완료를 추정하지 않습니다. |
 | `transactionTime` | 필수 nullable 처리 시각입니다. 결제 완료 매매에서는 결제 처리 시각이며 주문 생성·체결 시각이 아닙니다. 미결제에서는 null입니다. |
 | `isCancellation` | 필수 불리언입니다. true는 원거래 유형을 유지한 취소 내역이며 현금 방향이 반대가 됩니다. 모든 취소 방식을 나타내지는 않습니다. |
@@ -226,7 +269,7 @@ node scripts/toss.ts constraints AAPL 2026-11-06
 
 접수 종료 기준은 UTC로 출력하며 소수초는 최소 세 자리로 표시하고 밀리초 미만 자릿수도 유지합니다. 예를 들어 정규장 종료가 `2026-03-26T05:00:00.1234+09:00`이면 종료 1시간 전은 `2026-03-25T19:00:00.1234Z`입니다. 계산한 종료 기준이 시작 시각 이하이면 접수 구간은 `unknown`입니다.
 
-확인된 규칙과 일정은 유효 자료로 제공하지만 종목별 조회 기능 부재와 앱 미확인을 `omissions`에 남기므로 `constraints`는 항상 부분 결과·종료 코드 2입니다. 2026-11-08 [#296의 요구 범위 재결정](toss-market-validation.md#2026-11-08-요구-범위-재결정)에 따라 첫 버전은 문서상 규칙과 세션, 종목별 거래 가능 여부·수량·금액·앱 조건의 미확인 표시를 제공하는 범위로 인수합니다. 종목별 확정 정보의 직접 조회는 시장 조회 인수의 필수 조건에서 제외하며, 실제 거래 전 종목별 조건은 직접 확인하세요. 미확인은 다른 공급자·추정값으로 보완하지 않습니다. 이후 최근 체결의 [실제 대조 결과](toss-market-validation.md#2026-11-10-비어-있지-않은-최근-체결-대조)와 계좌·소비 환경 등 [전환 조건의 확인 결과](toss-transition.md)는 별도 기록에 있습니다. 이 명령은 주문 제출·정정·취소·계좌 조회를 수행하지 않습니다.
+유효한 달력 조회 결과를 받은 `constraints`는 확인된 규칙과 일정을 제공하고 종목별 조회 기능 부재와 앱 미확인을 `omissions`에 남겨 부분 결과·종료 코드 2를 반환합니다. 입력·인증·권한·한도 등 조회 실패는 오류·종료 코드 1입니다. 2026-11-08 [#296의 요구 범위 재결정](toss-market-validation.md#2026-11-08-요구-범위-재결정)에 따라 첫 버전은 문서상 규칙과 세션, 종목별 거래 가능 여부·수량·금액·앱 조건의 미확인 표시를 제공하는 범위로 인수합니다. 종목별 확정 정보의 직접 조회는 시장 조회 인수의 필수 조건에서 제외하며, 실제 거래 전 종목별 조건은 직접 확인하세요. 미확인은 다른 공급자·추정값으로 보완하지 않습니다. 이후 최근 체결의 [실제 대조 결과](toss-market-validation.md#2026-11-10-비어-있지-않은-최근-체결-대조)와 계좌·소비 환경 등 [전환 조건의 확인 결과](toss-transition.md)는 별도 기록에 있습니다. 이 명령은 주문 제출·정정·취소·계좌 조회를 수행하지 않습니다.
 
 ## 일봉과 분봉
 
@@ -350,6 +393,8 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 
 ## 응답 계약
 
+이 절은 `prices`의 현재가 필드와 가격 시각을 설명합니다. 상태·종료 코드·공통 오류는 [공통 출력](#공통-출력과-종료-코드)을 따르세요. 다른 명령의 `data`와 `page`는 각 명령의 상세 계약에서 확인하세요.
+
 2026-11-06 직접 확인한 [공식 OpenAPI](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)의 버전은 `1.2.28`입니다. `latest` 주소는 바뀔 수 있습니다. [공식 개요](https://openapi.tossinvest.com/openapi-docs/overview.md)의 오류와 호출 제한도 적용합니다. 문서 확인은 실제 응답 호환성 검증과 구분합니다.
 
 `GET /api/v1/prices?symbols=...`의 성공 envelope은 `result` 배열입니다. 페이지가 없는 API이므로 임의 페이지·개수 자르기·후속 자동 조회를 추가하지 않습니다.
@@ -367,8 +412,6 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 시각이 생략·null·미래이면 `seconds`와 `exceedsThreshold`는 null이고 `unavailableReason`은 각각 `timestamp_missing`·`timestamp_null`·`timestamp_future`입니다. 원래 `timestamp`의 생략·null·문자열을 보존합니다. 경고나 판정 불가만으로 유효 가격을 제외하거나 `omissions`에 추가하거나 `partial`로 바꾸지 않습니다. 임계값 이내라는 사실도 최신·실시간 보장이 아니며 이 값은 공급자의 전송 지연 측정값이 아닙니다.
 
 보고서 기준 시각의 가격 분류는 외부 에이전트가 [에이전트 보고 지침](toss-agent-usage.md#classify-prices-at-report-time)에 따라 수행합니다. CLI의 조회 시점 `priceAge`와 보고서 시점의 분류를 구분하세요.
-
-stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·공급자 메시지 없는 오류 코드만 출력합니다. 알려진 자격 증명·사용한 토큰이 결과에 나타나면 `SENSITIVE_OUTPUT`으로 자료 출력을 차단합니다. 공급자 추가 필드는 그대로 전달하지 않습니다.
 
 ```json
 {
@@ -389,16 +432,6 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 ```
 
 `retrievedAt`는 CLI가 결과를 만든 시각입니다. 각 행의 `timestamp`와 구분하세요. 가격은 표시한 통화 기준의 증권 단위 가격이며 세션별 원천·지연·실시간성·동일 시점 스냅샷은 미확인으로 둡니다. 완료 정규장의 종가나 주문 체결 보장 가격으로 해석하지 마세요.
-
-| 상태·종료 코드 | 의미 |
-| --- | --- |
-| `success`·0 | 유효한 응답입니다. `prices`의 정상 빈 배열은 성공, `stock`의 정상 빈 배열은 `NOT_FOUND`입니다. |
-| `partial`·2 | 개별 조회는 유효 자료가 남지만 잘못된 행, 요청 종목 누락, 요청보다 짧은 순위, 종목 유형 미확인, 봉의 후속 페이지 또는 페이지 정보 미확인이 있습니다. `omissions`의 `reason`을 확인하세요. 특정 행이나 심볼에 해당하면 0부터 시작하는 `index` 또는 요청 `symbol`도 반환합니다. 일봉 묶음은 종목별 실패·미조회도 집계하므로 최상위 `omissions`만 보지 말고 [묶음 계약](#순차-일봉-묶음)에 따라 각 항목을 확인하세요. |
-| `error`·1 | 입력·조회 실패 또는 유효 행이 없는 잘못된 응답입니다. 개별 조회는 빈 `data`와 `error.code`를 반환합니다. 일봉 묶음은 시작 전 실패와 종목별 실패의 형식이 다르므로 [묶음 계약](#순차-일봉-묶음)을 따르세요. |
-
-오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다.
-
-오류 코드는 `IDENTITY_AMBIGUOUS`, `INPUT_INVALID`, `ACCOUNT_SELECTION_REQUIRED`, `ACCOUNT_SCOPE_DENIED`, `AUTH_CONFIG`, `AUTH_STORAGE`, `AUTH_STATE_TRANSITION_REQUIRED`, `CLOCK_UNCERTAIN`, `AUTH_FAILED`, `AUTH_RESPONSE_INVALID`, `AUTH_ISSUANCE_UNKNOWN`, `PERMISSION_DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `RESPONSE_INVALID`, `RATE_LIMIT`, `NETWORK_ERROR`, `UPSTREAM_ERROR`, `REQUEST_LIMIT`, `TIMEOUT`, `INTERRUPTED`, `SENSITIVE_OUTPUT`, `INTERNAL_ERROR`입니다. 인증·권한·미지원·한도 오류는 정상 빈 결과로 바꾸지 않습니다.
 
 ## 실행 한도와 재시도
 
@@ -423,8 +456,6 @@ node --test tests/toss*.test.mjs tests/price-consumer.test.mjs
 npm run typecheck
 ```
 
-공개 검증 경계는 실제 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP입니다. `tests/toss-cli-helper.mjs`의 `fixture`와 `runCli`는 보호된 합성 설정 및 하위 프로세스를 만들며, `tests/toss-http-mock.mjs`는 네트워크·시계만 대체합니다. 후속 티켓은 이 도우미에 HTTP 시나리오를 추가하고 명령별 소비자 출력을 검사하세요. 서로 독립적인 인증·시계 도우미를 다시 만들지 마세요. 실제 프로세스 경합 검사는 실제 시계를 사용합니다.
-
-`scripts/toss.ts`가 명령 선택·입력·공통 응답 검증과 JSON 출력을 맡고, `scripts/toss-stock.ts`가 종목 정보의 검증과 선택을, `scripts/toss-market.ts`가 호가·체결 응답 검증을, `scripts/toss-candles.ts`가 봉 인수·응답·페이지 검증을 맡습니다. `scripts/toss-orders.ts`가 일반·조건 주문 인수·현재 상태·페이지 검증을 맡고, `scripts/toss-transactions.ts`가 기간별 거래내역 검증을 맡습니다. `scripts/toss-account.ts`가 보유·매수 가능 금액의 응답 검증을 맡고, `scripts/toss-sessions.ts`가 미국 세션 검증과 문서상 거래 제약을 맡습니다. `scripts/toss-client.ts`의 `TossClient.get`이 읽기 전송·공통 인증·잠금·시간 및 호출 제한을 소유합니다. 후속 조회는 같은 클라이언트 인스턴스를 재사용하고 공통 상태에 직접 쓰지 마세요. 인증 외의 POST·주문 변경 경로는 추가하지 마세요. 페이지·계좌·추가 명령의 의미 계약은 각 티켓에서 공식 스키마와 대조하세요.
+공개 검증 경계는 실제 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP입니다. 모듈별 책임과 공유 상태 소유권은 [구조 설명](architecture.md#모듈별-책임), 테스트 도우미와 수정 절차는 [개발 안내](development.md#테스트와-도우미-찾기)를 따르세요.
 
 위 검사는 합성 자료에 한정합니다. 승인 후 수행한 시장 조회와 실제 봉 페이지의 결과는 [실제 응답 검증 기록](toss-market-validation.md)에서 확인하세요. 비어 있지 않은 최근 체결 항목의 원응답 대조를 완료했습니다. 종목별 거래 제약은 합의에 따라 미확인으로 표시합니다. 기존 로컬 인증·연결의 준비 결과와 자료 전달·공급자 조회 전용 권한의 남은 미확인은 [접근 준비 기록](toss-access-readiness.md)에, Codex·dots 각각의 합성 연결 결과는 [환경별 검증 기록](toss-agent-validation.md)에 구분했습니다. 각 환경의 실제 자료 사용은 [실자료 소비 검증](toss-agent-live-validation.md)에, 기존 경로 제거와 최종 소스의 검증은 [전환 기록](toss-transition.md)에 구분했습니다. 제거된 KIS·내장 모델 테스트의 과거 통과 결과를 새 토스 호환성의 근거로 승계하지 않습니다.

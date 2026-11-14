@@ -1,6 +1,8 @@
 # Toss CLI instructions for local agents
 
-Use these instructions in the repository root. Use [the CLI reference](toss-cli.md) for command arguments and data meanings. Discover the current command list with `node scripts/toss.ts --help`; it requires no authentication. This document is intended for agents, including Codex and OpenAI dots.
+Use these instructions in the repository root when choosing queries, interpreting results, or connecting a local agent, including Codex and OpenAI dots. Use [the CLI reference](toss-cli.md) as the authority for arguments, JSON fields, limits and errors. Discover the current command list with `node scripts/toss.ts --help`; it requires no authentication.
+
+Actual Toss data, account access, credential setup and transmission to external models require the applicable [access conditions](toss-access-readiness.md) and task-specific authorization. Reuse existing authorization within its scope. Historical acceptance and synthetic exercises do not authorize new accounts, consumer environments or transmission/storage scope.
 
 ## Use the CLI for a user request
 
@@ -10,7 +12,22 @@ Use these instructions in the repository root. Use [the CLI reference](toss-cli.
 4. If more data is needed, request additional queries or pages within the approved scope. Report unresolved gaps when the scope or query budget prevents further retrieval.
 5. Use the returned data to write the analysis and recommendations, reflecting its coverage and limits. The agent owns query order and analysis; the CLI owns retrieval, validation, timestamps and error handling. The user decides and executes actual trades.
 
-For example, when asked to review an additional purchase of a held security, choose the relevant holdings, buying-power and market queries for that request. Do not run every command automatically.
+### Choose queries for the requested task
+
+Use the following starting points, then choose only the queries needed to answer the request. A request does not require every command in its row. Use a verified provider symbol and resolve ambiguous identity with `stock` before combining data for a security. Selecting a market/ISIN with `stock` does not pass that selection to `prices`; when multiple securities share a symbol, do not attribute a symbol-only price to the selected security without evidence linking them.
+
+| User task | Query choices | Interpretation and stopping point |
+| --- | --- | --- |
+| Find securities for further research | `rankings`, `tradable`, then `stock` for selected symbols | Treat rankings as US market discovery data. Confirm security identity and type; a ranking or tradable entry alone does not establish suitability or current eligibility. |
+| Review an additional purchase of a held security | Scoped `holdings`, relevant-currency `buying-power`, `stock`, `prices`, and needed market queries | Distinguish the existing position, cash buying power and market evidence. Report [price age at the report timestamp](#classify-prices-at-report-time) and unresolved trade constraints. |
+| Compare daily price history for several symbols | `candles-batch`, then selected individual `candles` pages | Inspect each symbol's actual coverage. Follow only pages needed for the analysis, preserving partial and unqueried results. |
+| Examine current market context | `orderbook`, `trades`, `sessions`, `constraints` as needed | Preserve provider order and timestamps. Recent trades are not a complete day; documented rules and sessions do not confirm per-symbol eligibility. |
+| Review settled or pending account transactions | Period-bound `transactions` | Use settlement date/status and the provider's net amount. Keep this separate from order creation and current order state. |
+| Review current general or conditional orders | `orders` or `conditional-orders` for the relevant group | Distinguish group selection from item status and order quantity from execution. Querying an order does not execute or change it. |
+
+For account queries, use the existing approved selection and scopes. If the request needs an unapproved account or scope, report that prerequisite instead of changing selection or opening credential files. Keep arguments and response details in the approved consumer context; shared evidence should contain only the safe metadata described in [the real-data exercise](#real-data-consumer-exercise-298).
+
+Continue with [result interpretation](#interpret-query-results), [daily coverage](#choose-daily-queries-and-follow-up-pages), and [report-time price classification](#classify-prices-at-report-time). Use [the synthetic exercise](#synthetic-connection-exercise) to verify a consumer path before approved real queries.
 
 ## Synthetic connection exercise
 
@@ -53,7 +70,7 @@ Account exercises select a synthetic `primary` account in the invocation's isola
 
 When creating analysis code or changing its field mapping, feed synthetic CLI stdout into the same code that will analyze the actual response, before making real queries. Repeat when that code changes, rather than before every real query. Keep independently chosen expected trade dates, `closePrice`, `volume` and calculation results; checking only extraction in a separate test implementation does not verify the analysis path. A field-mapping failure must stop the analysis. Do not fill a missing close with zero, silently use another field name or query Toss again to repair a code error.
 
-The executable [candle consumer](../examples/candle-consumer.mjs) reads either individual daily or batch stdout from stdin and performs a minimal two-point close return and volume sum. It preserves the top-level `status` and, when present, the CLI-safe `error` object, including early `INPUT_INVALID` or `AUTH_STORAGE` failures that have no daily source metadata. A failed query can therefore produce `status: "error"`, empty `data` and a machine-readable `error.code`; this is not a successful empty query. Provider messages, bodies and secrets excluded by the CLI are not reconstructed. The public regression check runs that executable with synthetic CLI stdout and isolated configuration failures: `node --test tests/toss-agent-cli.test.mjs`.
+The executable [candle consumer](../examples/candle-consumer.mjs) reads individual daily or batch stdout from stdin. For each usable nonempty result, it compares the first returned close with the last returned close and sums all returned volumes; it does not require exactly two bars. It preserves the top-level `status` and, when present, the CLI-safe `error` object, including early `INPUT_INVALID` or `AUTH_STORAGE` failures that have no daily source metadata. A failed query can therefore produce `status: "error"`, empty `data` and a machine-readable `error.code`; this is not a successful empty query. Provider messages, bodies and secrets excluded by the CLI are not reconstructed. The public regression check runs that executable with synthetic CLI stdout and isolated configuration failures: `node --test tests/toss-agent-cli.test.mjs`.
 
 The consumer exits 0 when it successfully consumes a query error; retain and interpret the original CLI exit code together with the JSON status and error. To inspect the same calculation directly, use a shell with `pipefail` so the upstream CLI exit remains observable:
 
@@ -67,7 +84,7 @@ The first query exits 0. Its newest source timestamp is `2026-11-04T23:00:00-06:
 
 The second pipeline exits 2, with `PERMISSION_DENIED` on stderr. `DEMO` succeeds; `PARTIAL` has the same usable calculation and a next page, which does not make the analysis fail or change its partial status. `EMPTY` is a usable empty partial page with count 0 and its next boundary. `INVALID` excludes an invalid bar and retains `invalid_item` plus `pagination_unknown`; its two valid bars still give 25% and 300. `DENIED` is an attempted error and `LATER` is unqueried; their summary counts are null and their existing error/reason explains why. The consumer forwards each actual summary, status, omissions, page and error/reason rather than rebuilding a batch schema or partial-reason list. An empty result has no calculation; the consumer does not choose a universal minimum bar count or follow additional pages.
 
-Omit `date` to exercise unconfirmed market/timezone evidence: source timestamps remain available, but trade dates are null with `market_timezone_unconfirmed`. Never derive a US trade date by slicing the timestamp's date portion. The regression check also sends a missing `closePrice` through this same executable and requires failure; the implementation's extraction mutation from `closePrice` to `close` is checked as a negative control before delivery. Synthetic success establishes this fixture and consumer path only, not live provider-schema agreement, live integration success or other agents' continued compliance. It authorizes no real queries or data transmission.
+Omit `date` to exercise unconfirmed market/timezone evidence: source timestamps remain available, but trade dates are null with `market_timezone_unconfirmed`. Never derive a US trade date by slicing the timestamp's date portion. The regression check also sends a missing `closePrice` through this same executable and requires failure. When changing the extraction logic, demonstrate that the regression fails for the broken mapping under the repository's negative-control procedure; an earlier validation does not verify a later revision. Synthetic success establishes this fixture and consumer path only, not live provider-schema agreement, live integration success or other agents' continued compliance. It authorizes no real queries or data transmission.
 
 ## Interpret query results
 
@@ -80,6 +97,8 @@ Read stdout as one JSON object and retain the process exit code even if it is no
 For `prices`, read each original `timestamp` with its query-time `priceAge` using [the response contract](toss-cli.md#응답-계약). An elapsed-time warning is not a provider-delay measurement or a reason to discard a valid price. Apply [report-time classification](#classify-prices-at-report-time) when writing the analysis.
 
 Preserve decimal strings and distinguish null from zero and omission. Treat `retrievedAt` as retrieval time, not a provider update timestamp. US market rankings are not exchange-specific rankings. Tradable lists and rankings have no cursor; do not invent a page argument.
+
+For paginated account queries, copy both `page.nextCursor` and `page.context` from the previous response. Keep the same account, command, group, period and filters; consult [the CLI reference](toss-cli.md) for which commands support pagination and which changes require a fresh first page. An empty page with more coverage outstanding remains partial. If the response indicates a next page but supplies no usable cursor, report the missing coverage instead of guessing a cursor or treating the history as complete. Keep live cursors and context out of shared evidence.
 
 ## Choose daily queries and follow-up pages
 
@@ -118,9 +137,9 @@ If dots cannot read this checkout or run a local process, record the observed li
 
 Keep `node scripts/toss.ts --help` as the discovery entry point and [the reference](toss-cli.md) as the argument, JSON, limit and error-contract authority. Keep workflow, consumer validation and report-time classification in this document. Add a command-specific section there when a new query is implemented. Add a synthetic response at the existing external HTTP boundary and a public CLI regression check when extending this exercise; keep live state and fixture state separate. The accepted first-tool-set consumer observations are recorded in [the live consumer record](toss-agent-live-validation.md).
 
-Actual Toss data, account access, credential setup and transmission to external models require the applicable [access conditions](toss-access-readiness.md) and task-specific authorization. Synthetic connection success does not establish any of them.
-
 ## Real-data consumer exercise (#298)
+
+Use this section when evaluating an explicitly approved consumer connection against the first-tool-set acceptance scope. For ordinary user requests, select only the needed queries through [the request workflow](#use-the-cli-for-a-user-request); the acceptance sweep below is not a prerequisite for every analysis.
 
 Run this exercise independently in Codex and dots after the user approves that consumer's real queries and transmission/storage scope. Use the existing approved launcher and state; do not open credential or selection files, copy credentials, or create a new client. If the launcher is unavailable in a consumer, report the limitation and request the authorized connection route.
 
