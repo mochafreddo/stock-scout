@@ -400,6 +400,76 @@ test('Toss CLI shares token issuance and one-second HTTP spacing across independ
   }
 });
 
+test('Toss CLI reuses unexpired tokens and refreshes locally expired tokens across executions', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  for (const [wallTime, expectedToken, expiresIn, expectedIssuances] of [
+    ['2026-11-06T15:00:00Z', 'synthetic-token-A', 60, 1],
+    ['2026-11-06T15:00:30Z', 'synthetic-token-A', undefined, 1],
+    ['2026-11-06T15:01:01Z', 'synthetic-token-B', 60, 2],
+    ['2026-11-06T15:01:02Z', 'synthetic-token-B', undefined, 2],
+  ]) {
+    const r = await runCli(f, [{ expectedToken, body: { result: [price] } }], undefined, {
+      TEST_CLOCK_START: String(Date.parse(wallTime)),
+      TEST_CLOCK_WALL_FIXED: String(Date.parse(wallTime)),
+      TEST_AUTH_STEPS: JSON.stringify(
+        expiresIn === undefined
+          ? []
+          : [
+              {
+                body: { access_token: expectedToken, token_type: 'Bearer', expires_in: expiresIn },
+              },
+            ],
+      ),
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(JSON.parse(r.stdout).status, 'success');
+    assert.equal(r.requests.filter(({ method }) => method === 'POST').length, expectedIssuances);
+    assert.equal(r.requests.at(-1).authorization, `Bearer ${expectedToken}`);
+    assert.equal(r.requests.at(-1).query, '?symbols=AAPL');
+    assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
+  }
+});
+
+test('Toss CLI refreshes at the strict fifteen-second cached-token safety boundary', async () => {
+  for (const [wallTime, expectedToken, expectedIssuances] of [
+    ['2026-11-06T15:00:44.999Z', 'synthetic-token-A', 1],
+    ['2026-11-06T15:00:45.000Z', 'synthetic-token-B', 2],
+    ['2026-11-06T15:00:45.001Z', 'synthetic-token-B', 2],
+  ]) {
+    const f = fixture();
+    try {
+      const first = await runCli(
+        f,
+        [{ expectedToken: 'synthetic-token-A', body: { result: [price] } }],
+        undefined,
+        {
+          TEST_CLOCK_START: '1793977200000',
+          TEST_CLOCK_WALL_FIXED: '1793977200000',
+          TEST_AUTH_STEPS: JSON.stringify([
+            { body: { access_token: 'synthetic-token-A', token_type: 'Bearer', expires_in: 60 } },
+          ]),
+        },
+      );
+      assert.equal(first.status, 0, first.stdout + first.stderr);
+      const r = await runCli(f, [{ expectedToken, body: { result: [price] } }], undefined, {
+        TEST_CLOCK_START: String(Date.parse(wallTime)),
+        TEST_CLOCK_WALL_FIXED: String(Date.parse(wallTime)),
+        TEST_AUTH_STEPS: JSON.stringify([
+          { body: { access_token: 'synthetic-token-B', token_type: 'Bearer', expires_in: 60 } },
+        ]),
+      });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.equal(JSON.parse(r.stdout).status, 'success');
+      assert.equal(r.requests.filter(({ method }) => method === 'POST').length, expectedIssuances);
+      assert.equal(r.requests.at(-1).authorization, `Bearer ${expectedToken}`);
+      assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test('Toss CLI bounds expiry recovery and transient retries together, and retains ambiguous issuance', async () => {
   const expired = { status: 401, body: { error: { code: 'expired-token' } } };
   for (const steps of [

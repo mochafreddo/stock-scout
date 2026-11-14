@@ -74,6 +74,8 @@ if (!process.env.TEST_REAL_CLOCK) {
     return write(...args);
   };
 }
+if (process.env.TEST_CLOCK_WALL_FIXED)
+  mock.method(Date, 'now', () => Number(process.env.TEST_CLOCK_WALL_FIXED));
 if (process.env.TEST_CLOCK_JUMP) {
   let calls = 0;
   const jump = Number(process.env.TEST_CLOCK_JUMP_MS || 60001);
