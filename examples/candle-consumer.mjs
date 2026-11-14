@@ -56,4 +56,10 @@ const data = rows.map((row) => {
         : null,
   };
 });
-process.stdout.write(`${JSON.stringify({ status: output.status, data })}\n`);
+process.stdout.write(
+  `${JSON.stringify({
+    status: output.status,
+    data,
+    ...(output.error ? { error: output.error } : {}),
+  })}\n`,
+);

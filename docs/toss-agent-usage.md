@@ -53,7 +53,9 @@ Account exercises select a synthetic `primary` account in the invocation's isola
 
 When creating analysis code or changing its field mapping, feed synthetic CLI stdout into the same code that will analyze the actual response, before making real queries. Repeat when that code changes, rather than before every real query. Keep independently chosen expected trade dates, `closePrice`, `volume` and calculation results; checking only extraction in a separate test implementation does not verify the analysis path. A field-mapping failure must stop the analysis. Do not fill a missing close with zero, silently use another field name or query Toss again to repair a code error.
 
-The executable [candle consumer](../examples/candle-consumer.mjs) reads either individual daily or batch stdout from stdin and performs a minimal two-point close return and volume sum. The public regression check runs that executable with synthetic CLI stdout: `node --test tests/toss-agent-cli.test.mjs`. To inspect the same calculation directly, use a shell with `pipefail` so the upstream CLI exit remains observable:
+The executable [candle consumer](../examples/candle-consumer.mjs) reads either individual daily or batch stdout from stdin and performs a minimal two-point close return and volume sum. It preserves the top-level `status` and, when present, the CLI-safe `error` object, including early `INPUT_INVALID` or `AUTH_STORAGE` failures that have no daily source metadata. A failed query can therefore produce `status: "error"`, empty `data` and a machine-readable `error.code`; this is not a successful empty query. Provider messages, bodies and secrets excluded by the CLI are not reconstructed. The public regression check runs that executable with synthetic CLI stdout and isolated configuration failures: `node --test tests/toss-agent-cli.test.mjs`.
+
+The consumer exits 0 when it successfully consumes a query error; retain and interpret the original CLI exit code together with the JSON status and error. To inspect the same calculation directly, use a shell with `pipefail` so the upstream CLI exit remains observable:
 
 ```sh
 set -o pipefail
