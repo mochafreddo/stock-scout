@@ -1,5 +1,7 @@
 # 토스 계좌 조회의 실제 응답 검증
 
+2026-11-10의 계좌 조회와 첫 인수 재결정 기록이다. 아래 검증 직후의 보류와 뒤이은 인수 예외는 순차 이력이며, 조건 주문 다음 페이지·진행 중 주문의 미관측은 남아 있다. 후속 소비 환경 검증과 기존 경로 제거는 [전환 기록](toss-transition.md)에 연결한다. 당시 승인을 새 계좌·조회 범위로 확대하지 않는다.
+
 [#297](https://github.com/mochafreddo/stock-scout/issues/297)의 2026-11-10 KST 검증 기록이다. [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)을 적용한다. 계획 당시 코드 기준 `ef64daa3d663e13af8e34001609aa5da4990dcc4`에서 착수 시 기준은 `d2359555132132a52a64290632ecbf953a8fca96`으로 바뀌었고, 갱신한 `origin/main`과 같았으며 작업 트리는 깨끗했다. 제품 코드 변경 없이 기존 CLI의 실제 응답을 대조했다.
 
 ## 승인과 실행 범위

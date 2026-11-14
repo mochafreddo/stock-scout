@@ -1,5 +1,7 @@
 # 토스 실자료 허용·조회 권한과 접근 준비
 
+2026-11-07~08의 접근 준비와 사용자 재결정 기록이다. 아래 초기 보류·평가 표는 당시 이력으로 보존한다. 이후 시장·계좌 조회와 소비 환경의 검증 및 기존 경로 제거는 [전환 기록](toss-transition.md)에 연결돼 있다. 이 기록의 승인 범위와 남은 미확인을 새 계좌·소비 환경의 승인으로 확대하지 않는다.
+
 [#294](https://github.com/mochafreddo/stock-scout/issues/294)의 2026-11-07 KST 확인 기록이다. 기준은 [#278의 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278#통합-전환-명세-ai-에이전트용-토스-조회-도구)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)이다. 계획 당시 코드 기준 `ef64daa3d663e13af8e34001609aa5da4990dcc4`에서 작업 시작 시 HEAD와 갱신한 `origin/main`은 모두 `7d6755e38552b5e9022fa7ec3d4158065c7a4d2c`로 바뀌었고, 작업 트리는 깨끗했다. 이번 변경은 접근 조건 문서와 사용 안내 연결만 다룬다.
 
 ## 2026-11-08 현재 상태

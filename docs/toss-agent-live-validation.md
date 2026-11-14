@@ -1,5 +1,7 @@
 # Codex·dots 실제 자료 사용 검증
 
+2026-11-10의 #298 검증 기록이다. 아래 최종 인수 평가 뒤 기존 경로 제거는 [#299 전환 기록](toss-transition.md)에서 진행했다. 이 문서의 후속 전환 계획은 #298 당시 범위이며, Codex 직접 관측과 dots 사용자 보고의 구분·승인 범위·미관측 한계는 그대로 유지한다.
+
 [#298](https://github.com/mochafreddo/stock-scout/issues/298)의 환경별 진행 기록이다. [#278 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)을 적용한다. 계획 기준 `ef64daa3d663e13af8e34001609aa5da4990dcc4`에서 착수 기준은 `f1b24e0efb74702c7ed369a9af7b7037ebeba10e`로 바뀌었다. 착수 시 작업 트리는 깨끗했고 갱신한 `origin/main`과 HEAD가 같았다. 공개 검증 경계는 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP다.
 
 ## 승인과 선행 근거

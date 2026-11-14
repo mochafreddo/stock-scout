@@ -2,6 +2,8 @@
 
 현재 제품의 요구사항은 [#278](https://github.com/mochafreddo/stock-scout/issues/278)과 [#283의 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)을 따른다. 용어는 [용어집](../GLOSSARY.md), 전환 범위와 검증 근거는 [전환 기록](toss-transition.md)에 있다.
 
+용어집은 개념의 정의, CLI 레퍼런스는 인수·JSON·한도·오류 계약, 에이전트 사용 지침은 조회 선택·결과 해석·소비 코드 검증·보고서 가격 분류를 다룬다. 설계와 검증 기록은 당시 결정·관측과 후속 결과를 연결하며 현재 사용 계약을 별도로 유지하지 않는다.
+
 ## 현재 조회 도구
 
 | 필요한 작업 | 문서 |
@@ -13,13 +15,15 @@
 | 로컬 검사와 Git 훅 | [개발 안내](development.md) |
 | 현재 설계와 대체 관계 | [ADR 목록](adr/README.md) |
 
-구현은 [진입점](../scripts/toss.ts)과 공통 [인증·조회 클라이언트](../scripts/toss-client.ts), 명령별 `scripts/toss-*.ts`에 있다. [CLI 검사](../tests/toss.test.mjs)와 명령별 `tests/toss-*.test.mjs`는 외부 HTTP·시계를 대체하여 실제 CLI를 실행한다.
+구현은 [진입점](../scripts/toss.ts)과 공통 [인증·조회 클라이언트](../scripts/toss-client.ts), 명령별 `scripts/toss-*.ts`에 있다. [CLI 검사](../tests/toss.test.mjs)와 명령별 `tests/toss-*.test.mjs`는 외부 HTTP를 합성 응답으로 대체하여 실제 CLI를 실행한다. 시계는 사례에 따라 대체하며 실제 프로세스 경합·호출 간격 검사는 실제 시계를 사용한다.
 
-## 확정된 후속 설계
+## 조회 개선 설계 기록
 
-[가격 시각·일봉 날짜 선택·묶음 조회 개선 설계](query-improvements.md)는 2026-11-12 합의한 후속 요구사항과 검증 계획이다. 현재 구현된 기능 안내와 구분한다.
+[가격 시각·일봉 날짜 선택·묶음 조회 개선 설계](query-improvements.md)는 2026-11-12~13의 설계 합의와 후속 구현 연결 기록이다. 현재 인수·출력 계약은 [CLI 레퍼런스](toss-cli.md), 소비 절차와 보고서 가격 분류는 [에이전트 사용 지침](toss-agent-usage.md)을 따른다.
 
 ## 토스 검증 기록
+
+각 기록의 날짜·리비전·관측 범위를 기준으로 읽는다. 초기 보류·계획과 뒤에 추가한 결과는 당시 이력이며, 후속 변경 전체의 실검증이나 새 계좌·소비 환경에 대한 승인을 뜻하지 않는다.
 
 | 영역 | 기록 |
 | --- | --- |

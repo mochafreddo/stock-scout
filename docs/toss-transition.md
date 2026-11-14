@@ -1,5 +1,7 @@
 # 토스 조회 도구 전환 기록
 
+2026-11-10의 기존 KIS·내장 모델 경로 제거와 보존 범위를 기록한다. 아래 최종 검증 계획과 실행 범위는 해당 전환 작업에 한정한다. 이후 조회 개선의 설계·구현 연결은 [개선 기록](query-improvements.md), 현재 사용 계약은 [CLI 레퍼런스](toss-cli.md)와 [에이전트 사용 지침](toss-agent-usage.md)을 따른다.
+
 [#299](https://github.com/mochafreddo/stock-scout/issues/299)는 [#278의 통합 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)에 따른 기존 제품 경로 제거다. 계획 기준 `ef64daa3d663e13af8e34001609aa5da4990dcc4`에서 착수 기준은 `aa914669a4d692891e3683112449149cca6b2512`로 바뀌었다. 착수 시 작업 트리는 깨끗했고 갱신한 `origin/main`과 HEAD가 같았다. 공개 검증 경계는 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP다.
 
 ## 제거 전 확인한 관문

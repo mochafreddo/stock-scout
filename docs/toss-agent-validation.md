@@ -1,5 +1,7 @@
 # Codex·dots 합성 CLI 연결 검증
 
+2026-11-08의 최소 합성 연결 검증 기록이다. 이후 실제 자료 소비는 [#298 기록](toss-agent-live-validation.md), 기존 경로 제거는 [전환 기록](toss-transition.md)에 있다. 이 문서의 합성 관측을 이후 추가 기능이나 실제 공급자 응답의 검증으로 확대하지 않는다.
+
 2026-11-08 KST의 #295 검증 기록이다. 구현 기준은 착수 시 깨끗한 `main`의 `528310ef5210ac2d75bd031160fe9d7422eadf42`이며, 갱신한 `origin/main`과 일치했다. 이슈의 계획 기준 `ef64daa3d663e13af8e34001609aa5da4990dcc4` 이후에 구현된 토스 CLI를 사용했다. 공개 검증 경계는 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP다.
 
 ## 실행 경로

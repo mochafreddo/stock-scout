@@ -1,5 +1,7 @@
 # 토스 시장 조회 실제 응답 검증
 
+2026-11-08~10의 시장 조회 기록이다. 초기 보류 뒤 [비어 있지 않은 최근 체결 대조](#2026-11-10-비어-있지-않은-최근-체결-대조)에서 남은 조건을 충족한 것으로 평가했다. 후속 소비 환경 검증과 기존 경로 제거는 [전환 기록](toss-transition.md)을 따른다. 아래 관측은 각 실행 시점의 근거이며 이후 기능 전체의 실검증을 뜻하지 않는다.
+
 [#296](https://github.com/mochafreddo/stock-scout/issues/296)의 2026-11-08 KST 실행 기록이다. 기준 계약은 [#278의 통합 전환 명세](https://github.com/mochafreddo/stock-scout/issues/278)와 [#283의 확정 계약](https://github.com/mochafreddo/stock-scout/issues/283#issuecomment-6686267791)이다. 계획 당시 코드 기준 `ef64daa3d663e13af8e34001609aa5da4990dcc4` 대신, 작업 시작 시 HEAD와 갱신한 `origin/main`이 일치한 `a9f1e5cf6a6537d89530911007756813b329989e`를 검토 기준으로 삼았다. 작업 시작 시 Git 작업 트리는 깨끗했다.
 
 ## 승인과 실행 조건
