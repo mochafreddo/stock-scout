@@ -106,7 +106,14 @@ function read(path: string) {
     closeSync(fd);
   }
 }
-function save(directory: string, value: unknown, filename = 'state.json') {
+function save(
+  directory: string,
+  value: unknown,
+  filename = 'state.json',
+  sizeError = 'AUTH_STORAGE',
+) {
+  const serialized = JSON.stringify(value);
+  if (Buffer.byteLength(serialized, 'utf8') > 16384) throw new TossError(sizeError);
   const target = join(directory, filename);
   if (existsSync(target)) secure(target);
   const temporary = join(directory, `${randomUUID()}.tmp`);
@@ -117,7 +124,7 @@ function save(directory: string, value: unknown, filename = 'state.json') {
   );
   try {
     try {
-      writeFileSync(fd, JSON.stringify(value));
+      writeFileSync(fd, serialized);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -602,7 +609,7 @@ export class TossClient {
       await this.locked(async (state) => {
         state.token = { value: token, expiresAt };
         state.pending = false;
-        save(this.directory, state);
+        save(this.directory, state, 'state.json', 'AUTH_RESPONSE_INVALID');
       });
       return token;
     }).catch((error: TossError) => {
