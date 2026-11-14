@@ -57,6 +57,46 @@ test('transactions preserve settlement meaning, precision and duplicate rows on 
   }
 });
 
+test('transactions preserve supplied trade decimals and nullable securities transfer amounts', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  await select(f);
+  const buy = {
+    ...row,
+    quantity: '0.1250',
+    filledPrice: '187.760000000000000001',
+    exchangeRate: '1382.123456789012345678',
+    amount: '23.470001',
+    netAmount: '23.480009',
+  };
+  const sell = {
+    ...row,
+    transactionType: 'SELL',
+    quantity: '2.5000',
+    filledPrice: '190.123456789012345678',
+    exchangeRate: '1391.987654321098765432',
+    amount: '475.308640',
+    netAmount: '475.288631',
+    settled: true,
+    transactionTime: '2026-10-01T06:30:00+09:00',
+  };
+  const transfer = {
+    ...row,
+    transactionType: 'SECURITIES_TRANSFER_IN',
+    amount: null,
+    netAmount: null,
+  };
+  const transferOut = { ...transfer, transactionType: 'SECURITIES_TRANSFER_OUT' };
+  const result = await runCli(
+    f,
+    [accounts, page([buy, sell, transfer, transferOut, row])],
+    ['transactions', ...period],
+  );
+  assert.equal(result.status, 0, result.stdout);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout).data, [buy, sell, transfer, transferOut, row]);
+});
+
 test('transactions attach settlement semantics only after account validation (characterization)', async (t) => {
   const f = fixture();
   t.after(f.close);
