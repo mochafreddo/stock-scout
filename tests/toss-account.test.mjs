@@ -131,6 +131,41 @@ const overview = {
 };
 const holdings = (result) => ({ path: '/api/v1/holdings', body: { result } });
 
+test('holdings symbol filter rejects other securities while preserving usable summaries', async () => {
+  const other = { ...holding, symbol: 'MSFT', name: 'Microsoft' };
+  for (const [rows, expected, omissions] of [
+    [[holding], [holding], []],
+    [[other, holding], [holding], [{ index: 0, reason: 'invalid_item' }]],
+    [[other], [], [{ index: 0, reason: 'invalid_item' }]],
+  ]) {
+    const f = fixture();
+    try {
+      const selected = await selection(f);
+      assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+      const result = await runCli(
+        f,
+        [accounts, holdings({ ...overview, items: rows })],
+        ['holdings', 'AAPL'],
+      );
+      const output = JSON.parse(result.stdout);
+      assert.equal(result.status, omissions.length ? 2 : 0, result.stdout + result.stderr);
+      assert.equal(result.stderr, '');
+      assert.equal(output.status, omissions.length ? 'partial' : 'success');
+      assert.deepEqual(output.data, [{ ...overview, items: expected }]);
+      assert.deepEqual(output.omissions, omissions);
+      assert.equal(result.requests.at(-1).path, '/api/v1/holdings');
+      assert.equal(result.requests.at(-1).query, '?symbol=AAPL');
+      assert.equal(result.requests.at(-1).account, '741');
+      assert.doesNotMatch(
+        result.stdout + result.stderr,
+        /accountSeq|accountNo|99887766554|11223344556|synthetic-secret|synthetic-token/,
+      );
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test('holdings preserves official monetary fields and filters unknown identifiers', async () => {
   const f = fixture();
   try {
