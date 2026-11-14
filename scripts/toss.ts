@@ -9,7 +9,7 @@ import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
 import { orderbookResult, tradesResult } from './toss-market.ts';
 import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
-import { constraintResult, sessionResult, validDate } from './toss-sessions.ts';
+import { sessionQuery } from './toss-sessions.ts';
 import { AmbiguousStock, stockQuery, stockResult } from './toss-stock.ts';
 import { symbolPattern } from './toss-values.ts';
 
@@ -195,33 +195,9 @@ try {
       );
     }
     if (command === 'sessions' || command === 'constraints') {
-      const date = command === 'sessions' ? symbols : rest[0];
-      if (
-        !validDate(date) ||
-        (command === 'sessions'
-          ? rest.length > 0
-          : !symbols || !symbolPattern.test(symbols) || rest.length !== 1)
-      )
-        throw new TossError('INPUT_INVALID');
-      Object.assign(source, {
-        date,
-        dateTimeZone: 'America/New_York',
-        sessionTimeZone: 'Asia/Seoul',
-        scope: 'provider_US_market_calendar',
-      });
-      if (command === 'constraints')
-        Object.assign(source, {
-          symbol: symbols,
-          symbolMarket: 'unverified_US_requested',
-          rulesVersion: '1.2.28',
-          rulesCheckedOn: '2026-11-07',
-          rulesSource: 'https://openapi.tossinvest.com/openapi-docs/latest/openapi.json',
-          rulesScope: 'documented_API_rules_not_live_eligibility',
-        });
-      const value = await read(new URLSearchParams({ date }));
-      return command === 'sessions'
-        ? sessionResult(value, date)
-        : constraintResult(value, symbols, date);
+      const request = sessionQuery(command, symbols, rest);
+      Object.assign(source, request.source);
+      return request.parse(await read(request.query));
     }
     if (command === 'candles-batch') {
       const requests = candleBatchQuery(symbols, rest);

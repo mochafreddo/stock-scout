@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, runCli } from './toss-cli-helper.mjs';
 
@@ -21,6 +22,24 @@ const calendar = {
   previousBusinessDay: closed('2026-03-24'),
   nextBusinessDay: closed('2026-03-26'),
 };
+const sessionSource = {
+  provider: 'tossinvest',
+  endpoint: '/api/v1/market-calendar/US',
+  freshness: 'unknown',
+  date: day.date,
+  dateTimeZone: 'America/New_York',
+  sessionTimeZone: 'Asia/Seoul',
+  scope: 'provider_US_market_calendar',
+};
+const constraintSource = {
+  ...sessionSource,
+  symbol: 'AAPL',
+  symbolMarket: 'unverified_US_requested',
+  rulesVersion: '1.2.28',
+  rulesCheckedOn: '2026-11-07',
+  rulesSource: 'https://openapi.tossinvest.com/openapi-docs/latest/openapi.json',
+  rulesScope: 'documented_API_rules_not_live_eligibility',
+};
 async function lookup(t, result = calendar, args = ['sessions', day.date], extra, steps) {
   const f = fixture();
   t.after(f.close);
@@ -39,10 +58,7 @@ test('sessions sends the explicit US local date and preserves KST sessions witho
   assert.equal(r.stderr, '');
   assert.deepEqual(r.out.data, [calendar]);
   assert.deepEqual(r.out.omissions, []);
-  assert.equal(r.out.source.dateTimeZone, 'America/New_York');
-  assert.equal(r.out.source.sessionTimeZone, 'Asia/Seoul');
-  assert.equal(r.out.source.date, day.date);
-  assert.equal(r.out.source.freshness, 'unknown');
+  assert.deepEqual(r.out.source, sessionSource);
   assert.deepEqual(
     r.requests.map(({ method, path, query }) => [method, path, query]),
     [
@@ -113,7 +129,7 @@ test('constraints distinguishes documented API rules from unprovided symbol elig
     { field: 'eligibility', reason: 'constraint_lookup_not_provided' },
     { field: 'appConditions', reason: 'not_verified' },
   ]);
-  assert.equal(r.out.source.rulesVersion, '1.2.28');
+  assert.deepEqual(r.out.source, constraintSource);
   assert.equal(r.requests.at(-1).query, '?date=2026-03-25');
   assert.deepEqual(
     r.requests.map(({ method, path }) => [method, path]),
@@ -343,6 +359,42 @@ test('invalid dates and unsupported options fail before authentication', async (
     ['sessions', '2028-02-29'],
   );
   assert.equal(r.status, 0, r.stdout);
+});
+
+test('session inputs and source attribution precede missing authentication storage (characterization)', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const extra = { TOSS_STATE_DIR: join(f.directory, 'missing') };
+  for (const args of [
+    ['sessions', '2026-02-29'],
+    ['sessions', day.date, 'extra'],
+    ['constraints', 'AAPL'],
+    ['constraints', 'AAPL,MSFT', day.date],
+  ]) {
+    const r = await runCli(f, [], args, extra);
+    const out = JSON.parse(r.stdout);
+    assert.equal(r.status, 1, r.stdout);
+    assert.deepEqual(out.error, { code: 'INPUT_INVALID' });
+    assert.equal(r.stderr, 'INPUT_INVALID\n');
+    assert.deepEqual(r.requests, []);
+    assert.deepEqual(out.source, {
+      provider: 'tossinvest',
+      endpoint: '/api/v1/market-calendar/US',
+      freshness: 'unknown',
+    });
+  }
+  for (const args of [
+    ['sessions', day.date],
+    ['constraints', 'AAPL', day.date],
+  ]) {
+    const r = await runCli(f, [], args, extra);
+    const out = JSON.parse(r.stdout);
+    assert.equal(r.status, 1, r.stdout);
+    assert.deepEqual(out.error, { code: 'AUTH_STORAGE' });
+    assert.equal(r.stderr, 'AUTH_STORAGE\n');
+    assert.deepEqual(r.requests, []);
+    assert.deepEqual(out.source, args[0] === 'constraints' ? constraintSource : sessionSource);
+  }
 });
 
 test('invalid envelopes, mismatched dates and no usable requested sessions are errors', async (t) => {

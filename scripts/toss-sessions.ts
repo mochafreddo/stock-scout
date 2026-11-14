@@ -1,5 +1,5 @@
 import { TossError } from './toss-client.ts';
-import { laterThan, record, validTime, wholeSecondMillis } from './toss-values.ts';
+import { laterThan, record, symbolPattern, validTime, wholeSecondMillis } from './toss-values.ts';
 
 const sessions = ['dayMarket', 'preMarket', 'regularMarket', 'afterMarket'] as const;
 type MarketDay = { date: string } & Partial<
@@ -10,7 +10,42 @@ export function validDate(value: unknown): value is string {
   return typeof value === 'string' && validTime(`${value}T00:00:00Z`);
 }
 
-export function sessionResult(value: unknown, date: string) {
+export function sessionQuery(
+  command: 'sessions' | 'constraints',
+  firstArg: string | undefined,
+  args: string[],
+) {
+  const date = command === 'sessions' ? firstArg : args[0];
+  if (!validDate(date) || args.length !== (command === 'sessions' ? 0 : 1))
+    throw new TossError('INPUT_INVALID');
+  const request = {
+    query: new URLSearchParams({ date }),
+    source: {
+      date,
+      dateTimeZone: 'America/New_York',
+      sessionTimeZone: 'Asia/Seoul',
+      scope: 'provider_US_market_calendar',
+    },
+  };
+  if (command === 'sessions')
+    return { ...request, parse: (value: unknown) => sessionResult(value, date) };
+  if (!firstArg || !symbolPattern.test(firstArg)) throw new TossError('INPUT_INVALID');
+  return {
+    ...request,
+    source: {
+      ...request.source,
+      symbol: firstArg,
+      symbolMarket: 'unverified_US_requested',
+      rulesVersion: '1.2.28',
+      rulesCheckedOn: '2026-11-07',
+      rulesSource: 'https://openapi.tossinvest.com/openapi-docs/latest/openapi.json',
+      rulesScope: 'documented_API_rules_not_live_eligibility',
+    },
+    parse: (value: unknown) => constraintResult(value, firstArg, date),
+  };
+}
+
+function sessionResult(value: unknown, date: string) {
   if (!record(value)) throw new TossError('RESPONSE_INVALID');
   const data: Record<string, MarketDay> = {};
   const omissions: { field: string; reason: string }[] = [];
@@ -62,7 +97,7 @@ export function sessionResult(value: unknown, date: string) {
   return { data: [data], omissions };
 }
 
-export function constraintResult(value: unknown, symbol: string, date: string) {
+function constraintResult(value: unknown, symbol: string, date: string) {
   const calendar = sessionResult(value, date);
   const regular = calendar.data[0].today.regularMarket;
   let acceptanceWindow: Record<string, unknown> = { status: 'unknown' };
