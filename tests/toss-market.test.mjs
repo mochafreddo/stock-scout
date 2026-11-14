@@ -15,7 +15,11 @@ const book = {
     { price: '185.7500', volume: '0.1250' },
     { price: '185.7000', volume: '0' },
   ],
-  bids: [{ price: '185.6500', volume: '180.0000' }],
+  bids: [
+    { price: '185.6500', volume: '180.0000' },
+    { price: '185.5500', volume: '0.2500' },
+    { price: '185.6000', volume: '12.5000' },
+  ],
 };
 const trade = {
   price: '185.7000',
@@ -56,7 +60,17 @@ test('orderbook preserves both sides, provider order, decimals and source timing
 });
 
 test('trades sends the requested count and preserves identical executions and provider order', async (t) => {
-  const rows = [trade, { ...trade, price: '0', volume: '0', currency: 'EUR' }, trade];
+  const rows = [
+    trade,
+    trade,
+    {
+      ...trade,
+      price: '0',
+      volume: '0',
+      currency: 'EUR',
+      timestamp: '2026-11-06T10:30:41.250-05:00',
+    },
+  ];
   const r = await lookup(t, 'trades', rows, ['BRK.B', '3']);
   assert.equal(r.status, 0, r.stdout);
   assert.equal(r.stderr, '');
