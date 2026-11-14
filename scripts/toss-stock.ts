@@ -74,7 +74,7 @@ export function stockQuery(symbol: string | undefined, args: string[]) {
 }
 
 export async function confirmUsMarket(client: TossClient, symbol: string) {
-  const rows = await client.get(`/api/v1/stocks?${stockQuery(symbol, []).query}`);
+  const rows = await client.get(`/api/v1/stocks?${new URLSearchParams({ symbols: symbol })}`);
   const identity = stockResult(rows, symbol);
   if (identity.omissions.some(({ reason }) => reason === 'invalid_item'))
     throw new TossError('RESPONSE_INVALID');
