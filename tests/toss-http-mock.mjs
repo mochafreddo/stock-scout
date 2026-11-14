@@ -7,6 +7,11 @@ import { setInterval as realInterval } from 'node:timers';
 import { setTimeout as realSleep } from 'node:timers/promises';
 
 const nativeHrtime = process.hrtime.bigint.bind(process.hrtime);
+function publishJson(path, value) {
+  const pending = `${path}.pending`;
+  writeFileSync(pending, JSON.stringify(value), { mode: 0o600 });
+  fs.renameSync(pending, path);
+}
 if (process.env.TEST_PLATFORM)
   Object.defineProperty(process, 'platform', { value: process.env.TEST_PLATFORM });
 const boot = process.env.TEST_BOOT_ID || '11111111-1111-4111-8111-111111111111';
@@ -19,6 +24,27 @@ mock.method(childProcess, 'execFileSync', (file, args, options) => {
   return execFileSync(file, args, options);
 });
 const readFileSync = fs.readFileSync;
+if (process.env.TEST_SHARED_CLOCK_FILE)
+  mock.method(process.hrtime, 'bigint', () => {
+    if (!existsSync(process.env.TEST_SHARED_CLOCK_FILE)) return nativeHrtime();
+    const clock = JSON.parse(readFileSync(process.env.TEST_SHARED_CLOCK_FILE));
+    return BigInt(clock.nowNs) + (clock.startedNs ? nativeHrtime() - BigInt(clock.startedNs) : 0n);
+  });
+let observedDeadline;
+let stateDescriptor;
+if (process.env.TEST_WAIT_GATE) {
+  const openSync = fs.openSync;
+  const closeSync = fs.closeSync;
+  mock.method(fs, 'openSync', (file, ...args) => {
+    const descriptor = openSync(file, ...args);
+    if (file === `${process.env.TOSS_STATE_DIR}/state.json`) stateDescriptor = descriptor;
+    return descriptor;
+  });
+  mock.method(fs, 'closeSync', (descriptor) => {
+    if (descriptor === stateDescriptor) stateDescriptor = undefined;
+    return closeSync(descriptor);
+  });
+}
 mock.method(fs, 'readFileSync', (file, ...args) => {
   if (file === '/proc/sys/kernel/random/boot_id') {
     if (process.env.TEST_CLOCK_UNAVAILABLE) throw new Error('synthetic-secret');
@@ -28,8 +54,42 @@ mock.method(fs, 'readFileSync', (file, ...args) => {
     if (process.env.TEST_TIME_OFFSET_UNAVAILABLE) throw new Error('synthetic-secret');
     return process.env.TEST_TIME_OFFSET || 'monotonic 0 0\nboottime 0 0\n';
   }
-  return readFileSync(file, ...args);
+  const value = readFileSync(file, ...args);
+  if (process.env.TEST_WAIT_GATE && file === stateDescriptor)
+    observedDeadline = {
+      nextNs: JSON.parse(value).clock.nextNs,
+      readNs: process.hrtime.bigint().toString(),
+    };
+  return value;
 });
+if (process.env.TEST_WAIT_GATE) {
+  const setTimeout = globalThis.setTimeout;
+  let observedWait = false;
+  mock.method(globalThis, 'setTimeout', (callback, milliseconds, ...args) => {
+    const waitNs = process.hrtime.bigint();
+    if (
+      !observedWait &&
+      observedDeadline &&
+      milliseconds > 0 &&
+      milliseconds >= Number(BigInt(observedDeadline.nextNs) - waitNs) / 1000000 &&
+      milliseconds <=
+        Number(BigInt(observedDeadline.nextNs) - BigInt(observedDeadline.readNs)) / 1000000
+    ) {
+      observedWait = true;
+      const timer = setTimeout(async () => {
+        while (!existsSync(process.env.TEST_WAIT_GATE)) await realSleep(5);
+        callback(...args);
+      }, milliseconds);
+      publishJson(`${process.env.TEST_WAIT_GATE}.ready`, {
+        ...observedDeadline,
+        waitNs: waitNs.toString(),
+        milliseconds,
+      });
+      return timer;
+    }
+    return setTimeout(callback, milliseconds, ...args);
+  });
+}
 const readlinkSync = fs.readlinkSync;
 const renameSync = fs.renameSync;
 let cooldownSaveFailed = false;
@@ -44,7 +104,10 @@ mock.method(fs, 'renameSync', (source, target) => {
   }
   if (process.env.TEST_FAIL_STATE_SAVE && target === `${process.env.TOSS_STATE_DIR}/state.json`)
     throw new Error('synthetic-secret');
-  return renameSync(source, target);
+  const result = renameSync(source, target);
+  if (process.env.TEST_COOLDOWN_SAVED && /\/cooldown-[0-9a-f-]{36}\.json$/.test(target))
+    publishJson(process.env.TEST_COOLDOWN_SAVED, JSON.parse(readFileSync(target)));
+  return result;
 });
 mock.method(fs, 'readlinkSync', (file, ...args) => {
   if (file === '/proc/self/ns/time') return process.env.TEST_TIME_NAMESPACE || 'time:[123]';
@@ -133,8 +196,31 @@ globalThis.fetch = async (url, init) => {
   assert.equal(address.pathname, step.path || '/api/v1/prices');
   assert.equal(init.headers.authorization, `Bearer ${step.expectedToken || 'synthetic-token'}`);
   if (step.gate) {
+    const gateStartedNs = nativeHrtime();
+    if (process.env.TEST_SHARED_CLOCK_FILE)
+      publishJson(process.env.TEST_SHARED_CLOCK_FILE, { nowNs: gateStartedNs.toString() });
     writeFileSync(`${process.env.TEST_GATE}.ready`, 'ready', { mode: 0o600 });
+    if (process.env.TEST_GATE_ELAPSED) {
+      let deadline;
+      while (!deadline) {
+        const state = JSON.parse(readFileSync(`${process.env.TOSS_STATE_DIR}/state.json`));
+        if (BigInt(state.clock.nextNs) > gateStartedNs) deadline = BigInt(state.clock.nextNs);
+        else await realSleep(5);
+      }
+      do {
+        await realSleep(5);
+        deadline = BigInt(
+          JSON.parse(readFileSync(`${process.env.TOSS_STATE_DIR}/state.json`)).clock.nextNs,
+        );
+      } while (nativeHrtime() <= deadline);
+      await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+      publishJson(process.env.TEST_GATE_ELAPSED, {
+        deadlineNs: deadline.toString(),
+        observedNs: nativeHrtime().toString(),
+      });
+    }
     while (!existsSync(process.env.TEST_GATE)) await realSleep(5);
+    writeFileSync(`${process.env.TEST_GATE}.released`, nativeHrtime().toString(), { mode: 0o600 });
   }
   if (step.oversizedCancel)
     return new Response(

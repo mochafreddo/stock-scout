@@ -1,10 +1,24 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
-import { fixture, price, readRequests, runCli, waitForFile } from './toss-cli-helper.mjs';
+import {
+  closeRuns,
+  fixture,
+  price,
+  readRequests,
+  runCli,
+  waitForFile,
+} from './toss-cli-helper.mjs';
 
 test('Toss CLI preserves decimal prices and data time through real arguments and HTTP', async () => {
   const f = fixture();
@@ -699,6 +713,9 @@ test('Toss CLI rejects oversized rate headers without poisoning shared state', a
 test('Toss CLI applies a peer Retry-After while another process is waiting to send', async () => {
   const f = fixture();
   const gate = join(f.directory, 'cooldown-gate');
+  const waitGate = join(f.directory, 'peer-wait');
+  const published = join(f.directory, 'cooldown-published');
+  const sharedClock = join(f.directory, 'shared-clock');
   const runs = [];
   try {
     const first = runCli(
@@ -713,25 +730,47 @@ test('Toss CLI applies a peer Retry-After while another process is waiting to se
         { body: { result: [price] } },
       ],
       undefined,
-      { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
+      {
+        TEST_REAL_CLOCK: '1',
+        TEST_GATE: gate,
+        TEST_COOLDOWN_SAVED: published,
+        TEST_SHARED_CLOCK_FILE: sharedClock,
+      },
     );
     runs.push(first);
     await waitForFile(`${gate}.ready`, first);
-    const peer = runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' });
+    const peer = runCli(f, [], undefined, {
+      TEST_REAL_CLOCK: '1',
+      TEST_WAIT_GATE: waitGate,
+      TEST_SHARED_CLOCK_FILE: sharedClock,
+    });
     runs.push(peer);
     peer.catch(() => {});
-    await sleep(150);
-    const releasedAt = Date.now();
+    await waitForFile(`${waitGate}.ready`, peer);
+    const waiting = JSON.parse(readFileSync(`${waitGate}.ready`, 'utf8'));
+    assert.ok(BigInt(waiting.nextNs) > BigInt(waiting.readNs));
+    assert.ok(waiting.milliseconds > 0);
+    assert.equal(readRequests(f.trace).length, 2);
     writeFileSync(gate, '', { mode: 0o600 });
+    await waitForFile(published, first);
+    const cooldown = JSON.parse(readFileSync(published, 'utf8'));
+    assert.ok(BigInt(cooldown.clock.nextNs) > BigInt(waiting.nextNs));
+    const frozenClock = JSON.parse(readFileSync(sharedClock, 'utf8'));
+    const runningClock = `${sharedClock}.running`;
+    writeFileSync(
+      runningClock,
+      JSON.stringify({ ...frozenClock, startedNs: process.hrtime.bigint().toString() }),
+      { mode: 0o600 },
+    );
+    renameSync(runningClock, sharedClock);
+    writeFileSync(waitGate, '', { mode: 0o600 });
     const results = await Promise.all([first, peer]);
     for (const r of results) assert.equal(r.status, 0, r.stdout + r.stderr);
     const requests = readRequests(f.trace);
     for (const r of requests.slice(2))
-      assert.ok(r.at >= releasedAt + 3000, JSON.stringify(requests));
+      assert.ok(BigInt(r.sharedNs) >= BigInt(cooldown.clock.nextNs), JSON.stringify(requests));
   } finally {
-    writeFileSync(gate, '', { mode: 0o600 });
-    await Promise.allSettled(runs);
-    f.close();
+    await closeRuns(f, runs, [gate, waitGate]);
   }
 });
 

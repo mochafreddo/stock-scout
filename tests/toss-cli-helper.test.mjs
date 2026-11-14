@@ -1,9 +1,47 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fixture, price, runCli, waitForFile } from './toss-cli-helper.mjs';
+import { closeRuns, fixture, price, runCli, waitForFile } from './toss-cli-helper.mjs';
+
+for (const failure of ['readiness timeout', 'assertion failure'])
+  test(`gated child cleanup reaps its child before removing state after ${failure}`, async () => {
+    const f = fixture();
+    const gate = join(f.directory, 'gate');
+    const pending = runCli(f, [{ gate: true }], undefined, {
+      TEST_REAL_CLOCK: '1',
+      TEST_GATE: gate,
+    });
+    let reaped = false;
+    pending.child.once('close', () => {
+      reaped = true;
+    });
+    const remove = f.close;
+    f.close = () => {
+      try {
+        assert.equal(reaped, true, 'child close must precede fixture removal');
+      } finally {
+        remove();
+      }
+    };
+    await assert.rejects(
+      async () => {
+        try {
+          await waitForFile(`${gate}.ready`, pending);
+          if (failure === 'readiness timeout')
+            await waitForFile(join(f.directory, 'missing.ready'), pending, 20);
+          else assert.fail('synthetic assertion failure');
+        } finally {
+          await closeRuns(f, [pending], [gate]);
+        }
+      },
+      { code: 'ERR_ASSERTION' },
+    );
+    assert.equal(reaped, true);
+    assert.throws(() => process.kill(pending.child.pid, 0), { code: 'ESRCH' });
+    assert.equal(existsSync(f.directory), false);
+  });
 
 test('readiness waiting retains an early CLI error result while its peer remains gated', async () => {
   const f = fixture();

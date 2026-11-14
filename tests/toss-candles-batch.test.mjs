@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
-import { fixture, readRequests, runCli, waitForFile } from './toss-cli-helper.mjs';
+import { closeRuns, fixture, readRequests, runCli, waitForFile } from './toss-cli-helper.mjs';
 
 const candle = {
   timestamp: '2026-11-05T14:00:00+09:00',
@@ -272,19 +271,18 @@ test('help discovers the explicit daily batch limits without authentication', as
 test('batch waits for each page before querying the next symbol and preserves requested spelling', async (t) => {
   const f = fixture();
   const gate = join(f.directory, 'gate');
+  const elapsed = join(f.directory, 'send-deadline-elapsed');
   const pending = runCli(
     f,
     [{ ...page([]), gate: true }, page([])],
     ['candles-batch', 'first,BRK.B'],
-    { TEST_REAL_CLOCK: '1', TEST_GATE: gate },
+    { TEST_REAL_CLOCK: '1', TEST_GATE: gate, TEST_GATE_ELAPSED: elapsed },
   );
-  t.after(async () => {
-    writeFileSync(gate, '', { mode: 0o600 });
-    await Promise.allSettled([pending]);
-    f.close();
-  });
+  t.after(() => closeRuns(f, [pending], [gate]));
   await waitForFile(`${gate}.ready`, pending, 4000);
-  await sleep(50);
+  await waitForFile(elapsed, pending);
+  const checkpoint = JSON.parse(readFileSync(elapsed, 'utf8'));
+  assert.ok(BigInt(checkpoint.observedNs) > BigInt(checkpoint.deadlineNs));
   assert.equal(readRequests(f.trace).length, 2);
   writeFileSync(gate, '', { mode: 0o600 });
   const r = await pending;
@@ -301,6 +299,7 @@ test('batch waits for each page before querying the next symbol and preserves re
     ],
   );
   assert.ok(r.requests[2].at - r.requests[1].at >= 1000);
+  assert.ok(BigInt(r.requests[2].nativeNs) >= BigInt(readFileSync(`${gate}.released`, 'utf8')));
 });
 
 test('batch includes authentication lock waits in its deadline and handles a signal while waiting', async (t) => {

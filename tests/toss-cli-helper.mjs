@@ -97,6 +97,12 @@ export async function waitForFile(path, run, timeout = 5000) {
     await sleep(10);
   }
 }
+export async function closeRuns(f, runs, gates) {
+  for (const gate of gates) writeFileSync(gate, '', { mode: 0o600 });
+  for (const run of runs) run.child.kill('SIGKILL');
+  await Promise.allSettled(runs);
+  f.close();
+}
 export const price = {
   symbol: 'AAPL',
   lastPrice: '185.7000',
