@@ -57,6 +57,7 @@ test('tradable list returns every matching row from one filtered GET', async (t)
   );
   assert.equal(r.status, 0);
   assert.deepEqual(r.out.data, rows);
+  assert.equal(r.out.source.status, 'SCHEDULED');
   assert.deepEqual(Object.fromEntries(new URLSearchParams(r.requests.at(-1).query)), {
     market: 'NASDAQ',
     status: 'SCHEDULED',
@@ -64,6 +65,21 @@ test('tradable list returns every matching row from one filtered GET', async (t)
     commonShare: 'false',
   });
   assert.equal(r.requests.length, 2);
+});
+test('tradable lists default to ACTIVE in the request and source, including empty lists', async (t) => {
+  for (const count of [201, 0]) {
+    const rows = Array.from({ length: count }, (_, i) => ({ ...listed, symbol: `DEMO${i}` }));
+    const r = await query(t, ['tradable', 'NYSE'], '/api/v1/stocks/all', rows);
+    assert.equal(r.status, 0);
+    assert.equal(r.stderr, '');
+    assert.deepEqual(r.out.data, rows);
+    assert.deepEqual(Object.fromEntries(new URLSearchParams(r.requests.at(-1).query)), {
+      market: 'NYSE',
+      status: 'ACTIVE',
+    });
+    assert.equal(r.out.source.status, 'ACTIVE');
+    assert.equal(r.requests.length, 2);
+  }
 });
 test('unsupported combinations, filters and cursors fail before HTTP', async (t) => {
   for (const args of [
