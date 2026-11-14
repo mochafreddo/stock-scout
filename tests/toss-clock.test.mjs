@@ -374,74 +374,82 @@ test('failed cooldown merge preserves the observation for a later execution with
   }
 });
 
-test('cooldown publication storage failure stops a single query without another GET', async () => {
-  const f = fixture();
-  try {
-    const result = await runCli(
-      f,
-      [{ status: 429, headers: { 'Retry-After': '80' }, body: {} }],
-      undefined,
-      { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' },
-    );
-    assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.equal(JSON.parse(result.stdout).error.code, 'AUTH_STORAGE');
-    assert.equal(result.stderr, 'AUTH_STORAGE\n');
-    assert.equal(result.requests.length, 2);
-    assert.doesNotMatch(result.stdout + result.stderr, /synthetic-secret/);
-  } finally {
-    f.close();
-  }
-});
+for (const wallJump of [0, 16000]) {
+  test(`cooldown publication storage failure with ${wallJump}ms wall jump stops a single query without another GET`, async () => {
+    const f = fixture();
+    try {
+      const result = await runCli(
+        f,
+        [{ status: 429, headers: { 'Retry-After': '80' }, body: {}, responseWallJump: wallJump }],
+        undefined,
+        { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' },
+      );
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.equal(JSON.parse(result.stdout).error.code, 'AUTH_STORAGE');
+      assert.equal(result.stderr, 'AUTH_STORAGE\n');
+      assert.equal(result.requests.length, 2);
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic-secret/);
+    } finally {
+      f.close();
+    }
+  });
 
-test('cooldown publication storage failure retains completed batch data and stops later symbols', async () => {
-  const f = fixture();
-  const page = {
-    path: '/api/v1/candles',
-    body: {
-      result: {
-        candles: [
-          {
-            timestamp: '2026-11-05T14:00:00+09:00',
-            openPrice: '185.7000',
-            highPrice: '190.1250',
-            lowPrice: '180.0000',
-            closePrice: '189.0000',
-            volume: '0',
-            currency: 'USD',
-          },
-        ],
-        nextBefore: null,
+  test(`cooldown publication storage failure with ${wallJump}ms wall jump retains completed batch data and stops later symbols`, async () => {
+    const f = fixture();
+    const page = {
+      path: '/api/v1/candles',
+      body: {
+        result: {
+          candles: [
+            {
+              timestamp: '2026-11-05T14:00:00+09:00',
+              openPrice: '185.7000',
+              highPrice: '190.1250',
+              lowPrice: '180.0000',
+              closePrice: '189.0000',
+              volume: '0',
+              currency: 'USD',
+            },
+          ],
+          nextBefore: null,
+        },
       },
-    },
-  };
-  try {
-    const result = await runCli(
-      f,
-      [
-        page,
-        { path: '/api/v1/candles', status: 429, headers: { 'Retry-After': '80' }, body: {} },
-        page,
-        page,
-      ],
-      ['candles-batch', 'AAPL,MSFT,GOOG', 'count=1'],
-      { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' },
-    );
-    const out = JSON.parse(result.stdout);
-    assert.equal(result.status, 2, result.stdout + result.stderr);
-    assert.equal(out.status, 'partial');
-    assert.equal(out.data[0].status, 'success');
-    assert.equal(out.data[0].data[0].closePrice, '189.0000');
-    assert.equal(out.data[1].status, 'error');
-    assert.equal(out.data[1].error.code, 'AUTH_STORAGE');
-    assert.equal(out.data[2].status, 'not_queried');
-    assert.equal(out.data[2].reason, 'AUTH_STORAGE');
-    assert.equal(result.stderr, 'AUTH_STORAGE\n');
-    assert.equal(result.requests.length, 3);
-    assert.doesNotMatch(result.stdout + result.stderr, /synthetic-secret/);
-  } finally {
-    f.close();
-  }
-});
+    };
+    try {
+      const result = await runCli(
+        f,
+        [
+          page,
+          {
+            path: '/api/v1/candles',
+            status: 429,
+            headers: { 'Retry-After': '80' },
+            body: {},
+            responseWallJump: wallJump,
+          },
+          page,
+          page,
+        ],
+        ['candles-batch', 'AAPL,MSFT,GOOG', 'count=1'],
+        { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' },
+      );
+      const out = JSON.parse(result.stdout);
+      assert.equal(result.status, 2, result.stdout + result.stderr);
+      assert.equal(out.status, 'partial');
+      assert.equal(out.data[0].status, 'success');
+      assert.equal(out.data[0].data[0].closePrice, '189.0000');
+      assert.equal(out.data[1].status, 'error');
+      assert.equal(out.data[1].error.code, 'AUTH_STORAGE');
+      assert.equal(out.data[2].status, 'not_queried');
+      assert.equal(out.data[2].reason, 'AUTH_STORAGE');
+      assert.equal(result.stderr, 'AUTH_STORAGE\n');
+      assert.equal(result.requests.length, 3);
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic-secret/);
+    } finally {
+      f.close();
+    }
+  });
+}
 
 test('independent CLI executions retain actual spacing across a wall-clock correction', async () => {
   for (const jump of [0, 2000, -2000]) {

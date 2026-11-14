@@ -21,6 +21,13 @@ import {
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 const STORAGE_BYTES = 16384;
+const TERMINAL_ERRORS = [
+  'AUTH_FAILED',
+  'AUTH_STORAGE',
+  'AUTH_STATE_TRANSITION_REQUIRED',
+  'CLOCK_UNCERTAIN',
+  'PERMISSION_DENIED',
+];
 
 export class TossError extends Error {
   readonly code: string;
@@ -655,6 +662,7 @@ export class TossClient {
       checkRequest();
       return result;
     } catch (error) {
+      if (error instanceof TossError && TERMINAL_ERRORS.includes(error.code)) this.stopped = error;
       try {
         if (flight) checkRequest();
         else this.check();
@@ -751,17 +759,7 @@ export class TossClient {
         } else throw error;
       }
     } catch (error) {
-      if (
-        error instanceof TossError &&
-        [
-          'AUTH_FAILED',
-          'AUTH_STORAGE',
-          'AUTH_STATE_TRANSITION_REQUIRED',
-          'CLOCK_UNCERTAIN',
-          'PERMISSION_DENIED',
-        ].includes(error.code)
-      )
-        this.stopped = error;
+      if (error instanceof TossError && TERMINAL_ERRORS.includes(error.code)) this.stopped = error;
       throw error;
     }
   }
