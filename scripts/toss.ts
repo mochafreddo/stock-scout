@@ -6,7 +6,7 @@ import {
   queryCandlePage,
 } from './toss-candles.ts';
 import { TossClient, TossError } from './toss-client.ts';
-import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
+import { discoveryQuery } from './toss-discovery.ts';
 import { marketQuery } from './toss-market.ts';
 import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
 import { sessionQuery } from './toss-sessions.ts';
@@ -216,17 +216,12 @@ try {
       Object.assign(source, request.source);
       return request.parse(await read(request.query));
     }
-    if (command === 'rankings') {
-      const query = rankingQuery(symbols, rest);
-      Object.assign(source, Object.fromEntries(query), { aggregation: 'US_market' });
-      const result = rankingResult(await read(query), Number(query.get('count')));
-      Object.assign(source, result.timing);
+    if (command === 'rankings' || command === 'tradable') {
+      const request = discoveryQuery(command, symbols, rest);
+      Object.assign(source, request.source);
+      const result = request.parse(await read(request.query));
+      if ('source' in result) Object.assign(source, result.source);
       return result;
-    }
-    if (command === 'tradable') {
-      const query = tradableQuery(symbols, rest);
-      Object.assign(source, Object.fromEntries(query));
-      return tradableResult(await read(query), query);
     }
     if (command === 'stock') {
       const request = stockQuery(symbols, rest);

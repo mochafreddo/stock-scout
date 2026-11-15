@@ -163,3 +163,45 @@ test('contradictory ranking values cannot be reported as success', async (t) => 
   assert.deepEqual(mixed.out.data, [row]);
   assert.deepEqual(mixed.out.omissions, [{ index: 0, reason: 'invalid_item' }]);
 });
+
+test('failed discovery queries preserve request source without unvalidated ranking time', async (t) => {
+  for (const [args, path, bad, querySource, source = {}] of [
+    [
+      ['rankings', 'TOP_GAINERS', '1w', '2'],
+      '/api/v1/rankings',
+      { rankedAt, rankings: [row, { ...row, rank: 1 }] },
+      {
+        type: 'TOP_GAINERS',
+        duration: '1w',
+        count: '2',
+        marketCountry: 'US',
+      },
+      { aggregation: 'US_market' },
+    ],
+    [
+      ['tradable', 'NASDAQ', 'securityType=ETF', 'commonShare=false'],
+      '/api/v1/stocks/all',
+      [{ ...listed, securityType: 'ETN' }],
+      { market: 'NASDAQ', securityType: 'ETF', commonShare: 'false', status: 'ACTIVE' },
+    ],
+  ]) {
+    for (const extra of [{}, { status: 403, body: { error: { code: 'forbidden' } } }]) {
+      const r = await query(t, args, path, bad, extra);
+      assert.equal(r.status, 1);
+      assert.equal(r.out.error.code, extra.status ? 'PERMISSION_DENIED' : 'RESPONSE_INVALID');
+      assert.equal(r.stderr.trim(), r.out.error.code);
+      assert.deepEqual(r.out.data, []);
+      assert.deepEqual(r.out.source, {
+        provider: 'tossinvest',
+        endpoint: path,
+        freshness: 'unknown',
+        ...querySource,
+        ...source,
+      });
+      assert.deepEqual(
+        Object.fromEntries(new URLSearchParams(r.requests.at(-1).query)),
+        querySource,
+      );
+    }
+  }
+});

@@ -2,7 +2,29 @@ import { TossError } from './toss-client.ts';
 import { isinPattern, securityTypes } from './toss-stock.ts';
 import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
 
-export function rankingQuery(type: string | undefined, args: string[]) {
+export function discoveryQuery(
+  command: 'rankings' | 'tradable',
+  target: string | undefined,
+  args: string[],
+) {
+  if (command === 'rankings') {
+    const query = rankingQuery(target, args);
+    const count = Number(query.get('count'));
+    return {
+      query,
+      source: { ...Object.fromEntries(query), aggregation: 'US_market' },
+      parse: (value: unknown) => rankingResult(value, count),
+    };
+  }
+  const query = tradableQuery(target, args);
+  return {
+    query,
+    source: Object.fromEntries(query),
+    parse: (value: unknown) => tradableResult(value, query),
+  };
+}
+
+function rankingQuery(type: string | undefined, args: string[]) {
   const [duration, count = '20'] = args;
   if (
     !type ||
@@ -49,7 +71,7 @@ function rankingItem(row: unknown) {
     tradingAmount: row.tradingAmount,
   };
 }
-export function rankingResult(value: unknown, count: number) {
+function rankingResult(value: unknown, count: number) {
   if (!record(value) || !Array.isArray(value.rankings) || value.rankings.length > count)
     throw new TossError('RESPONSE_INVALID');
   const { rankedAt, rankings } = value;
@@ -60,10 +82,10 @@ export function rankingResult(value: unknown, count: number) {
     throw new TossError('RESPONSE_INVALID');
   if (rankings.length && rankings.length < count)
     result.omissions.push({ reason: 'fewer_than_requested' });
-  return { ...result, timing: { rankedAt } };
+  return { ...result, source: { rankedAt } };
 }
 
-export function tradableQuery(market: string | undefined, args: string[]) {
+function tradableQuery(market: string | undefined, args: string[]) {
   if (!market || !['NYSE', 'NASDAQ', 'AMEX', 'US_ETC'].includes(market))
     throw new TossError('INPUT_INVALID');
   const query = new URLSearchParams({ market });
@@ -84,7 +106,7 @@ export function tradableQuery(market: string | undefined, args: string[]) {
   if (!query.has('status')) query.set('status', 'ACTIVE');
   return query;
 }
-export function tradableResult(value: unknown, query: URLSearchParams) {
+function tradableResult(value: unknown, query: URLSearchParams) {
   if (!Array.isArray(value)) throw new TossError('RESPONSE_INVALID');
   return items(value, (row) => {
     if (!record(row)) return;
