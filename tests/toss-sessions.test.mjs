@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fixture, runCli } from './toss-cli-helper.mjs';
+import { fixture, runCli, runFreshCli } from './toss-cli-helper.mjs';
 
 const day = {
   date: '2026-03-25',
@@ -43,20 +43,16 @@ const constraintSource = {
   rulesSource: 'https://openapi.tossinvest.com/openapi-docs/latest/openapi.json',
   rulesScope: 'documented_API_rules_not_live_eligibility',
 };
-async function lookup(t, result = calendar, args = ['sessions', day.date], extra, steps) {
-  const f = fixture();
-  t.after(f.close);
-  const r = await runCli(
-    f,
+function lookup(result = calendar, args = ['sessions', day.date], extra, steps) {
+  return runFreshCli(
     steps ?? [{ path: '/api/v1/market-calendar/US', body: { result } }],
     args,
     extra,
   );
-  return { ...r, out: JSON.parse(r.stdout) };
 }
 
-test('sessions sends the explicit US local date and preserves KST sessions without a market-hours gate', async (t) => {
-  const r = await lookup(t);
+test('sessions sends the explicit US local date and preserves KST sessions without a market-hours gate', async () => {
+  const r = await lookup();
   assert.equal(r.status, 0, r.stdout);
   assert.equal(r.stderr, '');
   assert.deepEqual(r.out.data, [calendar]);
@@ -71,8 +67,8 @@ test('sessions sends the explicit US local date and preserves KST sessions witho
   );
 });
 
-test('constraints distinguishes documented API rules from unprovided symbol eligibility and app unknowns', async (t) => {
-  const r = await lookup(t, calendar, ['constraints', 'AAPL', day.date]);
+test('constraints distinguishes documented API rules from unprovided symbol eligibility and app unknowns', async () => {
+  const r = await lookup(calendar, ['constraints', 'AAPL', day.date]);
   assert.equal(r.status, 2, r.stdout);
   assert.equal(r.stderr, '');
   const c = r.out.data[0];
@@ -150,8 +146,8 @@ test('sessions excludes only adjacent days that equal the requested date or poin
     ['nextBusinessDay', '2026-03-25', { today: day, previousBusinessDay: closed('2026-03-24') }],
     ['nextBusinessDay', '2026-03-24', { today: day, previousBusinessDay: closed('2026-03-24') }],
   ]) {
-    await t.test(`${role} ${invalidDate}`, async (t) => {
-      const r = await lookup(t, { ...calendar, [role]: closed(invalidDate) });
+    await t.test(`${role} ${invalidDate}`, async () => {
+      const r = await lookup({ ...calendar, [role]: closed(invalidDate) });
       assert.equal(r.status, 2, r.stdout);
       assert.equal(r.stderr, '');
       assert.equal(r.out.status, 'partial');
@@ -162,7 +158,7 @@ test('sessions excludes only adjacent days that equal the requested date or poin
   }
 });
 
-test('sessions preserves positive submillisecond intervals across offsets and fractional precision', async (t) => {
+test('sessions preserves positive submillisecond intervals across offsets and fractional precision', async () => {
   for (const [startTime, endTime] of [
     ['2026-03-25T22:30:00.1234+09:00', '2026-03-25T22:30:00.1235+09:00'],
     ['2026-03-25T09:30:00.12340000000000000001-04:00', '2026-03-25T13:30:00.12340000000000000002Z'],
@@ -177,7 +173,7 @@ test('sessions preserves positive submillisecond intervals across offsets and fr
       afterMarket: session,
     };
     const value = { ...calendar, today };
-    const r = await lookup(t, value);
+    const r = await lookup(value);
     assert.equal(r.status, 0, r.stdout);
     assert.equal(r.stderr, '');
     assert.deepEqual(r.out.data, [value]);
@@ -185,7 +181,7 @@ test('sessions preserves positive submillisecond intervals across offsets and fr
   }
 });
 
-test('fractional acceptance cutoff preserves provider submillisecond digits when subtracting an hour', async (t) => {
+test('fractional acceptance cutoff preserves provider submillisecond digits when subtracting an hour', async () => {
   for (const [endTime, expected] of [
     ['2026-03-26T05:00:00.1234+09:00', '2026-03-25T19:00:00.1234Z'],
     ['2026-03-25T20:00:00.00000000000000000001Z', '2026-03-25T19:00:00.00000000000000000001Z'],
@@ -195,7 +191,7 @@ test('fractional acceptance cutoff preserves provider submillisecond digits when
     ['2026-03-26T00:30:00.99999999999999999999Z', '2026-03-25T23:30:00.99999999999999999999Z'],
   ]) {
     const regularMarket = { startTime: '2026-03-25T00:00:00-04:00', endTime };
-    const r = await lookup(t, { ...calendar, today: { ...day, regularMarket } }, [
+    const r = await lookup({ ...calendar, today: { ...day, regularMarket } }, [
       'constraints',
       'AAPL',
       day.date,
@@ -212,14 +208,14 @@ test('fractional acceptance cutoff preserves provider submillisecond digits when
   }
 });
 
-test('sessions rejects equal and reversed submillisecond instants across offsets', async (t) => {
+test('sessions rejects equal and reversed submillisecond instants across offsets', async () => {
   for (const [startTime, endTime] of [
     ['2026-03-25T22:30:00.1235+09:00', '2026-03-25T13:30:00.1234Z'],
     ['2026-03-25T09:30:00.1234-04:00', '2026-03-25T22:30:00.123400+09:00'],
     ['2026-03-25T13:30:00.0000Z', '2026-03-25T22:30:00+09:00'],
     ['2026-03-25T13:30:00.12340000000000000002Z', '2026-03-25T13:30:00.12340000000000000001Z'],
   ]) {
-    const r = await lookup(t, {
+    const r = await lookup({
       ...calendar,
       today: { ...day, regularMarket: { startTime, endTime } },
     });
@@ -232,7 +228,7 @@ test('sessions rejects equal and reversed submillisecond instants across offsets
   }
 });
 
-test('fractional acceptance requires a strictly positive interval at submillisecond boundaries', async (t) => {
+test('fractional acceptance requires a strictly positive interval at submillisecond boundaries', async () => {
   for (const [endTime, expected] of [
     [
       '2026-03-25T14:30:00.12340000000000000002Z',
@@ -251,7 +247,7 @@ test('fractional acceptance requires a strictly positive interval at submillisec
       startTime: '2026-03-25T22:30:00.12340000000000000001+09:00',
       endTime,
     };
-    const r = await lookup(t, { ...calendar, today: { ...day, regularMarket } }, [
+    const r = await lookup({ ...calendar, today: { ...day, regularMarket } }, [
       'constraints',
       'AAPL',
       day.date,
@@ -263,7 +259,7 @@ test('fractional acceptance requires a strictly positive interval at submillisec
   }
 });
 
-test('holidays, short sessions, standard time and local-clock changes use only provider sessions', async (t) => {
+test('holidays, short sessions, standard time and local-clock changes use only provider sessions', async () => {
   for (const [today, expected] of [
     [closed('2026-07-03'), { status: 'closed' }],
     [
@@ -288,7 +284,7 @@ test('holidays, short sessions, standard time and local-clock changes use only p
       nextBusinessDay: closed('2026-12-31'),
     };
     for (const now of ['2026-11-06T15:00:00Z', '2026-11-07T23:00:00Z']) {
-      const r = await lookup(t, value, ['constraints', 'BRK.B', today.date], {
+      const r = await lookup(value, ['constraints', 'BRK.B', today.date], {
         TEST_CLOCK_START: String(Date.parse(now)),
       });
       assert.equal(r.status, 2, r.stdout);
@@ -299,7 +295,7 @@ test('holidays, short sessions, standard time and local-clock changes use only p
   }
 });
 
-test('missing and malformed sessions remain partial and cannot turn into holiday or an acceptance window', async (t) => {
+test('missing and malformed sessions remain partial and cannot turn into holiday or an acceptance window', async () => {
   for (const regularMarket of [
     undefined,
     {},
@@ -307,19 +303,19 @@ test('missing and malformed sessions remain partial and cannot turn into holiday
     { startTime: day.regularMarket.endTime, endTime: day.regularMarket.startTime },
   ]) {
     const today = { ...day, regularMarket, extra: 'private upstream message' };
-    const r = await lookup(t, { ...calendar, today }, ['constraints', 'AAPL', day.date]);
+    const r = await lookup({ ...calendar, today }, ['constraints', 'AAPL', day.date]);
     assert.equal(r.status, 2, r.stdout);
     assert.deepEqual(r.out.data[0].fractional.acceptanceWindow, { status: 'unknown' });
     assert.equal('regularMarket' in r.out.data[0].calendar.today, false);
     assert.ok(r.out.omissions.some((x) => x.field === 'today.regularMarket'));
     assert.doesNotMatch(r.stdout, /private upstream message/);
   }
-  const r = await lookup(t, { ...calendar, previousBusinessDay: null });
+  const r = await lookup({ ...calendar, previousBusinessDay: null });
   assert.equal(r.status, 2, r.stdout);
   assert.deepEqual(r.out.data, [{ today: day, nextBusinessDay: calendar.nextBusinessDay }]);
 });
 
-test('invalid dates and unsupported options fail before authentication', async (t) => {
+test('invalid dates and unsupported options fail before authentication', async () => {
   for (const date of [
     '2026-02-29',
     '2026-04-31',
@@ -333,7 +329,7 @@ test('invalid dates and unsupported options fail before authentication', async (
       ['sessions', date],
       ['constraints', 'AAPL', date],
     ]) {
-      const r = await lookup(t, calendar, args);
+      const r = await lookup(calendar, args);
       assert.equal(r.out.error.code, 'INPUT_INVALID');
       assert.equal(r.status, 1);
       assert.equal(r.stderr.trim(), 'INPUT_INVALID');
@@ -348,12 +344,11 @@ test('invalid dates and unsupported options fail before authentication', async (
     ['constraints', 'AAPL/OTHER', day.date],
     ['constraints', 'AAPL', day.date, 'extra'],
   ]) {
-    const r = await lookup(t, calendar, args);
+    const r = await lookup(calendar, args);
     assert.equal(r.out.error.code, 'INPUT_INVALID');
     assert.deepEqual(r.requests, []);
   }
   const r = await lookup(
-    t,
     {
       today: closed('2028-02-29'),
       previousBusinessDay: closed('2028-02-28'),
@@ -386,7 +381,7 @@ test('session inputs and source attribution precede missing authentication stora
   }
 });
 
-test('invalid envelopes, mismatched dates and no usable requested sessions are errors', async (t) => {
+test('invalid envelopes, mismatched dates and no usable requested sessions are errors', async () => {
   for (const value of [
     null,
     [],
@@ -397,14 +392,14 @@ test('invalid envelopes, mismatched dates and no usable requested sessions are e
     { ...calendar, today: { date: day.date } },
     { ...calendar, today: { ...day, date: '2026-02-30' } },
   ]) {
-    const r = await lookup(t, value);
+    const r = await lookup(value);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, 'RESPONSE_INVALID');
     assert.deepEqual(r.out.data, []);
   }
 });
 
-test('session commands retain permission and bounded rate errors with safe diagnostics and GET-only reads', async (t) => {
+test('session commands retain permission and bounded rate errors with safe diagnostics and GET-only reads', async () => {
   for (const args of [
     ['sessions', day.date],
     ['constraints', 'AAPL', day.date],
@@ -430,7 +425,6 @@ test('session commands retain permission and bounded rate errors with safe diagn
       [{ status: 401, body: { error: { code: 'invalid-token' } } }, 'AUTH_FAILED', 1],
     ]) {
       const r = await lookup(
-        t,
         calendar,
         args,
         {},
@@ -449,15 +443,15 @@ test('session commands retain permission and bounded rate errors with safe diagn
   }
 });
 
-test('help discovers session and constraint commands without authentication', async (t) => {
-  const r = await lookup(t, calendar, ['--help']);
+test('help discovers session and constraint commands without authentication', async () => {
+  const r = await lookup(calendar, ['--help']);
   assert.equal(r.status, 0);
   for (const name of ['sessions', 'constraints'])
     assert.ok(r.out.data.commands.some((x) => x.name === name));
   assert.deepEqual(r.requests, []);
 });
 
-test('regular session dates must match the owning US local day before deriving a fractional window', async (t) => {
+test('regular session dates must match the owning US local day before deriving a fractional window', async () => {
   for (const regularMarket of [
     day.regularMarket,
     { startTime: '2026-11-27T23:30:00+09:00', endTime: '2026-11-29T03:00:00+09:00' },
@@ -468,7 +462,6 @@ test('regular session dates must match the owning US local day before deriving a
       regularMarket,
     };
     const r = await lookup(
-      t,
       { today, previousBusinessDay: closed('2026-11-26'), nextBusinessDay: closed('2026-11-30') },
       ['constraints', 'AAPL', '2026-11-27'],
     );
@@ -483,13 +476,13 @@ test('regular session dates must match the owning US local day before deriving a
   }
 });
 
-test('all session intervals belong to their US day, including day market crossing New York midnight', async (t) => {
+test('all session intervals belong to their US day, including day market crossing New York midnight', async () => {
   for (const name of ['dayMarket', 'preMarket', 'afterMarket']) {
     const today = {
       ...day,
       [name]: { startTime: '2026-11-27T09:00:00+09:00', endTime: '2026-11-27T16:00:00+09:00' },
     };
-    const r = await lookup(t, { ...calendar, today });
+    const r = await lookup({ ...calendar, today });
     assert.equal(r.status, 2, r.stdout);
     assert.equal(name in r.out.data[0].today, false);
     assert.ok(

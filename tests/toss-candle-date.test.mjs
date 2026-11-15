@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fixture, runCli } from './toss-cli-helper.mjs';
+import { fixture, runCli, runFreshCli } from './toss-cli-helper.mjs';
 
 const stock = {
   symbol: 'AAPL',
@@ -23,16 +23,12 @@ const candle = {
   volume: '100',
   currency: 'USD',
 };
-async function lookup(t, steps, args = ['AAPL', '1d', 'date=2026-11-06'], extra) {
-  const f = fixture();
-  t.after(f.close);
-  const result = await runCli(f, steps, ['candles', ...args], extra);
-  return { ...result, out: JSON.parse(result.stdout) };
+function lookup(steps, args = ['AAPL', '1d', 'date=2026-11-06'], extra) {
+  return runFreshCli(steps, ['candles', ...args], extra);
 }
 
-test('daily date includes the selected New York trade date after confirming the provider market', async (t) => {
+test('daily date includes the selected New York trade date after confirming the provider market', async () => {
   const r = await lookup(
-    t,
     [
       { path: '/api/v1/stocks', body: { result: [stock] } },
       { path: '/api/v1/candles', body: { result: { candles: [candle], nextBefore: null } } },
@@ -62,7 +58,7 @@ test('daily date includes the selected New York trade date after confirming the 
   assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
 });
 
-test('date selection uses New York midnight on both DST transition dates and preserves timestamp spelling', async (t) => {
+test('date selection uses New York midnight on both DST transition dates and preserves timestamp spelling', async () => {
   for (const [date, before, timestamp] of [
     ['2026-03-08', '2026-03-08T05:00:00.000Z', '2026-03-07T21:00:00-08:00'],
     ['2026-03-09', '2026-03-09T04:00:00.000Z', '2026-03-09T13:00:00+09:00'],
@@ -72,7 +68,6 @@ test('date selection uses New York midnight on both DST transition dates and pre
   ]) {
     const row = { ...candle, timestamp };
     const r = await lookup(
-      t,
       [
         { path: '/api/v1/stocks', body: { result: [stock] } },
         { path: '/api/v1/candles', body: { result: { candles: [row], nextBefore: null } } },
@@ -87,7 +82,7 @@ test('date selection uses New York midnight on both DST transition dates and pre
   }
 });
 
-test('invalid dates, minute dates and conflicting bounds are rejected before any HTTP', async (t) => {
+test('invalid dates, minute dates and conflicting bounds are rejected before any HTTP', async () => {
   for (const args of [
     ['AAPL', '1d', 'date=2026-02-29'],
     ['AAPL', '1d', 'date=2026-04-31'],
@@ -99,7 +94,7 @@ test('invalid dates, minute dates and conflicting bounds are rejected before any
     ['AAPL', '1d', 'date=2026-11-06', 'before=2026-11-06T05:00:00Z'],
     ['AAPL', '1d', 'before=2026-11-06T05:00:00Z', 'date=2026-11-06'],
   ]) {
-    const r = await lookup(t, [], args);
+    const r = await lookup([], args);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, 'INPUT_INVALID');
     assert.equal(r.stderr.trim(), 'INPUT_INVALID');
@@ -107,9 +102,9 @@ test('invalid dates, minute dates and conflicting bounds are rejected before any
   }
 });
 
-test('date selection accepts all provider US markets and does not require a known security type', async (t) => {
+test('date selection accepts all provider US markets and does not require a known security type', async () => {
   for (const market of ['NYSE', 'NASDAQ', 'AMEX', 'US_ETC']) {
-    const r = await lookup(t, [
+    const r = await lookup([
       {
         path: '/api/v1/stocks',
         body: { result: [{ ...stock, market, securityType: 'FUTURE_TYPE' }] },
@@ -124,7 +119,7 @@ test('date selection accepts all provider US markets and does not require a know
   }
 });
 
-test('date selection rejects unconfirmed markets and malformed or ambiguous identity without requesting candles', async (t) => {
+test('date selection rejects unconfirmed markets and malformed or ambiguous identity without requesting candles', async () => {
   for (const [rows, code] of [
     ...['KOSPI', 'KOSDAQ', 'KR_ETC', 'FUTURE_MARKET'].map((market) => [
       [{ ...stock, market }],
@@ -139,7 +134,7 @@ test('date selection rejects unconfirmed markets and malformed or ambiguous iden
     [[{ ...stock, currency: undefined }], 'RESPONSE_INVALID'],
     [null, 'RESPONSE_INVALID'],
   ]) {
-    const r = await lookup(t, [{ path: '/api/v1/stocks', body: { result: rows } }]);
+    const r = await lookup([{ path: '/api/v1/stocks', body: { result: rows } }]);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, code);
     assert.equal(r.stderr.trim(), code);
@@ -152,10 +147,9 @@ test('date selection rejects unconfirmed markets and malformed or ambiguous iden
   }
 });
 
-test('a holiday date requests one page with unchanged count and adjustment and reuses the provider boundary without date', async (t) => {
+test('a holiday date requests one page with unchanged count and adjustment and reuses the provider boundary without date', async () => {
   const nextBefore = '2026-11-25T14:00:00.123400+09:00';
   const first = await lookup(
-    t,
     [
       { path: '/api/v1/stocks', body: { result: [stock] } },
       { path: '/api/v1/candles', body: { result: { candles: [], nextBefore } } },
@@ -176,7 +170,6 @@ test('a holiday date requests one page with unchanged count and adjustment and r
   });
   assert.equal(first.requests.length, 3);
   const second = await lookup(
-    t,
     [{ path: '/api/v1/candles', body: { result: { candles: [], nextBefore: null } } }],
     ['AAPL', '1d', 'count=1', 'adjusted=false', `before=${first.out.page.nextBefore}`],
   );
@@ -191,13 +184,13 @@ test('a holiday date requests one page with unchanged count and adjustment and r
   assert.equal(Object.hasOwn(second.out.source, 'market'), false);
 });
 
-test('date-selected pages retain unknown boundaries, valid partial rows and the inclusive upper-bound check', async (t) => {
+test('date-selected pages retain unknown boundaries, valid partial rows and the inclusive upper-bound check', async () => {
   for (const [result, status, reason] of [
     [{ candles: [] }, 2, 'pagination_unknown'],
     [{ candles: [candle, { ...candle, volume: null }], nextBefore: null }, 2, 'invalid_item'],
     [{ candles: [{ ...candle, timestamp: '2026-11-07T14:00:00+09:00' }], nextBefore: null }, 1],
   ]) {
-    const r = await lookup(t, [
+    const r = await lookup([
       { path: '/api/v1/stocks', body: { result: [stock] } },
       { path: '/api/v1/candles', body: { result } },
     ]);
@@ -212,7 +205,7 @@ test('date-selected pages retain unknown boundaries, valid partial rows and the 
   }
 });
 
-test('market failures remain safe errors and never fall through to a candle request', async (t) => {
+test('market failures remain safe errors and never fall through to a candle request', async () => {
   for (const [step, code] of [
     [
       { status: 403, body: { error: { code: 'ip-not-allowed', message: 'synthetic-secret' } } },
@@ -222,7 +215,7 @@ test('market failures remain safe errors and never fall through to a candle requ
     [{ status: 429, headers: { 'Retry-After': '60' }, body: {} }, 'TIMEOUT'],
     [{ hang: true }, 'TIMEOUT'],
   ]) {
-    const r = await lookup(t, [{ path: '/api/v1/stocks', ...step }]);
+    const r = await lookup([{ path: '/api/v1/stocks', ...step }]);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, code);
     assert.equal(r.stderr.trim(), code);
@@ -234,8 +227,8 @@ test('market failures remain safe errors and never fall through to a candle requ
   }
 });
 
-test('market checks and candle retries share the original sixty-second deadline', async (t) => {
-  const r = await lookup(t, [
+test('market checks and candle retries share the original sixty-second deadline', async () => {
+  const r = await lookup([
     { path: '/api/v1/stocks', status: 429, headers: { 'Retry-After': '35' }, body: {} },
     { path: '/api/v1/stocks', body: { result: [stock] } },
     { path: '/api/v1/candles', status: 429, headers: { 'Retry-After': '30' }, body: {} },
@@ -252,8 +245,8 @@ test('market checks and candle retries share the original sixty-second deadline'
   assert.ok(r.requests.at(-1).at - r.requests[0].at < 60000);
 });
 
-test('market and candle authentication recovery and retries retain common HTTP spacing', async (t) => {
-  const r = await lookup(t, [
+test('market and candle authentication recovery and retries retain common HTTP spacing', async () => {
+  const r = await lookup([
     { path: '/api/v1/stocks', status: 401, body: { error: { code: 'expired-token' } } },
     { path: '/api/v1/stocks', status: 503, body: {} },
     { path: '/api/v1/stocks', body: { result: [stock] } },

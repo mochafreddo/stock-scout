@@ -108,7 +108,7 @@ function headingIds(text: string) {
   return ids;
 }
 
-function checkLinks(root: string, files: string[]) {
+function checkLinks(root: string, files: string[], headingCache?: Map<string, Set<string>>) {
   for (const file of files.filter((name) => name.endsWith('.md'))) {
     const source = join(root, file);
     if (!realpathSync(source).startsWith(`${root}/`))
@@ -129,16 +129,16 @@ function checkLinks(root: string, files: string[]) {
           )
         : source;
       if (!existsSync(target)) throw new Error(`${file}: missing local target ${link}`);
-      const inside = relative(root, realpathSync(target));
+      const realTarget = realpathSync(target);
+      const inside = relative(root, realTarget);
       if (inside === '..' || inside.startsWith('../') || isAbsolute(inside)) {
         throw new Error(`${file}: local target leaves snapshot: ${link}`);
       }
-      if (
-        fragment &&
-        target.endsWith('.md') &&
-        !headingIds(markdownText(target)).has(decodeURIComponent(fragment))
-      ) {
-        throw new Error(`${file}: missing heading ${link}`);
+      if (fragment && target.endsWith('.md')) {
+        const ids = headingCache?.get(realTarget) ?? headingIds(markdownText(target));
+        headingCache?.set(realTarget, ids);
+        if (!ids.has(decodeURIComponent(fragment)))
+          throw new Error(`${file}: missing heading ${link}`);
       }
     }
   }
@@ -356,7 +356,7 @@ function checkSnapshot(
     }
     const files = snapshot(tree, root);
     checkSkills(root, files);
-    checkLinks(root, files);
+    checkLinks(root, files, new Map());
     if (changed.some((file) => !file.endsWith('.md'))) qualityChecks(root, source, staged);
     if (stagedTree && stagedTree() !== tree)
       throw new Error('Index changed during staged checks; retry the commit');

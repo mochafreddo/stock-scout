@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fixture, runCli } from './toss-cli-helper.mjs';
+import { fixture, runCli, runFreshCli } from './toss-cli-helper.mjs';
 
 const stock = {
   symbol: 'DEMO',
@@ -15,14 +15,11 @@ const stock = {
   sharesOutstanding: '100',
 };
 const endpoint = '/api/v1/stocks';
-async function lookup(t, rows, args = ['stock', 'DEMO']) {
-  const f = fixture();
-  t.after(f.close);
-  const run = await runCli(f, [{ path: endpoint, body: { result: rows } }], args);
-  return { ...run, out: JSON.parse(run.stdout) };
+function lookup(rows, args = ['stock', 'DEMO']) {
+  return runFreshCli([{ path: endpoint, body: { result: rows } }], args);
 }
-test('stock retrieves the specified symbol and projects its identity, type and listing state', async (t) => {
-  const r = await lookup(t, [stock]);
+test('stock retrieves the specified symbol and projects its identity, type and listing state', async () => {
+  const r = await lookup([stock]);
   assert.equal(r.status, 0, r.stdout);
   assert.equal(r.stderr, '');
   assert.deepEqual(
@@ -47,7 +44,7 @@ test('stock retrieves the specified symbol and projects its identity, type and l
   assert.ok(Number.isFinite(Date.parse(r.out.retrievedAt)));
 });
 
-test('stock asks for a market and ISIN selection, then applies it only to the fresh response', async (t) => {
+test('stock asks for a market and ISIN selection, then applies it only to the fresh response', async () => {
   const other = {
     ...stock,
     name: '합성 ETN',
@@ -55,7 +52,7 @@ test('stock asks for a market and ISIN selection, then applies it only to the fr
     isinCode: 'US0000000010',
     securityType: 'ETN',
   };
-  const r = await lookup(t, [other, stock]);
+  const r = await lookup([other, stock]);
   assert.equal(r.status, 1);
   assert.equal(r.out.error.code, 'IDENTITY_AMBIGUOUS');
   assert.deepEqual(r.out.data, []);
@@ -64,16 +61,16 @@ test('stock asks for a market and ISIN selection, then applies it only to the fr
     { symbol: 'DEMO', name: '합성 ETF', market: 'NASDAQ', isinCode: 'US0000000002' },
   ]);
   const args = ['stock', 'DEMO', 'NYSE', 'US0000000010'];
-  const selected = await lookup(t, [stock, other], args);
+  const selected = await lookup([stock, other], args);
   assert.equal(selected.status, 0, selected.stdout);
   assert.equal(selected.out.data[0].securityType, 'ETN');
   assert.equal(selected.requests.at(-1).query, '?symbols=DEMO');
-  const stale = await lookup(t, [stock], args);
+  const stale = await lookup([stock], args);
   assert.equal(stale.out.error.code, 'NOT_FOUND');
 });
 
 test('unrecognized types remain usable identities and never gate a prices call', async (t) => {
-  const r = await lookup(t, [{ ...stock, securityType: 'NEW_TYPE', isinCode: '' }]);
+  const r = await lookup([{ ...stock, securityType: 'NEW_TYPE', isinCode: '' }]);
   assert.equal(r.status, 2);
   assert.equal(r.out.data[0].securityType, null);
   assert.equal(r.out.data[0].isinCode, null);
@@ -104,11 +101,11 @@ test('stock separates empty and failed lookups, malformed rows and partial respo
     [[{ ...stock, isinCode: null }], 'RESPONSE_INVALID'],
     [[stock, stock], 'RESPONSE_INVALID'],
   ]) {
-    const r = await lookup(t, rows);
+    const r = await lookup(rows);
     assert.equal(r.status, 1);
     assert.equal(r.out.error.code, code);
   }
-  const r = await lookup(t, [stock, { ...stock, symbol: 'OTHER' }]);
+  const r = await lookup([stock, { ...stock, symbol: 'OTHER' }]);
   assert.equal(r.status, 2);
   assert.deepEqual(r.out.omissions, [{ index: 1, reason: 'invalid_item' }]);
   const f = fixture();
@@ -131,26 +128,24 @@ test('stock separates empty and failed lookups, malformed rows and partial respo
   );
 });
 
-test('stock preserves the existing 30-character decimal limit for shares outstanding', async (t) => {
-  const valid = await lookup(t, [
-    { ...stock, sharesOutstanding: '1234567890123456789012345678.9' },
-  ]);
+test('stock preserves the existing 30-character decimal limit for shares outstanding', async () => {
+  const valid = await lookup([{ ...stock, sharesOutstanding: '1234567890123456789012345678.9' }]);
   assert.equal(valid.status, 0, valid.stdout);
   assert.equal(valid.out.data[0].symbol, 'DEMO');
 
-  const invalid = await lookup(t, [
+  const invalid = await lookup([
     { ...stock, sharesOutstanding: '12345678901234567890123456789.9' },
   ]);
   assert.equal(invalid.status, 1, invalid.stdout);
   assert.equal(invalid.out.error.code, 'RESPONSE_INVALID');
 });
 
-test('stock rejects secrets in selected data or choices and invalid arguments before HTTP', async (t) => {
+test('stock rejects secrets in selected data or choices and invalid arguments before HTTP', async () => {
   for (const rows of [
     [{ ...stock, name: 'synthetic-token' }],
     [stock, { ...stock, name: 'synthetic-token', market: 'NYSE' }],
   ]) {
-    const r = await lookup(t, rows);
+    const r = await lookup(rows);
     assert.equal(r.status, 1);
     assert.equal(r.out.error.code, 'SENSITIVE_OUTPUT');
     assert.doesNotMatch(r.stdout + r.stderr, /synthetic-token/);
@@ -160,27 +155,27 @@ test('stock rejects secrets in selected data or choices and invalid arguments be
     ['stock', 'DEMO', 'NYSE', 'bad'],
     ['stock', 'DEMO/OTHER'],
   ]) {
-    const r = await lookup(t, [], args);
+    const r = await lookup([], args);
     assert.equal(r.out.error.code, 'INPUT_INVALID');
     assert.equal(r.requests.length, 0);
   }
 });
 
-test('selection can distinguish a missing ISIN from a known ISIN in the same market', async (t) => {
+test('selection can distinguish a missing ISIN from a known ISIN in the same market', async () => {
   const rows = [stock, { ...stock, isinCode: '', name: '합성 별도 종목' }];
-  const r = await lookup(t, rows, ['stock', 'DEMO', 'NASDAQ', '-']);
+  const r = await lookup(rows, ['stock', 'DEMO', 'NASDAQ', '-']);
   assert.equal(r.status, 0, r.stdout);
   assert.equal(r.out.data[0].name, '합성 별도 종목');
   assert.equal(r.out.data[0].isinCode, null);
 });
 
-test('an identifiable but malformed listing still requires a choice; duplicate rows cannot hide a different listing', async (t) => {
+test('an identifiable but malformed listing still requires a choice; duplicate rows cannot hide a different listing', async () => {
   const other = { ...stock, name: '합성 별도 종목', market: 'NYSE', isinCode: 'US0000000010' };
   for (const rows of [
     [stock, { ...other, sharesOutstanding: null }],
     [stock, stock, other],
   ]) {
-    const r = await lookup(t, rows);
+    const r = await lookup(rows);
     assert.equal(r.out.error?.code, 'IDENTITY_AMBIGUOUS', r.stdout);
     assert.deepEqual(
       r.out.error.choices.map(({ market }) => market),
@@ -188,12 +183,11 @@ test('an identifiable but malformed listing still requires a choice; duplicate r
     );
   }
   const malformed = await lookup(
-    t,
     [stock, { ...other, sharesOutstanding: null }],
     ['stock', 'DEMO', 'NYSE'],
   );
   assert.equal(malformed.out.error.code, 'RESPONSE_INVALID');
-  const selected = await lookup(t, [stock, stock, other], ['stock', 'DEMO', 'NYSE']);
+  const selected = await lookup([stock, stock, other], ['stock', 'DEMO', 'NYSE']);
   assert.equal(selected.out.data[0].market, 'NYSE');
 });
 

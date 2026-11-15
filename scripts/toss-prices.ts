@@ -33,11 +33,12 @@ export function priceQuery(symbols: string | undefined, args: string[]) {
 export function priceResult(value: unknown, { symbols }: ReturnType<typeof priceQuery>) {
   if (!Array.isArray(value)) throw new TossError('RESPONSE_INVALID');
   const rows: unknown[] = value;
-  const requested = new Set(symbols.split(','));
-  const counts = new Map<string, number>();
+  const counts = new Map(symbols.split(',').map((symbol) => [symbol, 0]));
   for (const row of rows)
-    if (row && typeof row === 'object' && 'symbol' in row && typeof row.symbol === 'string')
-      counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1);
+    if (row && typeof row === 'object' && 'symbol' in row && typeof row.symbol === 'string') {
+      const count = counts.get(row.symbol);
+      if (count !== undefined) counts.set(row.symbol, count + 1);
+    }
   const { data, omissions } = items<Price>(rows, (row) => {
     const timestamp =
       row && typeof row === 'object' && 'timestamp' in row ? row.timestamp : undefined;
@@ -48,7 +49,6 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
       typeof row.symbol !== 'string' ||
       !('lastPrice' in row) ||
       !('currency' in row) ||
-      !requested.has(row.symbol) ||
       counts.get(row.symbol) !== 1 ||
       !decimal(row.lastPrice) ||
       typeof row.currency !== 'string' ||
@@ -58,7 +58,7 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
         (typeof timestamp !== 'string' || !validTime(timestamp)))
     )
       return;
-    requested.delete(row.symbol);
+    counts.delete(row.symbol);
     return {
       symbol: row.symbol,
       lastPrice: row.lastPrice,
@@ -67,7 +67,7 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
     };
   });
   const missing = rows.length
-    ? Array.from(requested, (symbol) => ({ symbol, reason: 'missing_item' }))
+    ? Array.from(counts.keys(), (symbol) => ({ symbol, reason: 'missing_item' }))
     : [];
   return { data, omissions: [...omissions, ...missing] };
 }

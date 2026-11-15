@@ -41,7 +41,18 @@ export class TossError extends Error {
     this.requestId = requestId;
   }
 }
-type AccountSelection = { alias: string; accountSeq: string; scopes: string[] };
+const accountScopes = [
+  'holdings',
+  'buying-power',
+  'transactions',
+  'orders',
+  'conditional-orders',
+] as const;
+export type AccountScope = (typeof accountScopes)[number];
+export function isAccountScope(value: unknown): value is AccountScope {
+  return accountScopes.some((scope) => scope === value);
+}
+type AccountSelection = { alias: string; accountSeq: string; scopes: AccountScope[] };
 function contains(json: string, values: Set<string>) {
   for (const value of values) if (json.includes(JSON.stringify(value).slice(1, -1))) return true;
   return false;
@@ -66,9 +77,7 @@ function accountSelection(value: unknown): AccountSelection {
     !('scopes' in value) ||
     !Array.isArray(value.scopes) ||
     !value.scopes.length ||
-    !value.scopes.every((scope) =>
-      ['holdings', 'buying-power', 'transactions', 'orders', 'conditional-orders'].includes(scope),
-    ) ||
+    !value.scopes.every(isAccountScope) ||
     new Set(value.scopes).size !== value.scopes.length
   )
     throw new TossError('ACCOUNT_SELECTION_REQUIRED');
@@ -506,7 +515,7 @@ export class TossClient {
     return contains(json, this.accountIdentifiers);
   }
   async queryAccount<T extends { data: unknown[]; page?: { nextCursor?: unknown } }>(
-    request: { scope: string; endpoint: string; query: URLSearchParams; context?: string },
+    request: { scope: AccountScope; endpoint: string; query: URLSearchParams; context?: string },
     parse: (value: unknown) => T,
     onSelected: (alias: string) => void,
   ) {
@@ -551,7 +560,7 @@ export class TossClient {
       },
     };
   }
-  private selectedAccount(scope: string) {
+  private selectedAccount(scope: AccountScope) {
     let selected: AccountSelection;
     try {
       const value = read(join(this.directory, 'account.json'));

@@ -582,6 +582,29 @@ test('documentation pushes check fragments and reference links without running c
   assert.doesNotMatch(good.stderr, /fixture check|fixture typecheck|fixture test/);
 });
 
+for (const mode of ['staged', 'push'])
+  test(`${mode} link checks preserve per-target headings across repeated references (characterization)`, (t) => {
+    const { root, base } = fixture(t);
+    writeFileSync(join(root, 'first.md'), '# First\n\n## Details\n');
+    writeFileSync(join(root, 'second.md'), '# Second\n');
+    const links =
+      '# Start\n\n[First](first.md#first)\n[Details](first.md#details)\n[Second](second.md#second)\n';
+    for (const fragment of ['first', 'second']) {
+      writeFileSync(join(root, 'README.md'), `${links}[Again](first.md#${fragment})\n`);
+      git(root, 'add', '.');
+      if (mode === 'push') git(root, 'commit', '-m', `reference ${fragment}`);
+      const result = run(
+        root,
+        git(root, 'rev-parse', 'HEAD'),
+        base,
+        mode === 'staged' ? ['--staged'] : [],
+      );
+      assert.equal(result.status, fragment === 'first' ? 0 : 1, result.stderr);
+      if (fragment === 'second') assert.match(result.stderr, /missing heading.*first\.md#second/);
+      assert.doesNotMatch(result.stderr, /fixture check|fixture typecheck|fixture test/);
+    }
+  });
+
 test('installed hook preserves the existing scanner and blocks an actual local push', (t) => {
   const { root } = fixture(t);
   mkdirSync(join(root, 'scripts'));

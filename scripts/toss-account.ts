@@ -1,13 +1,9 @@
-import { TossError } from './toss-client.ts';
+import { type AccountScope, TossError } from './toss-client.ts';
 import { orderQuery, orderResult } from './toss-orders.ts';
 import { transactionQuery, transactionResult } from './toss-transactions.ts';
 import { decimal, record, symbolPattern } from './toss-values.ts';
 
-export function accountQuery(
-  command: 'holdings' | 'buying-power' | 'transactions' | 'orders' | 'conditional-orders',
-  firstArg: string | undefined,
-  args: string[],
-) {
+export function accountQuery(command: AccountScope, firstArg: string | undefined, args: string[]) {
   if (command === 'transactions') {
     const request = transactionQuery(firstArg, args);
     return {

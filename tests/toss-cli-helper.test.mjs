@@ -1,9 +1,31 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { closeRuns, fixture, price, runCli, waitForFile } from './toss-cli-helper.mjs';
+import { closeRuns, fixture, price, runCli, runFreshCli, waitForFile } from './toss-cli-helper.mjs';
+
+test('fresh CLI runs remove their fixture after success and spawn failure', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'fresh-cli-test-'));
+  const previousTmpdir = process.env.TMPDIR;
+  const executable = process.execPath;
+  process.env.TMPDIR = directory;
+  try {
+    const result = await runFreshCli([], ['--help']);
+    assert.equal(result.status, 0);
+    assert.ok(result.out.data.commands.length > 0);
+    assert.deepEqual(readdirSync(directory), []);
+    process.execPath = join(directory, 'missing-node');
+    await assert.rejects(runFreshCli(), { code: 'ENOENT' });
+    assert.deepEqual(readdirSync(directory), []);
+  } finally {
+    process.execPath = executable;
+    if (previousTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmpdir;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 for (const failure of ['readiness timeout', 'assertion failure'])
   test(`gated child cleanup reaps its child before removing state after ${failure}`, async () => {

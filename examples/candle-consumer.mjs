@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { decimal, validTime } from '../scripts/toss-values.ts';
 
+const tradeDateFormat = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 const output = JSON.parse(readFileSync(0, 'utf8'));
 assert.equal(output.version, 1);
 assert.ok(
@@ -22,14 +28,7 @@ const data = rows.map((row) => {
     assert.ok(Number(bar.closePrice) >= 0, 'closePrice must be nonnegative');
     assert.ok(Number(bar.volume) >= 0, 'volume must be nonnegative');
     assert.ok(validTime(bar.timestamp), 'timestamp must be valid');
-    const tradeDate = knownMarket
-      ? new Intl.DateTimeFormat('en-CA', {
-          timeZone: 'America/New_York',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-        }).format(new Date(bar.timestamp))
-      : null;
+    const tradeDate = knownMarket ? tradeDateFormat.format(new Date(bar.timestamp)) : null;
     return { timestamp: bar.timestamp, tradeDate, closePrice: bar.closePrice, volume: bar.volume };
   });
   return {

@@ -80,6 +80,15 @@ export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
   });
   return Object.assign(result, { child });
 }
+export async function runFreshCli(steps, args, extra) {
+  const f = fixture();
+  try {
+    const result = await runCli(f, steps, args, extra);
+    return { ...result, out: JSON.parse(result.stdout) };
+  } finally {
+    f.close();
+  }
+}
 export async function waitForFile(path, run, timeout = 5000) {
   let failure;
   run.then(

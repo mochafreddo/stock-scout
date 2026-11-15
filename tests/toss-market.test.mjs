@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fixture, runCli } from './toss-cli-helper.mjs';
+import { fixture, runCli, runFreshCli } from './toss-cli-helper.mjs';
 
-async function lookup(t, command, result, args = ['AAPL']) {
-  const f = fixture();
-  t.after(f.close);
-  const r = await runCli(f, [{ path: `/api/v1/${command}`, body: { result } }], [command, ...args]);
-  return { ...r, out: JSON.parse(r.stdout) };
+function lookup(command, result, args = ['AAPL']) {
+  return runFreshCli([{ path: `/api/v1/${command}`, body: { result } }], [command, ...args]);
 }
 const book = {
   currency: 'USD',
@@ -28,8 +25,8 @@ const trade = {
   currency: 'USD',
 };
 
-test('orderbook preserves both sides, provider order, decimals and source timing', async (t) => {
-  const r = await lookup(t, 'orderbook', {
+test('orderbook preserves both sides, provider order, decimals and source timing', async () => {
+  const r = await lookup('orderbook', {
     ...book,
     privateExtra: 'private upstream message',
     asks: book.asks.map((row) => ({ ...row, extra: 'synthetic-secret' })),
@@ -59,7 +56,7 @@ test('orderbook preserves both sides, provider order, decimals and source timing
   assert.doesNotMatch(r.stdout + r.stderr, /private upstream message|synthetic-secret/);
 });
 
-test('trades sends the requested count and preserves identical executions and provider order', async (t) => {
+test('trades sends the requested count and preserves identical executions and provider order', async () => {
   const rows = [
     trade,
     trade,
@@ -71,7 +68,7 @@ test('trades sends the requested count and preserves identical executions and pr
       timestamp: '2026-11-06T10:30:41.250-05:00',
     },
   ];
-  const r = await lookup(t, 'trades', rows, ['BRK.B', '3']);
+  const r = await lookup('trades', rows, ['BRK.B', '3']);
   assert.equal(r.status, 0, r.stdout);
   assert.equal(r.stderr, '');
   assert.deepEqual(r.out.data, rows);
@@ -97,9 +94,9 @@ test('trades sends the requested count and preserves identical executions and pr
   );
 });
 
-test('empty books, missing or null book times, and short or empty recent trades are successful', async (t) => {
+test('empty books, missing or null book times, and short or empty recent trades are successful', async () => {
   for (const timestamp of [undefined, null]) {
-    const r = await lookup(t, 'orderbook', { ...book, asks: [], bids: [], timestamp });
+    const r = await lookup('orderbook', { ...book, asks: [], bids: [], timestamp });
     assert.equal(r.status, 0, r.stdout);
     assert.deepEqual(r.out.data, [
       { currency: 'USD', asks: [], bids: [], ...(timestamp === null ? { timestamp: null } : {}) },
@@ -107,7 +104,7 @@ test('empty books, missing or null book times, and short or empty recent trades 
     assert.equal(r.out.source.freshness, 'unknown');
   }
   for (const rows of [[], [trade]]) {
-    const r = await lookup(t, 'trades', rows);
+    const r = await lookup('trades', rows);
     assert.equal(r.status, 0, r.stdout);
     assert.deepEqual(r.out.data, rows);
     assert.deepEqual(r.out.omissions, []);
@@ -115,14 +112,14 @@ test('empty books, missing or null book times, and short or empty recent trades 
   }
 });
 
-test('book depth is not truncated and trade count boundaries are sent without extra requests', async (t) => {
+test('book depth is not truncated and trade count boundaries are sent without extra requests', async () => {
   const asks = Array.from({ length: 60 }, () => ({ price: '1.0000', volume: '0.1250' }));
-  const r = await lookup(t, 'orderbook', { ...book, asks });
+  const r = await lookup('orderbook', { ...book, asks });
   assert.equal(r.status, 0, r.stdout);
   assert.deepEqual(r.out.data[0].asks, asks);
   for (const count of ['1', '50']) {
     const rows = Array.from({ length: Number(count) }, () => trade);
-    const r = await lookup(t, 'trades', rows, ['AAPL', count]);
+    const r = await lookup('trades', rows, ['AAPL', count]);
     assert.equal(r.status, 0, r.stdout);
     assert.deepEqual(r.out.data, rows);
     assert.equal(r.requests.at(-1).query, `?symbol=AAPL&count=${count}`);
@@ -130,8 +127,8 @@ test('book depth is not truncated and trade count boundaries are sent without ex
   }
 });
 
-test('malformed book levels are omitted by side and index; no usable levels is an error', async (t) => {
-  const r = await lookup(t, 'orderbook', {
+test('malformed book levels are omitted by side and index; no usable levels is an error', async () => {
+  const r = await lookup('orderbook', {
     ...book,
     asks: [{ price: null, volume: '1' }, book.asks[0]],
     bids: [{ price: '1', volume: 0 }],
@@ -153,7 +150,7 @@ test('malformed book levels are omitted by side and index; no usable levels is a
     { ...book, asks: [{ price: '1' }], bids: [] },
     { ...book, asks: [], bids: [{ price: '1'.repeat(31), volume: '1' }] },
   ]) {
-    const r = await lookup(t, 'orderbook', value);
+    const r = await lookup('orderbook', value);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, 'RESPONSE_INVALID');
     assert.deepEqual(r.out.data, []);
@@ -161,7 +158,7 @@ test('malformed book levels are omitted by side and index; no usable levels is a
   }
 });
 
-test('trades excludes invalid required fields without reconstructing unknown times or values', async (t) => {
+test('trades excludes invalid required fields without reconstructing unknown times or values', async () => {
   const invalid = [
     { ...trade, price: null },
     { ...trade, price: 0 },
@@ -176,7 +173,7 @@ test('trades excludes invalid required fields without reconstructing unknown tim
     { ...trade, currency: null },
     { ...trade, currency: undefined },
   ];
-  const r = await lookup(t, 'trades', [trade, ...invalid]);
+  const r = await lookup('trades', [trade, ...invalid]);
   assert.equal(r.status, 2, r.stdout);
   assert.deepEqual(r.out.data, [trade]);
   assert.deepEqual(
@@ -184,15 +181,15 @@ test('trades excludes invalid required fields without reconstructing unknown tim
     invalid.map((_, index) => ({ index: index + 1, reason: 'invalid_item' })),
   );
   for (const rows of [invalid, null, {}, [trade, trade]]) {
-    const r = await lookup(t, 'trades', rows, ['AAPL', '1']);
+    const r = await lookup('trades', rows, ['AAPL', '1']);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, 'RESPONSE_INVALID');
   }
-  const allInvalid = await lookup(t, 'trades', [{ ...trade, timestamp: null }]);
+  const allInvalid = await lookup('trades', [{ ...trade, timestamp: null }]);
   assert.equal(allInvalid.out.error.code, 'RESPONSE_INVALID');
 });
 
-test('market commands reject multi-symbol, page, period and depth requests before authentication', async (t) => {
+test('market commands reject multi-symbol, page, period and depth requests before authentication', async () => {
   for (const command of ['orderbook', 'trades']) {
     for (const args of [
       [],
@@ -202,7 +199,7 @@ test('market commands reject multi-symbol, page, period and depth requests befor
       ['AAPL', '1d'],
       ['AAPL', '1', 'extra'],
     ]) {
-      const r = await lookup(t, command, [], args);
+      const r = await lookup(command, [], args);
       assert.equal(r.status, 1, r.stdout);
       assert.equal(r.out.error.code, 'INPUT_INVALID');
       assert.deepEqual(r.requests, []);
@@ -211,11 +208,11 @@ test('market commands reject multi-symbol, page, period and depth requests befor
     }
   }
   for (const count of ['0', '51', '-1', '1.5', '01', '1e1', '']) {
-    const r = await lookup(t, 'trades', [], ['AAPL', count]);
+    const r = await lookup('trades', [], ['AAPL', count]);
     assert.equal(r.out.error.code, 'INPUT_INVALID');
     assert.deepEqual(r.requests, []);
   }
-  const r = await lookup(t, 'orderbook', book, ['AAPL', '10']);
+  const r = await lookup('orderbook', book, ['AAPL', '10']);
   assert.equal(r.out.error.code, 'INPUT_INVALID');
   assert.deepEqual(r.requests, []);
 });
@@ -323,17 +320,17 @@ test('help discovers both market commands without authentication', async (t) => 
   assert.deepEqual(r.requests, []);
 });
 
-test('invalid optional book time preserves valid levels as partial; new currency codes remain usable', async (t) => {
+test('invalid optional book time preserves valid levels as partial; new currency codes remain usable', async () => {
   for (const timestamp of ['2026-02-30T10:00:00Z', '2026-11-06T10:00:00']) {
-    const r = await lookup(t, 'orderbook', { ...book, timestamp });
+    const r = await lookup('orderbook', { ...book, timestamp });
     assert.equal(r.status, 2, r.stdout);
     assert.deepEqual(r.out.data, [{ currency: 'USD', asks: book.asks, bids: book.bids }]);
     assert.deepEqual(r.out.omissions, [{ field: 'timestamp', reason: 'invalid_timestamp' }]);
   }
-  const r = await lookup(t, 'orderbook', { ...book, currency: 'USDT' });
+  const r = await lookup('orderbook', { ...book, currency: 'USDT' });
   assert.equal(r.status, 0, r.stdout);
   assert.equal(r.out.data[0].currency, 'USDT');
-  const trades = await lookup(t, 'trades', [{ ...trade, currency: 'USDT' }]);
+  const trades = await lookup('trades', [{ ...trade, currency: 'USDT' }]);
   assert.equal(trades.status, 0, trades.stdout);
   assert.equal(trades.out.data[0].currency, 'USDT');
 });

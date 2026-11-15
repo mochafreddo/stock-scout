@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fixture, runCli } from './toss-cli-helper.mjs';
+import { fixture, runCli, runFreshCli } from './toss-cli-helper.mjs';
 
 const candle = {
   timestamp: '2026-11-05T14:00:00+09:00',
@@ -11,20 +11,12 @@ const candle = {
   volume: '0',
   currency: 'USD',
 };
-async function lookup(t, result, args = ['AAPL', '1d'], extra) {
-  const f = fixture();
-  t.after(f.close);
-  const r = await runCli(
-    f,
-    [{ path: '/api/v1/candles', body: { result } }],
-    ['candles', ...args],
-    extra,
-  );
-  return { ...r, out: JSON.parse(r.stdout) };
+function lookup(result, args = ['AAPL', '1d'], extra) {
+  return runFreshCli([{ path: '/api/v1/candles', body: { result } }], ['candles', ...args], extra);
 }
 
-test('daily candles request 100 adjusted bars and preserve values without claiming completion', async (t) => {
-  const r = await lookup(t, {
+test('daily candles request 100 adjusted bars and preserve values without claiming completion', async () => {
+  const r = await lookup({
     candles: [{ ...candle, privateExtra: 'synthetic-secret' }],
     nextBefore: null,
   });
@@ -45,9 +37,9 @@ test('daily candles request 100 adjusted bars and preserve values without claimi
   assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
 });
 
-test('minute candles preserve the inclusive provider boundary across an empty page', async (t) => {
+test('minute candles preserve the inclusive provider boundary across an empty page', async () => {
   const nextBefore = '2026-11-06T09:31:00.123+09:00';
-  const first = await lookup(t, { candles: [], nextBefore }, [
+  const first = await lookup({ candles: [], nextBefore }, [
     'BRK.B',
     '1m',
     'count=1',
@@ -59,7 +51,7 @@ test('minute candles preserve the inclusive provider boundary across an empty pa
   assert.deepEqual(first.out.omissions, [{ reason: 'next_page' }]);
   assert.equal(first.out.source.adjusted, false);
   const row = { ...candle, timestamp: nextBefore };
-  const second = await lookup(t, { candles: [row], nextBefore: null }, [
+  const second = await lookup({ candles: [row], nextBefore: null }, [
     'BRK.B',
     '1m',
     'count=1',
@@ -81,7 +73,7 @@ test('minute candles preserve the inclusive provider boundary across an empty pa
   assert.equal(second.requests.length, 2);
 });
 
-test('candles expose adjustment limits and remain unconfirmed for past and current intervals', async (t) => {
+test('candles expose adjustment limits and remain unconfirmed for past and current intervals', async () => {
   for (const interval of ['1d', '1m']) {
     for (const timestamp of [
       '2026-11-05T14:00:00+09:00',
@@ -89,7 +81,6 @@ test('candles expose adjustment limits and remain unconfirmed for past and curre
       '2026-11-06T15:01:00Z',
     ]) {
       const r = await lookup(
-        t,
         { candles: [{ ...candle, timestamp }], nextBefore: null },
         ['AAPL', interval],
         { TEST_CLOCK_START: String(Date.parse('2026-11-06T15:00:30Z')) },
@@ -143,7 +134,7 @@ test('candles retain request semantics on upstream errors (characterization)', a
   });
 });
 
-test('candles reject response order and upper-bound violations instead of silently reordering', async (t) => {
+test('candles reject response order and upper-bound violations instead of silently reordering', async () => {
   const older = { ...candle, timestamp: '2026-11-04T14:00:00+09:00' };
   for (const [candles, args] of [
     [
@@ -152,16 +143,15 @@ test('candles reject response order and upper-bound violations instead of silent
     ],
     [[candle], ['AAPL', '1d', 'before=2026-11-04T14:00:00+09:00']],
   ]) {
-    const r = await lookup(t, { candles, nextBefore: null }, args);
+    const r = await lookup({ candles, nextBefore: null }, args);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, 'RESPONSE_INVALID');
   }
 });
 
-test('candles enforce inclusive bounds beyond millisecond precision', async (t) => {
+test('candles enforce inclusive bounds beyond millisecond precision', async () => {
   for (const interval of ['1d', '1m']) {
     const r = await lookup(
-      t,
       { candles: [{ ...candle, timestamp: '2026-11-06T15:00:00.1235Z' }], nextBefore: null },
       ['AAPL', interval, 'before=2026-11-06T15:00:00.1234Z'],
     );
@@ -172,10 +162,9 @@ test('candles enforce inclusive bounds beyond millisecond precision', async (t) 
   }
 });
 
-test('candles reject ascending submillisecond timestamps', async (t) => {
+test('candles reject ascending submillisecond timestamps', async () => {
   for (const interval of ['1d', '1m']) {
     const r = await lookup(
-      t,
       {
         candles: [
           { ...candle, timestamp: '2026-11-06T10:00:00.12340000000000000001-05:00' },
@@ -192,7 +181,7 @@ test('candles reject ascending submillisecond timestamps', async (t) => {
   }
 });
 
-test('candles preserve exact boundaries across offsets and fractional precision', async (t) => {
+test('candles preserve exact boundaries across offsets and fractional precision', async () => {
   for (const interval of ['1d', '1m']) {
     for (const [before, timestamps] of [
       [
@@ -214,7 +203,6 @@ test('candles preserve exact boundaries across offsets and fractional precision'
       ['1969-12-31T23:59:59.1234Z', ['1969-12-31T23:59:59.1234Z', '1969-12-31T23:59:59.1233Z']],
     ]) {
       const r = await lookup(
-        t,
         {
           candles: timestamps.map((timestamp) => ({ ...candle, timestamp })),
           nextBefore: before,
@@ -234,27 +222,27 @@ test('candles preserve exact boundaries across offsets and fractional precision'
   }
 });
 
-test('short and empty last pages succeed while missing pagination is partial', async (t) => {
+test('short and empty last pages succeed while missing pagination is partial', async () => {
   for (const candles of [[], [candle]]) {
-    const r = await lookup(t, { candles, nextBefore: null });
+    const r = await lookup({ candles, nextBefore: null });
     assert.equal(r.status, 0, r.stdout);
     assert.deepEqual(r.out.page, { nextBefore: null });
     assert.deepEqual(r.out.omissions, []);
-    const missing = await lookup(t, { candles });
+    const missing = await lookup({ candles });
     assert.equal(missing.status, 2, missing.stdout);
     assert.deepEqual(missing.out.page, {});
     assert.deepEqual(missing.out.omissions, [{ reason: 'pagination_unknown' }]);
   }
   for (const count of ['1', '200']) {
     const candles = Array.from({ length: Number(count) }, () => candle);
-    const r = await lookup(t, { candles, nextBefore: null }, ['AAPL', '1d', `count=${count}`]);
+    const r = await lookup({ candles, nextBefore: null }, ['AAPL', '1d', `count=${count}`]);
     assert.equal(r.status, 0, r.stdout);
     assert.equal(r.out.data.length, Number(count));
     assert.equal(r.requests.at(-1).query, `?symbol=AAPL&interval=1d&count=${count}&adjusted=true`);
   }
 });
 
-test('invalid candles are omitted and null or missing fields are never filled with estimates', async (t) => {
+test('invalid candles are omitted and null or missing fields are never filled with estimates', async () => {
   const invalid = [
     null,
     [],
@@ -278,7 +266,7 @@ test('invalid candles are omitted and null or missing fields are never filled wi
     { ...candle, timestamp: '2026-11-06T10:00:00' },
     { ...candle, currency: '' },
   ];
-  const r = await lookup(t, { candles: [candle, ...invalid], nextBefore: null });
+  const r = await lookup({ candles: [candle, ...invalid], nextBefore: null });
   assert.equal(r.status, 2, r.stdout);
   assert.deepEqual(r.out.data, [{ ...candle, completion: 'unknown', inProgress: 'unknown' }]);
   assert.deepEqual(
@@ -295,14 +283,14 @@ test('invalid candles are omitted and null or missing fields are never filled wi
     { candles: [], nextBefore: 0 },
     { candles: [candle, candle], nextBefore: null },
   ]) {
-    const r = await lookup(t, result, ['AAPL', '1d', 'count=1']);
+    const r = await lookup(result, ['AAPL', '1d', 'count=1']);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, 'RESPONSE_INVALID');
     assert.deepEqual(r.out.data, []);
   }
 });
 
-test('invalid candle arguments are rejected before authentication', async (t) => {
+test('invalid candle arguments are rejected before authentication', async () => {
   for (const args of [
     [],
     ['AAPL'],
@@ -325,7 +313,7 @@ test('invalid candle arguments are rejected before authentication', async (t) =>
     ['AAPL', '1d', '100'],
     ['AAPL', '1d', 'adjusted=true=false'],
   ]) {
-    const r = await lookup(t, { candles: [], nextBefore: null }, args);
+    const r = await lookup({ candles: [], nextBefore: null }, args);
     assert.equal(r.status, 1, r.stdout);
     assert.equal(r.out.error.code, 'INPUT_INVALID');
     assert.deepEqual(r.requests, []);

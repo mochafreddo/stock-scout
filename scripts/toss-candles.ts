@@ -7,6 +7,12 @@ const newYorkOffset = new Intl.DateTimeFormat('en', {
   timeZone: 'America/New_York',
   timeZoneName: 'longOffset',
 });
+const tradeDateFormat = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 
 function tradeDateMidnight(date: string) {
   const utc = Date.parse(`${date}T00:00:00Z`);
@@ -131,12 +137,7 @@ export async function queryCandleBatch(
           latestTimestamp,
           latestTradeDate:
             latestTimestamp !== null && tradeDateKnown
-              ? new Intl.DateTimeFormat('en-CA', {
-                  timeZone: 'America/New_York',
-                  year: 'numeric',
-                  month: '2-digit',
-                  day: '2-digit',
-                }).format(new Date(latestTimestamp))
+              ? tradeDateFormat.format(new Date(latestTimestamp))
               : null,
           tradeDateUnavailableReason:
             latestTimestamp !== null && !tradeDateKnown ? 'market_timezone_unconfirmed' : null,

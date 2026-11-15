@@ -5,7 +5,7 @@ import {
   queryCandleBatch,
   queryCandlePage,
 } from './toss-candles.ts';
-import { TossClient, TossError } from './toss-client.ts';
+import { isAccountScope, TossClient, TossError } from './toss-client.ts';
 import { discoveryQuery } from './toss-discovery.ts';
 import { marketQuery } from './toss-market.ts';
 import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
@@ -173,13 +173,7 @@ try {
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
       return { data: [await client.selectAccount(symbols)], omissions: [] };
     }
-    if (
-      command === 'buying-power' ||
-      command === 'holdings' ||
-      command === 'transactions' ||
-      command === 'orders' ||
-      command === 'conditional-orders'
-    ) {
+    if (isAccountScope(command)) {
       const request = accountQuery(command, symbols, rest);
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
       return client.queryAccount(
