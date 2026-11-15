@@ -165,7 +165,7 @@ test('contradictory ranking values cannot be reported as success', async (t) => 
 });
 
 test('failed discovery queries preserve request source without unvalidated ranking time', async (t) => {
-  for (const [args, path, bad, querySource, source = {}] of [
+  for (const [args, path, bad, querySource, source] of [
     [
       ['rankings', 'TOP_GAINERS', '1w', '2'],
       '/api/v1/rankings',
