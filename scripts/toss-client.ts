@@ -503,6 +503,7 @@ export class TossClient {
       () => this.check(),
       (milliseconds) => this.wait(milliseconds),
       async () => {
+        this.check();
         save(this.directory, { ...selected, fingerprint: this.fingerprint }, 'account.json');
       },
     );

@@ -230,7 +230,7 @@ try {
   const result = await lookup();
   const { data, omissions } = result;
   const status = 'status' in result ? result.status : omissions.length ? 'partial' : 'success';
-  if (command !== 'candles-batch') client?.check();
+  if (command !== 'candles-batch' && command !== 'account-select') client?.check();
   const retrievedAt = new Date().toISOString();
   const outputData =
     'priceRequest' in result ? priceAge(result.data, result.priceRequest, retrievedAt) : data;

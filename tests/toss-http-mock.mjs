@@ -90,9 +90,37 @@ if (process.env.TEST_WAIT_GATE) {
   });
 }
 const readlinkSync = fs.readlinkSync;
+const mkdirSync = fs.mkdirSync;
+mock.method(fs, 'mkdirSync', (path, ...args) => {
+  const result = mkdirSync(path, ...args);
+  if (
+    process.env.TEST_ACCOUNT_LOCK_ELAPSED &&
+    path === `${process.env.TOSS_STATE_DIR}/account.lock`
+  ) {
+    const elapsed = performance.now() + 60001;
+    mock.method(performance, 'now', () => elapsed);
+  }
+  return result;
+});
+const fsyncSync = fs.fsyncSync;
+let accountRenamed = false;
+mock.method(fs, 'fsyncSync', (descriptor) => {
+  if (
+    process.env.TEST_FAIL_ACCOUNT_SAVE === 'directory-sync' &&
+    accountRenamed &&
+    fs.fstatSync(descriptor).isDirectory()
+  )
+    throw new Error('synthetic-secret');
+  return fsyncSync(descriptor);
+});
 const renameSync = fs.renameSync;
 let cooldownSaveFailed = false;
 mock.method(fs, 'renameSync', (source, target) => {
+  if (
+    process.env.TEST_FAIL_ACCOUNT_SAVE === 'rename' &&
+    target === `${process.env.TOSS_STATE_DIR}/account.json`
+  )
+    throw new Error('synthetic-secret');
   if (
     process.env.TEST_FAIL_COOLDOWN_SAVE_ONCE &&
     !cooldownSaveFailed &&
@@ -104,6 +132,14 @@ mock.method(fs, 'renameSync', (source, target) => {
   if (process.env.TEST_FAIL_STATE_SAVE && target === `${process.env.TOSS_STATE_DIR}/state.json`)
     throw new Error('synthetic-secret');
   const result = renameSync(source, target);
+  if (target === `${process.env.TOSS_STATE_DIR}/account.json`) accountRenamed = true;
+  if (
+    process.env.TEST_ACCOUNT_SAVED_ELAPSED &&
+    target === `${process.env.TOSS_STATE_DIR}/account.json`
+  ) {
+    const elapsed = performance.now() + 60001;
+    mock.method(performance, 'now', () => elapsed);
+  }
   if (process.env.TEST_COOLDOWN_SAVED && /\/cooldown-[0-9a-f-]{36}\.json$/.test(target))
     publishJson(process.env.TEST_COOLDOWN_SAVED, JSON.parse(readFileSync(target)));
   return result;

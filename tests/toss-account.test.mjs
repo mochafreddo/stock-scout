@@ -78,6 +78,95 @@ test('only financial requests receive the selected account header, including aut
   }
 });
 
+test('saved selection reports success after the deadline and is used by the next CLI', async () => {
+  const f = fixture();
+  try {
+    await selection(f);
+    const path = join(f.directory, 'selection-input.json');
+    writeFileSync(
+      path,
+      JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['buying-power'] }),
+    );
+    const selected = await runCli(f, [], ['account-select', path], {
+      TEST_ACCOUNT_SAVED_ELAPSED: '1',
+    });
+    assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+    assert.equal(JSON.parse(selected.stdout).status, 'success');
+    assert.deepEqual(JSON.parse(selected.stdout).data, [
+      { alias: 'secondary', scopes: ['buying-power'] },
+    ]);
+    assert.equal(selected.stderr, '');
+    assert.equal(selected.requests.length, 0);
+    const next = await runCli(f, [accounts, buying], ['buying-power', 'USD']);
+    assert.equal(next.status, 0, next.stdout + next.stderr);
+    assert.equal(JSON.parse(next.stdout).source.accountAlias, 'secondary');
+    assert.equal(next.requests.at(-1).account, '852');
+    const denied = await runCli(f, [], ['holdings']);
+    assert.equal(JSON.parse(denied.stdout).error.code, 'ACCOUNT_SCOPE_DENIED');
+    assert.doesNotMatch(selected.stdout + selected.stderr, /852|synthetic-secret|synthetic-token/);
+  } finally {
+    f.close();
+  }
+});
+
+test('deadline before account save preserves the previous selection for the next CLI', async () => {
+  const f = fixture();
+  try {
+    await selection(f);
+    const path = join(f.directory, 'selection-input.json');
+    writeFileSync(
+      path,
+      JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['holdings'] }),
+    );
+    const rejected = await runCli(f, [], ['account-select', path], {
+      TEST_ACCOUNT_LOCK_ELAPSED: '1',
+    });
+    assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+    assert.equal(JSON.parse(rejected.stdout).error.code, 'TIMEOUT');
+    assert.deepEqual(JSON.parse(rejected.stdout).data, []);
+    assert.equal(rejected.requests.length, 0);
+    const next = await runCli(f, [accounts, buying], ['buying-power', 'USD']);
+    assert.equal(next.status, 0, next.stdout + next.stderr);
+    assert.equal(JSON.parse(next.stdout).source.accountAlias, 'primary');
+    assert.equal(next.requests.at(-1).account, '741');
+  } finally {
+    f.close();
+  }
+});
+
+test('account save failures report safe errors without rolling back published selections', async () => {
+  for (const phase of ['rename', 'directory-sync']) {
+    const f = fixture();
+    try {
+      await selection(f);
+      const path = join(f.directory, 'selection-input.json');
+      writeFileSync(
+        path,
+        JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['buying-power'] }),
+      );
+      const failed = await runCli(f, [], ['account-select', path], {
+        TEST_FAIL_ACCOUNT_SAVE: phase,
+      });
+      assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+      assert.equal(JSON.parse(failed.stdout).status, 'error');
+      assert.equal(JSON.parse(failed.stdout).error.code, 'AUTH_STORAGE');
+      assert.deepEqual(JSON.parse(failed.stdout).data, []);
+      assert.equal(failed.stderr, 'AUTH_STORAGE\n');
+      assert.equal(failed.requests.length, 0);
+      assert.doesNotMatch(failed.stdout + failed.stderr, /852|synthetic-secret|synthetic-token/);
+      const next = await runCli(f, [accounts, buying], ['buying-power', 'USD']);
+      assert.equal(next.status, 0, next.stdout + next.stderr);
+      assert.equal(
+        JSON.parse(next.stdout).source.accountAlias,
+        phase === 'rename' ? 'primary' : 'secondary',
+      );
+      assert.equal(next.requests.at(-1).account, phase === 'rename' ? '741' : '852');
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test('explicit account selection persists scopes and uses only selected account header', async () => {
   const f = fixture();
   try {
