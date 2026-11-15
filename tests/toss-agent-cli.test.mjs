@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fixture, runCli } from './toss-cli-helper.mjs';
@@ -9,6 +11,85 @@ function run(...args) {
     encoding: 'utf8',
     timeout: 15000,
     env: { PATH: process.env.PATH, TOSS_STATE_DIR: '/must-not-use-real-state' },
+  });
+}
+
+function copiedCheckout(t, name) {
+  const directory = mkdtempSync(join(tmpdir(), 'stock-scout-checkout-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const root = join(directory, name);
+  mkdirSync(join(root, 'tests'), { recursive: true });
+  cpSync(new URL('../scripts', import.meta.url), join(root, 'scripts'), { recursive: true });
+  for (const path of [
+    'package.json',
+    'tests/toss-agent-cli.mjs',
+    'tests/toss-cli-helper.mjs',
+    'tests/toss-http-mock.mjs',
+    'tests/pre-push.test.mjs',
+  ])
+    copyFileSync(new URL(`../${path}`, import.meta.url), join(root, path));
+  return root;
+}
+
+for (const name of ['ordinary', 'with spaces', '한글']) {
+  test(`documented synthetic commands preserve output in ${name} checkout paths`, (t) => {
+    const cwd = copiedCheckout(t, name);
+    for (const [scenario, status] of [
+      ['success', 0],
+      ['partial', 2],
+      ['error', 1],
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        ['tests/toss-agent-cli.mjs', scenario, 'candles', 'DEMO', '1d'],
+        {
+          cwd,
+          encoding: 'utf8',
+          timeout: 15000,
+          env: { PATH: process.env.PATH, TOSS_STATE_DIR: '/must-not-use-real-state' },
+        },
+      );
+      assert.ifError(result.error);
+      assert.equal(result.status, status, result.stderr);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.version, 1);
+      assert.equal(output.status, scenario);
+      assert.equal(output.source.endpoint, '/api/v1/candles');
+      assert.match(result.stderr, /SYNTHETIC/);
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic-(secret|token|client)/);
+      if (scenario === 'error') {
+        assert.deepEqual(output.data, []);
+        assert.equal(output.error.code, 'PERMISSION_DENIED');
+        assert.match(result.stderr, /PERMISSION_DENIED/);
+      } else {
+        assert.ok(output.data.length > 0);
+        assert.equal(output.source.symbol, 'DEMO');
+        assert.equal(output.data[0].closePrice, '12.50');
+        assert.doesNotMatch(result.stderr, /PERMISSION_DENIED/);
+      }
+    }
+  });
+
+  test(`related hook test resolves its entry in ${name} checkout paths`, (t) => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--test',
+        '--test-reporter=tap',
+        '--test-name-pattern=^docs CLI checks selected working documents and untracked targets without changing the index$',
+        'tests/pre-push.test.mjs',
+      ],
+      {
+        cwd: copiedCheckout(t, name),
+        encoding: 'utf8',
+        timeout: 15000,
+        env: { PATH: process.env.PATH },
+      },
+    );
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /# pass 1/);
+    assert.match(result.stdout, /# fail 0/);
   });
 }
 

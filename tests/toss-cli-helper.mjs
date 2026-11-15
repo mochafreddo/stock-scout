@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 
 export function fixture(clientSecret = 'synthetic-secret') {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-toss-')));
@@ -35,8 +36,8 @@ export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
     process.execPath,
     [
       '--import',
-      new URL('./toss-http-mock.mjs', import.meta.url).pathname,
-      new URL('../scripts/toss.ts', import.meta.url).pathname,
+      new URL('./toss-http-mock.mjs', import.meta.url).href,
+      fileURLToPath(new URL('../scripts/toss.ts', import.meta.url)),
       ...args,
     ],
     {
