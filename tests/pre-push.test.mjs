@@ -112,7 +112,7 @@ function installCommitHook(root) {
   assert.equal(result.status, 0, result.stderr);
 }
 
-function moduleFixture(t) {
+function brokenModuleFixture(t) {
   const { root } = fixture(t, false);
   const compiler = fileURLToPath(new URL('../node_modules/typescript/lib/tsc.js', import.meta.url));
   writeFileSync(join(root, 'module.ts'), 'export const value = 1;\n');
@@ -137,18 +137,19 @@ process.exit(result.status ?? 1);
   assert.equal(valid.status, 0, valid.stdout + valid.stderr);
   git(root, 'add', '.');
   git(root, 'commit', '-m', 'valid module');
-  return { root, base: git(root, 'rev-parse', 'HEAD'), typecheck };
-}
-
-test('pre-commit blocks a module renamed to Markdown with a broken staged import', (t) => {
-  const { root, base, typecheck } = moduleFixture(t);
-  installCommitHook(root);
-  git(root, 'config', 'diff.renames', 'true');
+  const base = git(root, 'rev-parse', 'HEAD');
   renameSync(join(root, 'module.ts'), join(root, 'module.md'));
   const broken = typecheck();
   assert.notEqual(broken.status, 0, broken.stdout + broken.stderr);
   assert.match(broken.stdout + broken.stderr, /Cannot find module ['"]\.\/module\.js['"]/);
   t.diagnostic(broken.stdout + broken.stderr);
+  return { root, base };
+}
+
+test('pre-commit blocks a module renamed to Markdown with a broken staged import', (t) => {
+  const { root, base } = brokenModuleFixture(t);
+  installCommitHook(root);
+  git(root, 'config', 'diff.renames', 'true');
   git(root, 'add', 'module.ts', 'module.md');
   writeFileSync(join(root, 'module.ts'), 'export const value = 1;\n');
   const staged = git(root, 'diff', '--cached', '--binary');
@@ -170,16 +171,11 @@ test('pre-commit blocks a module renamed to Markdown with a broken staged import
 
 for (const renames of ['true', 'false']) {
   test(`pre-push blocks a module renamed to Markdown with diff.renames=${renames}`, (t) => {
-    const { root, base, typecheck } = moduleFixture(t);
+    const { root, base } = brokenModuleFixture(t);
     const remote = join(root, 'remote.git');
     git(root, 'init', '--bare', remote);
     git(root, 'push', remote, 'HEAD:refs/heads/main');
     git(root, 'config', 'diff.renames', renames);
-    renameSync(join(root, 'module.ts'), join(root, 'module.md'));
-    const broken = typecheck();
-    assert.notEqual(broken.status, 0, broken.stdout + broken.stderr);
-    assert.match(broken.stdout + broken.stderr, /Cannot find module ['"]\.\/module\.js['"]/);
-    t.diagnostic(broken.stdout + broken.stderr);
     git(root, 'add', 'module.ts', 'module.md');
     git(root, 'commit', '-m', 'broken module rename');
     writeFileSync(join(root, 'module.ts'), 'export const value = 1;\n');
