@@ -12,7 +12,7 @@ export function orderQuery(status: string | undefined, args: string[], condition
     (key, value) =>
       (key === 'symbol' && symbolPattern.test(value)) ||
       (!conditional && (key === 'from' || key === 'to') && validDate(value)),
-    paginated ? (conditional ? 'url-safe' : 'opaque') : false,
+    conditional ? 'url-safe' : paginated ? 'opaque' : false,
   );
   const from = query.get('from');
   const to = query.get('to');

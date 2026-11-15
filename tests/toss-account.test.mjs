@@ -479,6 +479,24 @@ test('credential changes invalidate prior account page contexts after reselectio
           );
           assert.equal(first.status, 2, first.stdout);
           const { page } = JSON.parse(first.stdout);
+          const continuation = [
+            command,
+            ...args,
+            `cursor=${page.nextCursor}`,
+            `context=${page.context}`,
+          ];
+          const valid = await runAccountCli(
+            f,
+            [
+              accounts,
+              {
+                path: `/api/v1/${command}`,
+                body: { result: { [key]: [], hasNext: false, nextCursor: null } },
+              },
+            ],
+            continuation,
+          );
+          assert.equal(valid.status, 0, valid.stdout);
           writeFileSync(
             join(changed.directory, 'credentials.json'),
             JSON.stringify({
@@ -489,11 +507,7 @@ test('credential changes invalidate prior account page contexts after reselectio
           );
           const reselected = await selectAccount(changed, 741, [command]);
           assert.equal(reselected.status, 0, reselected.stdout);
-          const next = await runAccountCli(
-            changed,
-            [],
-            [command, ...args, `cursor=${page.nextCursor}`, `context=${page.context}`],
-          );
+          const next = await runAccountCli(changed, [], continuation);
           assert.equal(next.status, 1, next.stdout);
           assert.equal(JSON.parse(next.stdout).error.code, 'INPUT_INVALID');
           assert.deepEqual(next.requests, []);

@@ -46,20 +46,18 @@ export function accountCursorPayload(
   cursor: string,
   endpoint: string,
 ) {
+  if (endpoint === '/api/v1/transactions')
+    return JSON.stringify([
+      clientId,
+      accountSeq,
+      query.get('from'),
+      query.get('to'),
+      query.get('transactionTypes') || '',
+      cursor,
+    ]);
   const filters = new URLSearchParams(query);
   filters.delete('cursor');
   filters.delete('limit');
   filters.sort();
-  return JSON.stringify(
-    endpoint === '/api/v1/transactions'
-      ? [
-          clientId,
-          accountSeq,
-          query.get('from'),
-          query.get('to'),
-          query.get('transactionTypes') || '',
-          cursor,
-        ]
-      : [clientId, accountSeq, endpoint, filters.toString(), cursor],
-  );
+  return JSON.stringify([clientId, accountSeq, endpoint, filters.toString(), cursor]);
 }
