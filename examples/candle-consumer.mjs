@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { decimal, validTime } from '../scripts/toss-values.ts';
+import { decimal, record, validTime } from '../scripts/toss-values.ts';
 
 const tradeDateFormat = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/New_York',
@@ -10,9 +10,28 @@ const tradeDateFormat = new Intl.DateTimeFormat('en-CA', {
 });
 const output = JSON.parse(readFileSync(0, 'utf8'));
 assert.equal(output.version, 1);
+assert.ok(['success', 'partial', 'error'].includes(output.status), 'valid CLI status required');
+assert.ok(Array.isArray(output.data), 'CLI data must be an array');
+const emptyError = output.status === 'error' && !output.data.length;
+if (emptyError) {
+  assert.ok(
+    record(output.error) && typeof output.error.code === 'string' && output.error.code.length > 0,
+    'CLI error code required',
+  );
+  for (const field of ['providerCode', 'requestId'])
+    assert.ok(
+      !Object.hasOwn(output.error, field) || typeof output.error[field] === 'string',
+      `CLI error ${field} must be a string`,
+    );
+  assert.ok(
+    !Object.hasOwn(output.error, 'choices') || Array.isArray(output.error.choices),
+    'CLI error choices must be an array',
+  );
+}
 assert.ok(
-  output.source.endpoint === '/api/v1/candles' &&
-    (!Object.hasOwn(output.source, 'interval') || output.source.interval === '1d'),
+  emptyError ||
+    (output.source.endpoint === '/api/v1/candles' &&
+      (!Object.hasOwn(output.source, 'interval') || output.source.interval === '1d')),
   'daily candle output required',
 );
 const batch = !Object.hasOwn(output.source, 'interval');

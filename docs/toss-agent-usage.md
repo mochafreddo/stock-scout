@@ -72,6 +72,8 @@ When creating analysis code or changing its field mapping, feed synthetic CLI st
 
 The executable [candle consumer](../examples/candle-consumer.mjs) reads individual daily or batch stdout from stdin. For each usable nonempty result, it compares the first returned close with the last returned close and sums all returned volumes; it does not require exactly two bars. It preserves the top-level `status` and, when present, the CLI-safe `error` object, including early `INPUT_INVALID` or `AUTH_STORAGE` failures that have no daily source metadata. A failed query can therefore produce `status: "error"`, empty `data` and a machine-readable `error.code`; this is not a successful empty query. Provider messages, bodies and secrets excluded by the CLI are not reconstructed. The public regression check runs that executable with synthetic CLI stdout and isolated configuration failures: `node --test tests/toss-agent-cli.test.mjs`.
 
+For an empty query error, the consumer validates the version, status, array data and error structure before forwarding the original safe error, even when the CLI removed the source endpoint to protect sensitive information. The error requires a nonempty string `code`; optional `providerCode` and `requestId` must be strings, and optional `choices` must be an array. Usable candle results still require the daily candle endpoint and valid bar fields. Removed source metadata is not inferred or fetched again.
+
 The consumer exits 0 when it successfully consumes a query error; retain and interpret the original CLI exit code together with the JSON status and error. To inspect the same calculation directly, use a shell with `pipefail` so the upstream CLI exit remains observable:
 
 ```sh
