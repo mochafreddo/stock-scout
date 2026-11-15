@@ -226,7 +226,13 @@ export function candleResult(value: unknown, { query }: ReturnType<typeof candle
     )
   )
     throw new TossError('RESPONSE_INVALID');
-  if (value.nextBefore !== null && value.nextBefore !== undefined && !validTime(value.nextBefore))
+  if (
+    value.nextBefore !== null &&
+    value.nextBefore !== undefined &&
+    (typeof value.nextBefore !== 'string' ||
+      !validTime(value.nextBefore) ||
+      (before !== null && laterThan(value.nextBefore, before)))
+  )
     throw new TossError('RESPONSE_INVALID');
   if (value.nextBefore === undefined) result.omissions.push({ reason: 'pagination_unknown' });
   else if (value.nextBefore !== null) result.omissions.push({ reason: 'next_page' });
