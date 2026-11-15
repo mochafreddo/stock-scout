@@ -633,6 +633,7 @@ export class TossClient {
       rejectDeadline(new TossError(this.signal.aborted ? 'INTERRUPTED' : 'TIMEOUT'));
     signal.addEventListener('abort', abort, { once: true });
     let flight: Promise<Response> | undefined;
+    let bodyResponse: Response | undefined;
     let requestWall = 0,
       requestStarted = 0,
       requestLimit = 0;
@@ -693,6 +694,7 @@ export class TossClient {
             throw new TossError('RESPONSE_INVALID');
           if (seconds) this.coordination.publishCooldown(Math.ceil(seconds * 1000));
           checkRequest();
+          bodyResponse = response;
           const reader = response.body?.getReader();
           const chunks: Uint8Array[] = [];
           let bytes = 0;
@@ -726,6 +728,10 @@ export class TossClient {
       checkRequest();
       return result;
     } catch (error) {
+      if (bodyResponse && [401, 403].includes(bodyResponse.status) && !this.signal.aborted) {
+        controller.abort();
+        return { response: bodyResponse, body: undefined };
+      }
       if (error instanceof TossError && TERMINAL_ERRORS.includes(error.code)) this.stopped = error;
       try {
         if (flight) checkRequest();
@@ -753,7 +759,14 @@ export class TossClient {
         const { response, body } = await this.transmit('/oauth2/token');
         if (!response.ok) {
           if (response.status >= 400 && response.status < 500)
-            await this.coordination.recordRejectedIssuance();
+            await this.coordination.recordRejectedIssuance().catch((error) => {
+              if (
+                !(error instanceof TossError) ||
+                error.code !== 'TIMEOUT' ||
+                ![401, 403].includes(response.status)
+              )
+                throw error;
+            });
           throw failure(response, body);
         }
         if (
