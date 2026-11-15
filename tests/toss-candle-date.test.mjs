@@ -205,6 +205,45 @@ test('date-selected pages retain unknown boundaries, valid partial rows and the 
   }
 });
 
+test('daily date and explicit bounds validate nextBefore for individual and batch pages', async () => {
+  const before = '2026-11-06T05:00:00.000Z';
+  for (const option of ['date=2026-11-06', `before=${before}`]) {
+    for (const batch of [false, true]) {
+      for (const [nextBefore, expectedStatus] of [
+        ['2026-11-06T14:00:00.000000001+09:00', 1],
+        ['2026-11-06T00:00:00.000000000-05:00', 2],
+        ['2026-11-06T04:59:59.999999999Z', 2],
+      ]) {
+        const r = await runFreshCli(
+          [
+            ...(option.startsWith('date=')
+              ? [{ path: '/api/v1/stocks', body: { result: [stock] } }]
+              : []),
+            { path: '/api/v1/candles', body: { result: { candles: [candle], nextBefore } } },
+          ],
+          batch ? ['candles-batch', 'AAPL', option] : ['candles', 'AAPL', '1d', option],
+        );
+        const row = batch ? r.out.data[0] : r.out;
+        assert.equal(r.status, expectedStatus, r.stdout);
+        assert.equal(new URLSearchParams(r.requests.at(-1).query).get('before'), before);
+        assert.equal(r.requests.length, option.startsWith('date=') ? 3 : 2);
+        if (expectedStatus === 1) {
+          assert.equal(row.error.code, 'RESPONSE_INVALID');
+          assert.deepEqual(row.data, []);
+          assert.equal(Object.hasOwn(row, 'page'), false);
+          assert.equal(r.stderr, 'RESPONSE_INVALID\n');
+        } else {
+          assert.equal(row.status, 'partial');
+          assert.deepEqual(row.page, { nextBefore });
+          assert.deepEqual(row.omissions, [{ reason: 'next_page' }]);
+          assert.deepEqual(row.data, [{ ...candle, completion: 'unknown', inProgress: 'unknown' }]);
+          assert.equal(r.stderr, '');
+        }
+      }
+    }
+  }
+});
+
 test('market failures remain safe errors and never fall through to a candle request', async () => {
   for (const [step, code] of [
     [
