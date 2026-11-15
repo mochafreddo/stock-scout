@@ -21,6 +21,74 @@ function consume(result) {
   });
 }
 
+test('consumer preserves safe empty CLI errors when sensitive source metadata is removed', async (t) => {
+  const f = fixture('/api/v1/candles');
+  t.after(f.close);
+  const result = await runCli(
+    f,
+    [
+      {
+        path: '/api/v1/candles',
+        status: 403,
+        body: { error: { code: 'ip-not-allowed', requestId: 'SAFE_REQUEST_334' } },
+      },
+    ],
+    ['candles', 'DEMO', '1d'],
+    { TEST_CLIENT_SECRET: '/api/v1/candles' },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  const original = JSON.parse(result.stdout);
+  assert.deepEqual(original.source, { provider: 'tossinvest' });
+  assert.deepEqual(original.data, []);
+  assert.deepEqual(original.error, {
+    code: 'PERMISSION_DENIED',
+    providerCode: 'ip-not-allowed',
+    requestId: 'SAFE_REQUEST_334',
+  });
+  const consumed = consume(result);
+  assert.equal(consumed.status, 0, consumed.stderr);
+  assert.deepEqual(JSON.parse(consumed.stdout), {
+    status: 'error',
+    data: [],
+    error: original.error,
+  });
+  assert.doesNotMatch(consumed.stdout, /endpoint|\/api\/v1\/candles/);
+});
+
+test('consumer rejects malformed error envelopes and requires candle sources for usable data', async (t) => {
+  const error = {
+    version: 1,
+    status: 'error',
+    source: { provider: 'tossinvest' },
+    data: [],
+    error: { code: 'SENSITIVE_OUTPUT' },
+  };
+  for (const [name, patch] of [
+    ['wrong version', { version: 2 }],
+    ['success with masked source', { status: 'success' }],
+    ['partial with masked source', { status: 'partial' }],
+    ['unknown status', { status: 'failed', source: { endpoint: '/api/v1/candles' } }],
+    ['non-array data', { data: {} }],
+    ['nonempty data with masked source', { data: [{}] }],
+    ['missing error', { error: undefined }],
+    ['null error', { error: null }],
+    ['array error', { error: [] }],
+    ['string error', { error: 'SENSITIVE_OUTPUT' }],
+    ['missing error code', { error: {} }],
+    ['empty error code', { error: { code: '' } }],
+    ['non-string error code', { error: { code: 1 } }],
+    ['non-string provider code', { error: { code: 'AUTH_FAILED', providerCode: {} } }],
+    ['non-string request id', { error: { code: 'AUTH_FAILED', requestId: [] } }],
+    ['non-array choices', { error: { code: 'IDENTITY_AMBIGUOUS', choices: {} } }],
+  ]) {
+    await t.test(name, () => {
+      const consumed = consume({ stdout: JSON.stringify({ ...error, ...patch }) });
+      assert.equal(consumed.status, 1, consumed.stderr);
+      assert.equal(consumed.stdout, '');
+    });
+  }
+});
+
 test('consumer preserves currencies and declines mixed-currency close comparisons', () => {
   const output = {
     version: 1,
