@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,6 +17,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const cli = new URL('../scripts/pre-push.ts', import.meta.url).pathname;
 
@@ -108,6 +110,139 @@ function installCommitHook(root) {
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
+}
+
+function moduleFixture(t) {
+  const { root } = fixture(t, false);
+  const compiler = fileURLToPath(new URL('../node_modules/typescript/lib/tsc.js', import.meta.url));
+  writeFileSync(join(root, 'module.ts'), 'export const value = 1;\n');
+  writeFileSync(
+    join(root, 'caller.ts'),
+    "import { value } from './module.js';\nconsole.log(value);\n",
+  );
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  manifest.scripts.typecheck = 'node typecheck.mjs';
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  writeFileSync(
+    join(root, 'typecheck.mjs'),
+    `import { spawnSync } from 'node:child_process';
+const result = spawnSync(process.execPath, ${JSON.stringify([compiler, '--noEmit', '--target', 'esnext', '--module', 'nodenext', 'caller.ts'])}, { stdio: 'inherit' });
+if (result.error) throw result.error;
+process.exit(result.status ?? 1);
+`,
+  );
+  const typecheck = () =>
+    spawnSync(process.execPath, ['typecheck.mjs'], { cwd: root, encoding: 'utf8' });
+  const valid = typecheck();
+  assert.equal(valid.status, 0, valid.stdout + valid.stderr);
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'valid module');
+  return { root, base: git(root, 'rev-parse', 'HEAD'), typecheck };
+}
+
+test('pre-commit blocks a module renamed to Markdown with a broken staged import', (t) => {
+  const { root, base, typecheck } = moduleFixture(t);
+  installCommitHook(root);
+  git(root, 'config', 'diff.renames', 'true');
+  renameSync(join(root, 'module.ts'), join(root, 'module.md'));
+  const broken = typecheck();
+  assert.notEqual(broken.status, 0, broken.stdout + broken.stderr);
+  assert.match(broken.stdout + broken.stderr, /Cannot find module ['"]\.\/module\.js['"]/);
+  t.diagnostic(broken.stdout + broken.stderr);
+  git(root, 'add', 'module.ts', 'module.md');
+  writeFileSync(join(root, 'module.ts'), 'export const value = 1;\n');
+  const staged = git(root, 'diff', '--cached', '--binary');
+  const hook = readFileSync(join(root, '.git/hooks/pre-commit'));
+  const result = spawnSync('git', ['commit', '-m', 'broken module rename'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Cannot find module ['"]\.\/module\.js['"]/);
+  assert.match(result.stderr, /npm run typecheck failed/);
+  assert.doesNotMatch(result.stderr, /fixture test/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+  assert.equal(git(root, 'diff', '--cached', '--binary'), staged);
+  assert.equal(readFileSync(join(root, 'module.ts'), 'utf8'), 'export const value = 1;\n');
+  assert.equal(readFileSync(join(root, 'module.md'), 'utf8'), 'export const value = 1;\n');
+  assert.deepEqual(readFileSync(join(root, '.git/hooks/pre-commit')), hook);
+});
+
+for (const renames of ['true', 'false']) {
+  test(`pre-push blocks a module renamed to Markdown with diff.renames=${renames}`, (t) => {
+    const { root, base, typecheck } = moduleFixture(t);
+    const remote = join(root, 'remote.git');
+    git(root, 'init', '--bare', remote);
+    git(root, 'push', remote, 'HEAD:refs/heads/main');
+    git(root, 'config', 'diff.renames', renames);
+    renameSync(join(root, 'module.ts'), join(root, 'module.md'));
+    const broken = typecheck();
+    assert.notEqual(broken.status, 0, broken.stdout + broken.stderr);
+    assert.match(broken.stdout + broken.stderr, /Cannot find module ['"]\.\/module\.js['"]/);
+    t.diagnostic(broken.stdout + broken.stderr);
+    git(root, 'add', 'module.ts', 'module.md');
+    git(root, 'commit', '-m', 'broken module rename');
+    writeFileSync(join(root, 'module.ts'), 'export const value = 1;\n');
+    mkdirSync(join(root, 'scripts'));
+    copyFileSync(cli, join(root, 'scripts/pre-push.ts'));
+    const installed = spawnSync(process.execPath, [cli, '--install'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.equal(installed.status, 0, installed.stderr);
+    const index = readFileSync(join(root, '.git/index'));
+    const hook = readFileSync(join(root, '.git/hooks/pre-push'));
+    const result = spawnSync('git', ['push', remote, 'HEAD:refs/heads/main'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.notEqual(result.status, 0, result.stderr);
+    assert.match(result.stderr, /Cannot find module ['"]\.\/module\.js['"]/);
+    assert.match(result.stderr, /npm run typecheck failed/);
+    assert.doesNotMatch(result.stderr, /fixture test/);
+    assert.equal(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/main'), base);
+    assert.deepEqual(readFileSync(join(root, '.git/index')), index);
+    assert.deepEqual(readFileSync(join(root, '.git/hooks/pre-push')), hook);
+    assert.equal(readFileSync(join(root, 'module.ts'), 'utf8'), 'export const value = 1;\n');
+    assert.equal(readFileSync(join(root, 'module.md'), 'utf8'), 'export const value = 1;\n');
+  });
+}
+
+for (const mode of ['staged', 'push']) {
+  for (const [source, destination, code] of [
+    ['document.md', 'renamed.md', false],
+    ['module.ts', 'renamed.ts', true],
+    ['document.md', 'renamed.ts', true],
+  ]) {
+    test(`${mode} CLI preserves check policy for ${source} renamed to ${destination}`, (t) => {
+      const { root } = fixture(t);
+      writeFileSync(join(root, source), 'export const value = 1;\n');
+      git(root, 'add', source);
+      git(root, 'commit', '-m', 'rename source');
+      const base = git(root, 'rev-parse', 'HEAD');
+      git(root, 'config', 'diff.renames', 'true');
+      renameSync(join(root, source), join(root, destination));
+      git(root, 'add', source, destination);
+      if (mode === 'push') git(root, 'commit', '-m', 'rename file');
+      const index = readFileSync(join(root, '.git/index'));
+      const result = run(
+        root,
+        git(root, 'rev-parse', 'HEAD'),
+        base,
+        mode === 'staged' ? ['--staged'] : [],
+      );
+      assert.equal(result.status, 0, result.stderr);
+      if (code) {
+        assert.match(result.stderr, /fixture check/);
+        assert.match(result.stderr, /fixture typecheck/);
+        if (mode === 'push') assert.match(result.stderr, /fixture test/);
+        else assert.doesNotMatch(result.stderr, /fixture test/);
+      } else assert.doesNotMatch(result.stderr, /fixture check|fixture typecheck|fixture test/);
+      assert.deepEqual(readFileSync(join(root, '.git/index')), index);
+      assert.equal(readFileSync(join(root, destination), 'utf8'), 'export const value = 1;\n');
+      assert.equal(existsSync(join(root, source)), false);
+    });
+  }
 }
 
 test('docs CLI checks selected working documents and untracked targets without changing the index', (t) => {

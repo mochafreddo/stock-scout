@@ -105,6 +105,8 @@ node scripts/pre-push.ts --install
 
 pre-commit은 staged 스냅샷의 공백·로컬 Markdown 링크·프로젝트 스킬 설정을 검사합니다. 코드 변경이 있으면 staged 스냅샷에서 `npm run check`와 `npm run typecheck`도 실행합니다. 부분 스테이징과 최초 커밋을 지원하며 작업 파일과 인덱스를 자동 수정하지 않습니다. 인덱스에 충돌이 남아 있거나 검사 중 staged 내용이 바뀌면 커밋을 차단합니다. 훅을 설치하지 않고 검사하려면 `node scripts/pre-push.ts --staged`를 실행하세요.
 
+staged·push의 변경 분류는 Git의 이름 변경 탐지를 끄고 삭제 경로와 추가 경로를 모두 확인합니다. 코드 파일을 `.md`로 이름 변경해도 삭제된 코드 경로를 기준으로 코드 검사를 실행합니다. 문서끼리 이름 변경하면 문서 검사를 유지하며, 코드끼리 또는 문서에서 코드로 이름 변경하면 코드 검사를 실행합니다. push는 코드 변경이 있으면 `npm run check`, `npm run typecheck`, `npm test`를 모두 실행합니다. 모듈 이름 변경 뒤 남은 호출자의 실제 타입 오류는 작업 디렉터리에서 고쳤더라도 staged·push 스냅샷에 남아 있으면 차단합니다.
+
 코드 검사에는 staged `package-lock.json`과 일치하는 작업 디렉터리의 lockfile 및 설치된 의존성이 필요합니다. 의존성이 없거나 버전이 맞지 않으면 먼저 개발 환경에서 준비한 뒤 다시 커밋하세요. 훅은 패키지를 설치하지 않으며 검사 실패와 검사 실행 불가를 오류 메시지로 구분합니다. 전체 테스트는 최종 검증과 pre-push에서 실행합니다.
 
 설치기는 기존 훅을 덮어쓰지 않습니다. 기존 gstack-redact pre-push는 보존하고 지원하는 로컬 훅 위치에 연결합니다. 기존 pre-commit이 있거나 `core.hooksPath`를 사용하면 설치를 중단하므로 기존 훅에 수동으로 통합해야 합니다.
