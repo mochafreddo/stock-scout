@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { closeRuns, fixture, readRequests, runCli, waitForFile } from './toss-cli-helper.mjs';
+import {
+  closeRuns,
+  fixture,
+  readRequests,
+  runCli,
+  runFreshCli,
+  waitForFile,
+} from './toss-cli-helper.mjs';
 
 const candle = {
   timestamp: '2026-11-05T14:00:00+09:00',
@@ -674,11 +681,41 @@ test('batch stops shared access failures and distinguishes the failed symbol fro
   }
 });
 
-test('batch preserves an oversized HTTP permission failure and stops later requests', async (t) => {
-  const f = fixture();
-  t.after(f.close);
-  const r = await runCli(
-    f,
+test('batch preserves received access failures when the deadline expires before reading the body', async () => {
+  for (const [status, code] of [
+    [401, 'AUTH_FAILED'],
+    [403, 'PERMISSION_DENIED'],
+  ]) {
+    const r = await runFreshCli(
+      [
+        page([]),
+        {
+          path: '/api/v1/candles',
+          status,
+          body: { error: { code: 'expired-token' } },
+          headers: { 'X-Request-Id': 'SAFE_HEADERS' },
+          responseWallJump: 16000,
+        },
+        page(),
+      ],
+      ['candles-batch', 'FIRST,BLOCKED,LATER'],
+    );
+    const out = r.out;
+    assert.equal(r.status, 2, r.stdout);
+    assert.deepEqual(
+      out.data.map(({ status }) => status),
+      ['success', 'error', 'not_queried'],
+    );
+    assert.deepEqual(out.data[1].error, { code, requestId: 'SAFE_HEADERS' });
+    assert.equal(out.data[2].reason, code);
+    assert.equal(r.requests.length, 3);
+    assert.equal(r.stderr, `${code}\n`);
+    assert.doesNotMatch(r.stdout + r.stderr, /expired-token|synthetic-(secret|token|client)/);
+  }
+});
+
+test('batch preserves an oversized HTTP permission failure and stops later requests', async () => {
+  const r = await runFreshCli(
     [
       page([]),
       {
@@ -694,7 +731,7 @@ test('batch preserves an oversized HTTP permission failure and stops later reque
     ],
     ['candles-batch', 'FIRST,BLOCKED,LATER'],
   );
-  const out = JSON.parse(r.stdout);
+  const out = r.out;
   assert.equal(r.status, 2, r.stdout);
   assert.deepEqual(
     out.data.map(({ status }) => status),
@@ -725,18 +762,16 @@ test('batch preserves HTTP access failures when error bodies cannot be trusted o
         ['failed stream', { bodyFailure: true }],
         ['body timeout', { bodyHang: true }],
       ]) {
-        await t.test(`${path} ${status} ${name}`, async (t) => {
-          const f = fixture();
-          t.after(f.close);
+        await t.test(`${path} ${status} ${name}`, async () => {
           const steps = [identity('FIRST'), page([])];
           if (path === '/api/v1/candles') steps.push(identity('BLOCKED'));
           steps.push({ path, status, headers: { 'X-Request-Id': 'SAFE_ACCESS' }, ...failure });
-          const r = await runCli(f, steps, [
+          const r = await runFreshCli(steps, [
             'candles-batch',
             'FIRST,BLOCKED,LATER',
             'date=2026-11-05',
           ]);
-          const out = JSON.parse(r.stdout);
+          const out = r.out;
           assert.equal(r.status, 2, r.stdout);
           assert.equal(out.status, 'partial');
           assert.deepEqual(
@@ -759,16 +794,13 @@ test('batch preserves HTTP access failures when error bodies cannot be trusted o
   }
 });
 
-test('batch preserves interruption during an HTTP access error body', async (t) => {
+test('batch preserves interruption during an HTTP access error body', async () => {
   for (const status of [401, 403]) {
-    const f = fixture();
-    t.after(f.close);
-    const r = await runCli(
-      f,
+    const r = await runFreshCli(
       [page([]), { path: '/api/v1/candles', status, bodyHang: true, interrupt: true }],
       ['candles-batch', 'FIRST,CURRENT,LATER'],
     );
-    const out = JSON.parse(r.stdout);
+    const out = r.out;
     assert.equal(r.status, 2, r.stdout);
     assert.deepEqual(
       out.data.map(({ status }) => status),
@@ -781,15 +813,12 @@ test('batch preserves interruption during an HTTP access error body', async (t) 
   }
 });
 
-test('batch preserves a confirmed HTTP access failure when its body reaches the shared deadline', async (t) => {
+test('batch preserves a confirmed HTTP access failure when its body reaches the shared deadline', async () => {
   for (const [status, code] of [
     [401, 'AUTH_FAILED'],
     [403, 'PERMISSION_DENIED'],
   ]) {
-    const f = fixture();
-    t.after(f.close);
-    const r = await runCli(
-      f,
+    const r = await runFreshCli(
       [
         page([]),
         ...Array.from({ length: 7 }, () => ({ path: '/api/v1/candles', hang: true })),
@@ -797,7 +826,7 @@ test('batch preserves a confirmed HTTP access failure when its body reaches the 
       ],
       ['candles-batch', 'FIRST,S1,S2,S3,S4,S5,S6,S7,BLOCKED,LATER'],
     );
-    const out = JSON.parse(r.stdout);
+    const out = r.out;
     assert.equal(r.status, 2, r.stdout);
     assert.equal(out.data[0].status, 'success');
     assert.ok(out.data.slice(1, 8).every((row) => row.error.code === 'TIMEOUT'));
@@ -812,12 +841,9 @@ test('batch preserves a confirmed HTTP access failure when its body reaches the 
   }
 });
 
-test('batch retains coordinator storage failures before reading an HTTP access error body', async (t) => {
+test('batch retains coordinator storage failures before reading an HTTP access error body', async () => {
   for (const status of [401, 403]) {
-    const f = fixture();
-    t.after(f.close);
-    const r = await runCli(
-      f,
+    const r = await runFreshCli(
       [
         page([]),
         { path: '/api/v1/candles', status, headers: { 'Retry-After': '3' }, bodyHang: true },
@@ -825,7 +851,7 @@ test('batch retains coordinator storage failures before reading an HTTP access e
       ['candles-batch', 'FIRST,CURRENT,LATER'],
       { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' },
     );
-    const out = JSON.parse(r.stdout);
+    const out = r.out;
     assert.equal(r.status, 2, r.stdout);
     assert.deepEqual(
       out.data.map(({ status }) => status),

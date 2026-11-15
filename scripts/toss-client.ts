@@ -693,8 +693,8 @@ export class TossClient {
           if (!Number.isSafeInteger(Math.ceil(seconds * 1000)))
             throw new TossError('RESPONSE_INVALID');
           if (seconds) this.coordination.publishCooldown(Math.ceil(seconds * 1000));
-          checkRequest();
           bodyResponse = response;
+          checkRequest();
           const reader = response.body?.getReader();
           const chunks: Uint8Array[] = [];
           let bytes = 0;

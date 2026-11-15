@@ -4,10 +4,16 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, runAccountCli, runCli, selectAccount } from './toss-cli-helper.mjs';
 
-function selection(f, accountSeq = 741, scopes = ['holdings', 'buying-power'], alias = 'primary') {
+function selection(
+  f,
+  accountSeq = 741,
+  scopes = ['holdings', 'buying-power'],
+  alias = 'primary',
+  extra,
+) {
   const path = join(f.directory, 'selection-input.json');
   writeFileSync(path, JSON.stringify({ accountSeq, alias, scopes }), { mode: 0o600 });
-  return runCli(f, [], ['account-select', path]);
+  return runCli(f, [], ['account-select', path], extra);
 }
 const accounts = {
   path: '/api/v1/accounts',
@@ -82,12 +88,7 @@ test('saved selection reports success after the deadline and is used by the next
   const f = fixture();
   try {
     await selection(f);
-    const path = join(f.directory, 'selection-input.json');
-    writeFileSync(
-      path,
-      JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['buying-power'] }),
-    );
-    const selected = await runCli(f, [], ['account-select', path], {
+    const selected = await selection(f, 852, ['buying-power'], 'secondary', {
       TEST_ACCOUNT_SAVED_ELAPSED: '1',
     });
     assert.equal(selected.status, 0, selected.stdout + selected.stderr);
@@ -113,12 +114,7 @@ test('deadline before account save preserves the previous selection for the next
   const f = fixture();
   try {
     await selection(f);
-    const path = join(f.directory, 'selection-input.json');
-    writeFileSync(
-      path,
-      JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['holdings'] }),
-    );
-    const rejected = await runCli(f, [], ['account-select', path], {
+    const rejected = await selection(f, 852, ['holdings'], 'secondary', {
       TEST_ACCOUNT_LOCK_ELAPSED: '1',
     });
     assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
@@ -139,12 +135,7 @@ test('account save failures report safe errors without rolling back published se
     const f = fixture();
     try {
       await selection(f);
-      const path = join(f.directory, 'selection-input.json');
-      writeFileSync(
-        path,
-        JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['buying-power'] }),
-      );
-      const failed = await runCli(f, [], ['account-select', path], {
+      const failed = await selection(f, 852, ['buying-power'], 'secondary', {
         TEST_FAIL_ACCOUNT_SAVE: phase,
       });
       assert.equal(failed.status, 1, failed.stdout + failed.stderr);
