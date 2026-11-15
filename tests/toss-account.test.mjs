@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fixture, runCli } from './toss-cli-helper.mjs';
+import { fixture, runAccountCli, runCli, selectAccount } from './toss-cli-helper.mjs';
 
 function selection(f, accountSeq = 741, scopes = ['holdings', 'buying-power'], alias = 'primary') {
   const path = join(f.directory, 'selection-input.json');
@@ -450,6 +450,59 @@ test('financial responses are not saved and selection is bound to client credent
     assert.equal(changed.requests.length, 0);
   } finally {
     f.close();
+  }
+});
+
+test('credential changes invalidate prior account page contexts after reselection', async (t) => {
+  for (const [command, args, key] of [
+    ['transactions', ['2026-09-01', '2026-10-31'], 'transactions'],
+    ['orders', ['CLOSED'], 'orders'],
+    ['conditional-orders', ['CLOSED'], 'conditionalOrders'],
+  ]) {
+    for (const field of ['clientId', 'clientSecret']) {
+      await t.test(`${command}: ${field}`, async () => {
+        const f = fixture();
+        const changed = fixture();
+        try {
+          const selected = await selectAccount(f, 741, [command]);
+          assert.equal(selected.status, 0, selected.stdout);
+          const first = await runAccountCli(
+            f,
+            [
+              accounts,
+              {
+                path: `/api/v1/${command}`,
+                body: { result: { [key]: [], hasNext: true, nextCursor: 'next-page' } },
+              },
+            ],
+            [command, ...args],
+          );
+          assert.equal(first.status, 2, first.stdout);
+          const { page } = JSON.parse(first.stdout);
+          writeFileSync(
+            join(changed.directory, 'credentials.json'),
+            JSON.stringify({
+              ...JSON.parse(readFileSync(join(f.directory, 'credentials.json'), 'utf8')),
+              [field]: `replacement-${field}`,
+            }),
+            { mode: 0o600 },
+          );
+          const reselected = await selectAccount(changed, 741, [command]);
+          assert.equal(reselected.status, 0, reselected.stdout);
+          const next = await runAccountCli(
+            changed,
+            [],
+            [command, ...args, `cursor=${page.nextCursor}`, `context=${page.context}`],
+          );
+          assert.equal(next.status, 1, next.stdout);
+          assert.equal(JSON.parse(next.stdout).error.code, 'INPUT_INVALID');
+          assert.deepEqual(next.requests, []);
+        } finally {
+          f.close();
+          changed.close();
+        }
+      });
+    }
   }
 });
 

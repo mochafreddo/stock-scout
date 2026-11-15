@@ -1,3 +1,4 @@
+import { accountPageQuery } from './toss-account-pagination.ts';
 import { TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
 import { decimal, items, record, validTime } from './toss-values.ts';
@@ -18,30 +19,13 @@ const types = new Set([
 export function transactionQuery(from: string | undefined, args: string[]) {
   const [to, ...options] = args;
   if (!validDate(from) || !validDate(to) || from > to) throw new TossError('INPUT_INVALID');
-  const query = new URLSearchParams({ from, to, limit: '20' });
-  const seen = new Set<string>();
-  let context: string | undefined;
-  for (const arg of options) {
-    const separator = arg.indexOf('=');
-    const key = arg.slice(0, separator);
-    const value = arg.slice(separator + 1);
-    if (
-      separator < 0 ||
-      seen.has(key) ||
-      !(
-        (key === 'limit' && /^(?:[1-9]\d?|100)$/.test(value)) ||
-        (key === 'transactionTypes' &&
-          (value === '' || value.split(',').every((type) => types.has(type)))) ||
-        (key === 'cursor' && value.length > 0) ||
-        (key === 'context' && /^[a-f0-9]{64}$/.test(value))
-      )
-    )
-      throw new TossError('INPUT_INVALID');
-    seen.add(key);
-    if (key === 'context') context = value;
-    else query.set(key, value);
-  }
-  if (query.has('cursor') !== (context !== undefined)) throw new TossError('INPUT_INVALID');
+  const { query, context } = accountPageQuery(
+    new URLSearchParams({ from, to }),
+    options,
+    (key, value) =>
+      key === 'transactionTypes' &&
+      (value === '' || value.split(',').every((type) => types.has(type))),
+  );
   return {
     query,
     context,

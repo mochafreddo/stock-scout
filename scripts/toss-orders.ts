@@ -1,3 +1,4 @@
+import { accountPageQuery } from './toss-account-pagination.ts';
 import { TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
 import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
@@ -5,36 +6,17 @@ import { decimal, items, record, symbolPattern, validTime } from './toss-values.
 export function orderQuery(status: string | undefined, args: string[], conditional: boolean) {
   if (status !== 'OPEN' && status !== 'CLOSED') throw new TossError('INPUT_INVALID');
   const paginated = conditional || status === 'CLOSED';
-  const query = new URLSearchParams({ status, ...(paginated ? { limit: '20' } : {}) });
-  const seen = new Set<string>();
-  let context: string | undefined;
-  for (const arg of args) {
-    const separator = arg.indexOf('=');
-    const key = arg.slice(0, separator);
-    const value = arg.slice(separator + 1);
-    if (
-      separator < 0 ||
-      seen.has(key) ||
-      !(
-        (key === 'symbol' && symbolPattern.test(value)) ||
-        (!conditional && (key === 'from' || key === 'to') && validDate(value)) ||
-        (paginated && key === 'limit' && /^(?:[1-9]\d?|100)$/.test(value)) ||
-        (paginated &&
-          key === 'cursor' &&
-          value.length > 0 &&
-          (!conditional || /^[A-Za-z0-9_-]+$/.test(value))) ||
-        (paginated && key === 'context' && /^[a-f0-9]{64}$/.test(value))
-      )
-    )
-      throw new TossError('INPUT_INVALID');
-    seen.add(key);
-    if (key === 'context') context = value;
-    else query.set(key, value);
-  }
+  const { query, context } = accountPageQuery(
+    new URLSearchParams({ status }),
+    args,
+    (key, value) =>
+      (key === 'symbol' && symbolPattern.test(value)) ||
+      (!conditional && (key === 'from' || key === 'to') && validDate(value)),
+    paginated ? (conditional ? 'url-safe' : 'opaque') : false,
+  );
   const from = query.get('from');
   const to = query.get('to');
-  if ((from && to && from > to) || query.has('cursor') !== (context !== undefined))
-    throw new TossError('INPUT_INVALID');
+  if (from && to && from > to) throw new TossError('INPUT_INVALID');
   return {
     query,
     context,

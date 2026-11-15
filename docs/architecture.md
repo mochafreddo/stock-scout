@@ -33,6 +33,7 @@ flowchart TD
 | [toss-candles.ts](../scripts/toss-candles.ts) | 봉 조건·응답, 거래일 선택, 순차 일봉 묶음 조립 | [봉](../tests/toss-candles.test.mjs), [날짜](../tests/toss-candle-date.test.mjs), [묶음](../tests/toss-candles-batch.test.mjs) |
 | [toss-sessions.ts](../scripts/toss-sessions.ts) | 세션·거래 제약의 입력·조회 조건·출처·응답 해석, 문서상 거래 규칙·미확인 구분 | [세션·제약](../tests/toss-sessions.test.mjs) |
 | [toss-account.ts](../scripts/toss-account.ts) | 계좌 조회의 입력·응답 검증 함수·출처 조립, 보유와 통화별 현금 기반 매수 가능 금액 검증 | [계좌](../tests/toss-account.test.mjs), 거래내역·주문 검사 |
+| [toss-account-pagination.ts](../scripts/toss-account-pagination.ts) | 계좌 페이지 입력·커서와 문맥의 결합·서명 대상 구성 | [거래내역](../tests/toss-transactions.test.mjs), [주문](../tests/toss-orders.test.mjs) |
 | [toss-transactions.ts](../scripts/toss-transactions.ts) | 결제 기준 거래내역과 페이지 | [거래내역](../tests/toss-transactions.test.mjs) |
 | [toss-orders.ts](../scripts/toss-orders.ts) | 일반·조건 주문의 조회 조건·상태·페이지 | [주문](../tests/toss-orders.test.mjs) |
 
@@ -64,7 +65,9 @@ flowchart TD
 
 `toss-account.ts`는 계좌 조회 명령을 해석해 검증된 조회 조건·응답 검증 함수·출처 정보를 함께 준비한다. 거래내역과 주문의 세부 검증은 각 명령 모듈에 둔다. 진입점은 입력 검증 후 클라이언트를 만들고, 클라이언트가 저장된 계좌 선택과 범위를 확인한 뒤에만 별칭과 명령별 출처를 붙인다.
 
-다음 페이지 문맥은 계좌·자격 증명·조회 조건·공급자 커서를 HMAC으로 연결한다. 소비자는 반환된 `cursor`와 `context`를 함께 전달하며, 필터나 계좌가 바뀐 문맥을 재사용하지 않는다. 봉의 `nextBefore`는 이 계좌 커서와 다른 방식이다.
+계좌 페이지 모듈은 페이지 크기·커서·문맥의 공통 입력 규칙과 서명 대상을 구성한다. 거래내역·주문 모듈은 고유 필터 검증과 응답 해석을 유지한다. 일반 진행 중 주문의 페이지 없음과 조건 주문의 커서 형식 차이도 보존한다. 클라이언트는 자격 증명을 보관하고 HMAC 서명과 검증을 수행한다.
+
+계좌 페이지 문맥은 계좌·자격 증명·조회 조건·공급자 커서를 HMAC으로 연결한다. 소비자는 반환된 `cursor`와 `context`를 함께 전달하며, 필터나 계좌가 바뀐 문맥을 재사용하지 않는다. 페이지 크기는 다음 조회에서 바꿀 수 있다. 기존 거래내역 문맥 형식은 유지하며, 봉의 `nextBefore`는 이 계좌 커서와 다른 방식이다.
 
 클라이언트는 비밀값과 계좌 식별자를 추적한다. 명령별 파서는 허용된 필드를 결과에 옮기고, 최종 출력에서 비밀값이 발견되면 정상 자료를 출력하지 않는다. 오류의 공급자 코드·요청 식별자도 형식 검증과 민감한 값 검사를 거친다. 이 로컬 범위 제한은 공급자가 강제하는 조회 전용 권한의 증거가 아니다. 접근·전달 허용과 남은 미확인은 [접근 기록](toss-access-readiness.md)을 따른다.
 

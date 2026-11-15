@@ -19,6 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { accountCursorPayload } from './toss-account-pagination.ts';
 
 const STORAGE_BYTES = 16384;
 const TERMINAL_ERRORS = [
@@ -570,25 +571,8 @@ export class TossClient {
     cursor: string,
     endpoint: string,
   ) {
-    const filters = new URLSearchParams(query);
-    filters.delete('cursor');
-    filters.delete('limit');
-    filters.sort();
     return createHmac('sha256', this.clientSecret)
-      .update(
-        JSON.stringify(
-          endpoint === '/api/v1/transactions'
-            ? [
-                this.clientId,
-                accountSeq,
-                query.get('from'),
-                query.get('to'),
-                query.get('transactionTypes') || '',
-                cursor,
-              ]
-            : [this.clientId, accountSeq, endpoint, filters.toString(), cursor],
-        ),
-      )
+      .update(accountCursorPayload(this.clientId, accountSeq, query, cursor, endpoint))
       .digest('hex');
   }
   private remaining() {
