@@ -1,5 +1,27 @@
 import { TossError } from './toss-client.ts';
-import { decimal, items, record, validTime } from './toss-values.ts';
+import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
+
+export function marketQuery(
+  command: 'orderbook' | 'trades',
+  symbol: string | undefined,
+  args: string[],
+) {
+  if (!symbol || !symbolPattern.test(symbol)) throw new TossError('INPUT_INVALID');
+  const query = new URLSearchParams({ symbol });
+  if (command === 'orderbook') {
+    if (args.length) throw new TossError('INPUT_INVALID');
+    return { query, source: { symbol }, parse: orderbookResult };
+  }
+  const count = args[0] ?? '50';
+  if (args.length > 1 || !/^(?:[1-9]|[1-4]\d|50)$/.test(count))
+    throw new TossError('INPUT_INVALID');
+  query.set('count', count);
+  return {
+    query,
+    source: { symbol, count: Number(count), scope: 'provider_current_day_recent_trades' },
+    parse: (value: unknown) => tradesResult(value, Number(count)),
+  };
+}
 
 function currency(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -8,7 +30,7 @@ function level(row: Record<string, unknown>) {
   if (!decimal(row.price) || !decimal(row.volume)) return;
   return { price: row.price, volume: row.volume };
 }
-export function orderbookResult(value: unknown) {
+function orderbookResult(value: unknown) {
   if (
     !record(value) ||
     !currency(value.currency) ||
@@ -46,7 +68,7 @@ export function orderbookResult(value: unknown) {
   };
 }
 
-export function tradesResult(value: unknown, count: number) {
+function tradesResult(value: unknown, count: number) {
   if (!Array.isArray(value) || value.length > count) throw new TossError('RESPONSE_INVALID');
   return items(value, (row) => {
     if (!record(row)) return;

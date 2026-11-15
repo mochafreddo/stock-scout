@@ -7,11 +7,10 @@ import {
 } from './toss-candles.ts';
 import { TossClient, TossError } from './toss-client.ts';
 import { rankingQuery, rankingResult, tradableQuery, tradableResult } from './toss-discovery.ts';
-import { orderbookResult, tradesResult } from './toss-market.ts';
+import { marketQuery } from './toss-market.ts';
 import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
 import { sessionQuery } from './toss-sessions.ts';
 import { AmbiguousStock, stockQuery, stockResult } from './toss-stock.ts';
-import { symbolPattern } from './toss-values.ts';
 
 const interruption = new AbortController();
 const interrupt = () => interruption.abort();
@@ -213,26 +212,9 @@ try {
       return result;
     }
     if (command === 'orderbook' || command === 'trades') {
-      const count = rest[0] ?? '50';
-      if (
-        !symbols ||
-        !symbolPattern.test(symbols) ||
-        (command === 'orderbook'
-          ? rest.length > 0
-          : rest.length > 1 || !/^(?:[1-9]|[1-4]\d|50)$/.test(count))
-      )
-        throw new TossError('INPUT_INVALID');
-      const query = new URLSearchParams({ symbol: symbols });
-      Object.assign(source, { symbol: symbols });
-      if (command === 'trades') {
-        query.set('count', count);
-        Object.assign(source, {
-          count: Number(count),
-          scope: 'provider_current_day_recent_trades',
-        });
-        return tradesResult(await read(query), Number(count));
-      }
-      return orderbookResult(await read(query));
+      const request = marketQuery(command, symbols, rest);
+      Object.assign(source, request.source);
+      return request.parse(await read(request.query));
     }
     if (command === 'rankings') {
       const query = rankingQuery(symbols, rest);

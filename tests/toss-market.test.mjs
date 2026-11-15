@@ -206,6 +206,8 @@ test('market commands reject multi-symbol, page, period and depth requests befor
       assert.equal(r.status, 1, r.stdout);
       assert.equal(r.out.error.code, 'INPUT_INVALID');
       assert.deepEqual(r.requests, []);
+      for (const field of ['symbol', 'count', 'scope'])
+        assert.equal(Object.hasOwn(r.out.source, field), false);
     }
   }
   for (const count of ['0', '51', '-1', '1.5', '01', '1e1', '']) {
@@ -267,6 +269,8 @@ test('both commands share authentication, bounded retries, timeout and safe prov
       assert.equal(r.status, 1, r.stdout);
       assert.equal(out.error.code, code, r.stdout);
       assert.deepEqual(out.data, []);
+      assert.equal(out.source.symbol, 'AAPL');
+      if (command === 'trades') assert.equal(out.source.count, 50);
       assert.equal(r.requests.filter((row) => row.method === 'GET').length, count);
       assert.equal(r.stderr.trim(), code);
       assert.doesNotMatch(

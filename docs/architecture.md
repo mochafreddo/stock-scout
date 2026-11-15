@@ -29,7 +29,7 @@ flowchart TD
 | [toss-stock.ts](../scripts/toss-stock.ts) | 종목 식별과 모호한 후보의 선택 요구, 날짜 지정 봉의 미국 시장 확인 | [종목](../tests/toss-stock.test.mjs), [봉 날짜](../tests/toss-candle-date.test.mjs) |
 | [toss-discovery.ts](../scripts/toss-discovery.ts) | 순위와 거래 가능 종목 목록의 조건·집계 범위 | [탐색](../tests/toss-discovery.test.mjs) |
 | [toss-prices.ts](../scripts/toss-prices.ts) | 가격 조회와 원천 시각 경과 시간 | [공통 CLI](../tests/toss.test.mjs), [보고 시점 소비](../tests/price-consumer.test.mjs) |
-| [toss-market.ts](../scripts/toss-market.ts) | 호가와 최근 체결의 검증·공급자 순서 보존 | [시장 자료](../tests/toss-market.test.mjs) |
+| [toss-market.ts](../scripts/toss-market.ts) | 호가·최근 체결의 입력·조회 조건·출처·응답 해석, 공급자 순서 보존 | [시장 자료](../tests/toss-market.test.mjs) |
 | [toss-candles.ts](../scripts/toss-candles.ts) | 봉 조건·응답, 거래일 선택, 순차 일봉 묶음 조립 | [봉](../tests/toss-candles.test.mjs), [날짜](../tests/toss-candle-date.test.mjs), [묶음](../tests/toss-candles-batch.test.mjs) |
 | [toss-sessions.ts](../scripts/toss-sessions.ts) | 세션·거래 제약의 입력·조회 조건·출처·응답 해석, 문서상 거래 규칙·미확인 구분 | [세션·제약](../tests/toss-sessions.test.mjs) |
 | [toss-account.ts](../scripts/toss-account.ts) | 계좌 조회의 입력·응답 검증 함수·출처 조립, 보유와 통화별 현금 기반 매수 가능 금액 검증 | [계좌](../tests/toss-account.test.mjs), 거래내역·주문 검사 |
