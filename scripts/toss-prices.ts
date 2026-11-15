@@ -3,6 +3,7 @@ import {
   decimal,
   items,
   laterThan,
+  record,
   symbolPattern,
   validTime,
   wholeSecondMillis,
@@ -34,11 +35,11 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
   if (!Array.isArray(value)) throw new TossError('RESPONSE_INVALID');
   const rows: unknown[] = value;
   const counts = new Map(symbols.split(',').map((symbol) => [symbol, 0]));
-  for (const row of rows)
-    if (row && typeof row === 'object' && 'symbol' in row && typeof row.symbol === 'string') {
-      const count = counts.get(row.symbol);
-      if (count !== undefined) counts.set(row.symbol, count + 1);
-    }
+  for (const row of rows) {
+    if (!record(row) || typeof row.symbol !== 'string') continue;
+    const count = counts.get(row.symbol);
+    if (count !== undefined) counts.set(row.symbol, count + 1);
+  }
   const { data, omissions } = items<Price>(rows, (row) => {
     const timestamp =
       row && typeof row === 'object' && 'timestamp' in row ? row.timestamp : undefined;

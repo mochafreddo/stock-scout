@@ -134,12 +134,11 @@ function checkLinks(root: string, files: string[], headingCache?: Map<string, Se
       if (inside === '..' || inside.startsWith('../') || isAbsolute(inside)) {
         throw new Error(`${file}: local target leaves snapshot: ${link}`);
       }
-      if (fragment && target.endsWith('.md')) {
-        const ids = headingCache?.get(realTarget) ?? headingIds(markdownText(target));
-        headingCache?.set(realTarget, ids);
-        if (!ids.has(decodeURIComponent(fragment)))
-          throw new Error(`${file}: missing heading ${link}`);
-      }
+      if (!fragment || !target.endsWith('.md')) continue;
+      const ids = headingCache?.get(realTarget) ?? headingIds(markdownText(target));
+      headingCache?.set(realTarget, ids);
+      if (!ids.has(decodeURIComponent(fragment)))
+        throw new Error(`${file}: missing heading ${link}`);
     }
   }
 }
