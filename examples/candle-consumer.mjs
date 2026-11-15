@@ -18,20 +18,39 @@ if (emptyError) {
     record(output.error) && typeof output.error.code === 'string' && output.error.code.length > 0,
     'CLI error code required',
   );
+  assert.ok(
+    Object.keys(output.error).every((field) =>
+      ['code', 'providerCode', 'requestId', 'choices'].includes(field),
+    ),
+    'CLI error contains unexpected fields',
+  );
   for (const field of ['providerCode', 'requestId'])
     assert.ok(
       !Object.hasOwn(output.error, field) || typeof output.error[field] === 'string',
       `CLI error ${field} must be a string`,
     );
   assert.ok(
-    !Object.hasOwn(output.error, 'choices') || Array.isArray(output.error.choices),
-    'CLI error choices must be an array',
+    !Object.hasOwn(output.error, 'choices') ||
+      (Array.isArray(output.error.choices) &&
+        output.error.choices.every(
+          (choice) =>
+            record(choice) &&
+            Object.keys(choice).length === 4 &&
+            typeof choice.symbol === 'string' &&
+            typeof choice.market === 'string' &&
+            (choice.name === null || typeof choice.name === 'string') &&
+            (choice.isinCode === null || typeof choice.isinCode === 'string'),
+        )),
+    'CLI error choices must contain stock choices',
   );
 }
 assert.ok(
-  emptyError ||
-    (output.source.endpoint === '/api/v1/candles' &&
-      (!Object.hasOwn(output.source, 'interval') || output.source.interval === '1d')),
+  record(output.source) &&
+    ((emptyError &&
+      output.source.provider === 'tossinvest' &&
+      Object.keys(output.source).length === 1) ||
+      (output.source.endpoint === '/api/v1/candles' &&
+        (!Object.hasOwn(output.source, 'interval') || output.source.interval === '1d'))),
   'daily candle output required',
 );
 const batch = !Object.hasOwn(output.source, 'interval');
@@ -42,6 +61,10 @@ const data = rows.map((row) => {
     ['NYSE', 'NASDAQ', 'AMEX', 'US_ETC'].includes(row.source.market) &&
     row.source.dateTimeZone === 'America/New_York';
   const bars = row.data.map((bar) => {
+    assert.ok(
+      typeof bar.currency === 'string' && bar.currency.trim(),
+      'currency must be a nonempty string',
+    );
     assert.ok(decimal(bar.closePrice), 'closePrice must be a decimal string');
     assert.ok(decimal(bar.volume), 'volume must be a decimal string');
     assert.ok(Number(bar.closePrice) >= 0, 'closePrice must be nonnegative');

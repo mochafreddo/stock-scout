@@ -170,6 +170,103 @@ test('consumer rejects malformed error envelopes and requires candle sources for
   }
 });
 
+test('consumer accepts only daily or exactly redacted sources for empty errors', async (t) => {
+  const error = {
+    version: 1,
+    status: 'error',
+    data: [],
+    error: { code: 'INPUT_INVALID' },
+  };
+  for (const source of [
+    undefined,
+    null,
+    [],
+    'tossinvest',
+    {},
+    { provider: 'other' },
+    { provider: 'tossinvest', endpoint: '/api/v1/prices' },
+    { provider: 'tossinvest', endpoint: '/api/v1/candles', interval: '1m' },
+    { provider: 'tossinvest', endpoint: null },
+    { provider: 'tossinvest', interval: '1d' },
+  ]) {
+    await t.test(`rejects ${JSON.stringify(source)}`, () => {
+      const consumed = consume({ stdout: JSON.stringify({ ...error, source }) });
+      assert.equal(consumed.status, 1, consumed.stderr);
+      assert.equal(consumed.stdout, '');
+      assert.match(consumed.stderr, /daily candle output required/);
+    });
+  }
+  for (const source of [
+    { provider: 'tossinvest' },
+    { provider: 'tossinvest', endpoint: '/api/v1/candles' },
+    { provider: 'tossinvest', endpoint: '/api/v1/candles', interval: '1d', symbol: 'DEMO' },
+  ]) {
+    await t.test(`preserves ${JSON.stringify(source)}`, () => {
+      const consumed = consume({ stdout: JSON.stringify({ ...error, source }) });
+      assert.equal(consumed.status, 0, consumed.stderr);
+      assert.deepEqual(JSON.parse(consumed.stdout).error, error.error);
+    });
+  }
+});
+
+test('consumer rejects unsafe error fields and malformed stock choices without rewriting safe details', async (t) => {
+  const choice = {
+    symbol: 'DEMO',
+    name: 'Synthetic Demo',
+    market: 'NASDAQ',
+    isinCode: 'US0000000002',
+  };
+  const error = {
+    version: 1,
+    status: 'error',
+    source: { provider: 'tossinvest' },
+    data: [],
+    error: { code: 'IDENTITY_AMBIGUOUS' },
+  };
+  const malformedChoices = [
+    null,
+    [],
+    'DEMO',
+    {},
+    { ...choice, symbol: 1 },
+    { ...choice, name: 1 },
+    { ...choice, market: null },
+    { ...choice, isinCode: {} },
+    { symbol: 'DEMO', market: 'NASDAQ' },
+    { ...choice, message: 'raw provider message' },
+  ];
+  for (const [name, detail] of [
+    ['message', { ...error.error, message: 'raw provider message' }],
+    ['body', { ...error.error, body: { secret: 'raw provider body' } }],
+    ['unknown key', { ...error.error, extra: true }],
+    ...malformedChoices.map((value) => [
+      `choice=${JSON.stringify(value)}`,
+      { ...error.error, choices: [value] },
+    ]),
+  ]) {
+    await t.test(`rejects ${name}`, () => {
+      const consumed = consume({ stdout: JSON.stringify({ ...error, error: detail }) });
+      assert.equal(consumed.status, 1, consumed.stderr);
+      assert.equal(consumed.stdout, '');
+    });
+  }
+  for (const detail of [
+    { code: 'IDENTITY_AMBIGUOUS', choices: [choice, { ...choice, name: null, isinCode: null }] },
+    {
+      code: 'AUTH_FAILED',
+      providerCode: 'safe-provider-code',
+      requestId: 'SAFE_REQUEST',
+      choices: [],
+    },
+  ]) {
+    await t.test(`preserves ${detail.code}`, () => {
+      const consumed = consume({ stdout: JSON.stringify({ ...error, error: detail }) });
+      assert.equal(consumed.status, 0, consumed.stderr);
+      assert.deepEqual(JSON.parse(consumed.stdout), { status: 'error', data: [], error: detail });
+    });
+  }
+});
+
 test('consumer preserves currencies and declines mixed-currency close comparisons', () => {
   const output = {
     version: 1,
@@ -198,6 +295,26 @@ test('consumer preserves currencies and declines mixed-currency close comparison
   );
   assert.deepEqual(row.omissions, output.omissions);
   assert.deepEqual(row.page, output.page);
+});
+
+test('consumer rejects absent or invalid currency on every bar before calculating', async (t) => {
+  for (const currency of [undefined, null, '', '   ', 1, {}, []]) {
+    await t.test(`currency=${JSON.stringify(currency)}`, () => {
+      const output = {
+        version: 1,
+        status: 'success',
+        source: { endpoint: '/api/v1/candles', interval: '1d', symbol: 'DEMO' },
+        data: [
+          { timestamp: '2026-11-05T21:00:00Z', closePrice: '12.50', volume: '200', currency },
+          { timestamp: '2026-11-04T21:00:00Z', closePrice: '10.00', volume: '100', currency },
+        ],
+      };
+      const consumed = consume({ stdout: JSON.stringify(output) });
+      assert.equal(consumed.status, 1, consumed.stderr);
+      assert.equal(consumed.stdout, '');
+      assert.match(consumed.stderr, /currency must be a nonempty string/);
+    });
+  }
 });
 
 test('actual CLI mixed-currency stdout retains bars and volume in the executable consumer', async (t) => {
