@@ -131,6 +131,12 @@ mock.method(fs, 'renameSync', (source, target) => {
   }
   if (process.env.TEST_FAIL_STATE_SAVE && target === `${process.env.TOSS_STATE_DIR}/state.json`)
     throw new Error('synthetic-secret');
+  if (
+    process.env.TEST_FAIL_REJECTED_ISSUANCE_SAVE &&
+    target === `${process.env.TOSS_STATE_DIR}/state.json` &&
+    JSON.parse(readFileSync(source)).pending === false
+  )
+    throw new Error('synthetic-secret');
   const result = renameSync(source, target);
   if (target === `${process.env.TOSS_STATE_DIR}/account.json`) accountRenamed = true;
   if (
@@ -198,6 +204,7 @@ globalThis.fetch = async (url, init) => {
     process.env.TEST_TRACE,
     `${JSON.stringify({ path: address.pathname, query: address.search, method: init.method, at: Date.now(), nativeNs: nativeHrtime().toString(), sharedNs: process.hrtime.bigint().toString(), authorization: init.headers.authorization, account: init.headers['X-Tossinvest-Account'], body: init.body })}\n`,
   );
+  let step;
   if (address.pathname === '/oauth2/token') {
     assert.equal(init.headers['content-type'], 'application/x-www-form-urlencoded');
     assert.deepEqual(Object.fromEntries(new URLSearchParams(init.body)), {
@@ -205,31 +212,30 @@ globalThis.fetch = async (url, init) => {
       client_id: 'synthetic-client',
       client_secret: process.env.TEST_CLIENT_SECRET || 'synthetic-secret',
     });
-    const step = authSteps.shift();
-    if (step?.transport) throw new TypeError('synthetic-secret');
-    if (step)
-      return Response.json(step.body, { status: step.status || 200, headers: step.headers });
-    return Response.json({
-      access_token: 'synthetic-token',
-      token_type: 'Bearer',
-      expires_in: 86400,
-    });
+    step = authSteps.shift();
+    if (!step)
+      return Response.json({
+        access_token: 'synthetic-token',
+        token_type: 'Bearer',
+        expires_in: 86400,
+      });
+  } else {
+    assert.equal(init.method, 'GET');
+    step = steps.shift() || {
+      body: {
+        result: [
+          {
+            symbol: 'AAPL',
+            lastPrice: '185.7000',
+            currency: 'USD',
+            timestamp: '2026-11-06T10:30:00-05:00',
+          },
+        ],
+      },
+    };
+    assert.equal(address.pathname, step.path || '/api/v1/prices');
+    assert.equal(init.headers.authorization, `Bearer ${step.expectedToken || 'synthetic-token'}`);
   }
-  assert.equal(init.method, 'GET');
-  const step = steps.shift() || {
-    body: {
-      result: [
-        {
-          symbol: 'AAPL',
-          lastPrice: '185.7000',
-          currency: 'USD',
-          timestamp: '2026-11-06T10:30:00-05:00',
-        },
-      ],
-    },
-  };
-  assert.equal(address.pathname, step.path || '/api/v1/prices');
-  assert.equal(init.headers.authorization, `Bearer ${step.expectedToken || 'synthetic-token'}`);
   if (step.gate) {
     const gateStartedNs = nativeHrtime();
     if (process.env.TEST_SHARED_CLOCK_FILE)
@@ -267,8 +273,29 @@ globalThis.fetch = async (url, init) => {
           throw new Error('synthetic-secret');
         },
       }),
+      { status: step.status || 200, headers: step.headers },
     );
-  if (step.bodyHang) return new Response(new ReadableStream({ start() {} }));
+  if (step.bodyHang)
+    return new Response(
+      new ReadableStream({
+        start() {
+          if (step.interrupt) process.kill(process.pid, 'SIGTERM');
+        },
+      }),
+      { status: step.status || 200, headers: step.headers },
+    );
+  if (step.bodyFailure)
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"error":{"code":"expired-token"}}'));
+        },
+        pull(controller) {
+          controller.error(new TypeError('synthetic-secret'));
+        },
+      }),
+      { status: step.status || 200, headers: step.headers },
+    );
   if (step.interrupt) {
     process.kill(process.pid, 'SIGTERM');
     return new Promise(() => {});
@@ -286,14 +313,17 @@ globalThis.fetch = async (url, init) => {
         start(controller) {
           for (const chunk of step.responseChunks)
             controller.enqueue(
-              new TextEncoder().encode(typeof chunk === 'number' ? ' '.repeat(chunk) : chunk),
+              Array.isArray(chunk)
+                ? Uint8Array.from(chunk)
+                : new TextEncoder().encode(typeof chunk === 'number' ? ' '.repeat(chunk) : chunk),
             );
           controller.close();
         },
       }),
       { status: step.status || 200, headers: step.headers },
     );
-  if (step.rawBody) return new Response(step.rawBody, { status: step.status || 200 });
+  if (step.rawBody)
+    return new Response(step.rawBody, { status: step.status || 200, headers: step.headers });
   if (step.freezeAt) {
     clearInterval(clock);
     mock.timers.setTime(Date.parse(step.freezeAt));

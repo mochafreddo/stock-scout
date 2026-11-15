@@ -674,6 +674,283 @@ test('batch stops shared access failures and distinguishes the failed symbol fro
   }
 });
 
+test('batch preserves an oversized HTTP permission failure and stops later requests', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const r = await runCli(
+    f,
+    [
+      page([]),
+      {
+        path: '/api/v1/candles',
+        status: 403,
+        responseChunks: [
+          '{"error":{"code":"expired-token","message":"synthetic-secret"}}',
+          1048577,
+        ],
+        headers: { 'X-Request-Id': 'SAFE_403' },
+      },
+      page(),
+    ],
+    ['candles-batch', 'FIRST,BLOCKED,LATER'],
+  );
+  const out = JSON.parse(r.stdout);
+  assert.equal(r.status, 2, r.stdout);
+  assert.deepEqual(
+    out.data.map(({ status }) => status),
+    ['success', 'error', 'not_queried'],
+  );
+  assert.deepEqual(out.data[1].error, { code: 'PERMISSION_DENIED', requestId: 'SAFE_403' });
+  assert.equal(out.data[2].reason, 'PERMISSION_DENIED');
+  assert.deepEqual(
+    r.requests.map(({ path }) => path),
+    ['/oauth2/token', '/api/v1/candles', '/api/v1/candles'],
+  );
+  assert.equal(r.requests.at(-1).query, '?symbol=BLOCKED&interval=1d&count=100&adjusted=true');
+  assert.equal(r.stderr, 'PERMISSION_DENIED\n');
+  assert.doesNotMatch(r.stdout + r.stderr, /expired-token|synthetic-(secret|token|client)/);
+});
+
+test('batch preserves HTTP access failures when error bodies cannot be trusted or received', async (t) => {
+  for (const path of ['/api/v1/stocks', '/api/v1/candles']) {
+    for (const [status, code] of [
+      [401, 'AUTH_FAILED'],
+      [403, 'PERMISSION_DENIED'],
+    ]) {
+      for (const [name, failure] of [
+        ['oversized', { responseChunks: ['{"error":{"code":"expired-token"}}', 1048577] }],
+        ['malformed JSON', { rawBody: '{"error":{"code":"expired-token"},"synthetic-secret":' }],
+        ['missing token code', { rawBody: '{"error":{"message":"synthetic-secret"}}' }],
+        ['invalid UTF-8', { responseChunks: ['{"error":{"code":"expired-token"}}', [255]] }],
+        ['failed stream', { bodyFailure: true }],
+        ['body timeout', { bodyHang: true }],
+      ]) {
+        await t.test(`${path} ${status} ${name}`, async (t) => {
+          const f = fixture();
+          t.after(f.close);
+          const steps = [identity('FIRST'), page([])];
+          if (path === '/api/v1/candles') steps.push(identity('BLOCKED'));
+          steps.push({ path, status, headers: { 'X-Request-Id': 'SAFE_ACCESS' }, ...failure });
+          const r = await runCli(f, steps, [
+            'candles-batch',
+            'FIRST,BLOCKED,LATER',
+            'date=2026-11-05',
+          ]);
+          const out = JSON.parse(r.stdout);
+          assert.equal(r.status, 2, r.stdout);
+          assert.equal(out.status, 'partial');
+          assert.deepEqual(
+            out.data.map(({ status }) => status),
+            ['success', 'error', 'not_queried'],
+          );
+          assert.deepEqual(out.data[1].error, { code, requestId: 'SAFE_ACCESS' });
+          assert.equal(out.data[2].reason, code);
+          assert.deepEqual(
+            r.requests.map(({ path }) => path),
+            ['/oauth2/token', ...steps.map(({ path }) => path)],
+          );
+          assert.equal(r.stderr, `${code}\n`);
+          assert.doesNotMatch(r.stdout + r.stderr, /expired-token|synthetic-(secret|token|client)/);
+          if (name === 'body timeout')
+            assert.equal(Date.parse(out.data[1].retrievedAt) - r.requests.at(-1).at, 15000);
+        });
+      }
+    }
+  }
+});
+
+test('batch preserves interruption during an HTTP access error body', async (t) => {
+  for (const status of [401, 403]) {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(
+      f,
+      [page([]), { path: '/api/v1/candles', status, bodyHang: true, interrupt: true }],
+      ['candles-batch', 'FIRST,CURRENT,LATER'],
+    );
+    const out = JSON.parse(r.stdout);
+    assert.equal(r.status, 2, r.stdout);
+    assert.deepEqual(
+      out.data.map(({ status }) => status),
+      ['success', 'error', 'not_queried'],
+    );
+    assert.equal(out.data[1].error.code, 'INTERRUPTED');
+    assert.equal(out.data[2].reason, 'INTERRUPTED');
+    assert.equal(r.requests.length, 3);
+    assert.equal(r.stderr, 'INTERRUPTED\n');
+  }
+});
+
+test('batch preserves a confirmed HTTP access failure when its body reaches the shared deadline', async (t) => {
+  for (const [status, code] of [
+    [401, 'AUTH_FAILED'],
+    [403, 'PERMISSION_DENIED'],
+  ]) {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(
+      f,
+      [
+        page([]),
+        ...Array.from({ length: 7 }, () => ({ path: '/api/v1/candles', hang: true })),
+        { path: '/api/v1/candles', status, bodyHang: true },
+      ],
+      ['candles-batch', 'FIRST,S1,S2,S3,S4,S5,S6,S7,BLOCKED,LATER'],
+    );
+    const out = JSON.parse(r.stdout);
+    assert.equal(r.status, 2, r.stdout);
+    assert.equal(out.data[0].status, 'success');
+    assert.ok(out.data.slice(1, 8).every((row) => row.error.code === 'TIMEOUT'));
+    assert.equal(out.data[8].error.code, code);
+    assert.equal(out.data[9].status, 'not_queried');
+    assert.equal(out.data[9].reason, code);
+    assert.equal(r.requests.length, 10);
+    assert.equal(r.requests.at(-1).query, '?symbol=BLOCKED&interval=1d&count=100&adjusted=true');
+    assert.equal(Date.parse(out.retrievedAt) - r.requests[0].at, 120000);
+    assert.equal(Date.parse(out.data[8].retrievedAt) - r.requests.at(-1).at, 13000);
+    assert.equal(r.stderr, `${'TIMEOUT\n'.repeat(7)}${code}\n`);
+  }
+});
+
+test('batch retains coordinator storage failures before reading an HTTP access error body', async (t) => {
+  for (const status of [401, 403]) {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(
+      f,
+      [
+        page([]),
+        { path: '/api/v1/candles', status, headers: { 'Retry-After': '3' }, bodyHang: true },
+      ],
+      ['candles-batch', 'FIRST,CURRENT,LATER'],
+      { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' },
+    );
+    const out = JSON.parse(r.stdout);
+    assert.equal(r.status, 2, r.stdout);
+    assert.deepEqual(
+      out.data.map(({ status }) => status),
+      ['success', 'error', 'not_queried'],
+    );
+    assert.equal(out.data[1].error.code, 'AUTH_STORAGE');
+    assert.equal(out.data[2].reason, 'AUTH_STORAGE');
+    assert.equal(r.requests.length, 3);
+    assert.equal(r.stderr, 'AUTH_STORAGE\n');
+    assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
+  }
+});
+
+test('batch preserves rejected token issuance with unreadable bodies without repeating the attempt', async (t) => {
+  for (const [status, code] of [
+    [401, 'AUTH_FAILED'],
+    [403, 'PERMISSION_DENIED'],
+  ]) {
+    for (const body of [{ responseChunks: [1048577] }, { bodyFailure: true }, { bodyHang: true }]) {
+      const f = fixture();
+      t.after(f.close);
+      const r = await runCli(f, [], ['candles-batch', 'FIRST,LATER'], {
+        TEST_AUTH_STEPS: JSON.stringify([{ status, ...body }]),
+      });
+      const out = JSON.parse(r.stdout);
+      assert.equal(r.status, 1, r.stdout);
+      assert.equal(out.data[0].error.code, code);
+      assert.equal(out.data[1].status, 'not_queried');
+      assert.equal(out.data[1].reason, code);
+      assert.deepEqual(
+        r.requests.map(({ path }) => path),
+        ['/oauth2/token'],
+      );
+      assert.equal(r.stderr, `${code}\n`);
+      const next = await runCli(f, [page([])], ['candles-batch', 'FIRST'], {
+        TEST_CLOCK_START: String(Date.parse('2026-11-06T15:03:00Z')),
+      });
+      assert.equal(next.status, 0, next.stdout);
+      assert.deepEqual(
+        next.requests.map(({ path }) => path),
+        ['/oauth2/token', '/oauth2/token', '/api/v1/candles'],
+      );
+      assert.doesNotMatch(
+        r.stdout + r.stderr + next.stdout + next.stderr,
+        /synthetic-(secret|token|client)/,
+      );
+    }
+  }
+});
+
+test('batch retains storage failure while recording rejected token issuance', async (t) => {
+  for (const status of [401, 403]) {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(f, [], ['candles-batch', 'FIRST,LATER'], {
+      TEST_AUTH_STEPS: JSON.stringify([{ status, bodyFailure: true }]),
+      TEST_FAIL_REJECTED_ISSUANCE_SAVE: '1',
+    });
+    const out = JSON.parse(r.stdout);
+    assert.equal(r.status, 1, r.stdout);
+    assert.equal(out.data[0].error.code, 'AUTH_STORAGE');
+    assert.equal(out.data[1].status, 'not_queried');
+    assert.equal(out.data[1].reason, 'AUTH_STORAGE');
+    assert.equal(r.requests.length, 1);
+    assert.equal(r.stderr, 'AUTH_STORAGE\n');
+    const next = await runCli(f, [], ['candles-batch', 'FIRST,LATER'], {
+      TEST_CLOCK_START: String(Date.parse('2026-11-06T15:03:00Z')),
+    });
+    assert.equal(next.status, 1, next.stdout);
+    assert.equal(JSON.parse(next.stdout).data[0].error.code, 'AUTH_ISSUANCE_UNKNOWN');
+    assert.equal(next.requests.length, 1);
+    assert.doesNotMatch(
+      r.stdout + r.stderr + next.stdout + next.stderr,
+      /synthetic-(secret|token|client)/,
+    );
+  }
+});
+
+test('batch preserves rejected recovery issuance when its body reaches the shared deadline', async (t) => {
+  for (const [status, code] of [
+    [401, 'AUTH_FAILED'],
+    [403, 'PERMISSION_DENIED'],
+  ]) {
+    await t.test(`${status}`, async (t) => {
+      const f = fixture();
+      t.after(f.close);
+      const r = await runCli(
+        f,
+        [
+          page([]),
+          ...Array.from({ length: 7 }, () => ({ path: '/api/v1/candles', hang: true })),
+          { path: '/api/v1/candles', status: 401, body: { error: { code: 'expired-token' } } },
+        ],
+        ['candles-batch', 'FIRST,S1,S2,S3,S4,S5,S6,S7,BLOCKED,LATER'],
+        {
+          TEST_AUTH_STEPS: JSON.stringify([
+            { body: { access_token: 'synthetic-token', token_type: 'Bearer', expires_in: 86400 } },
+            { status, bodyHang: true },
+          ]),
+        },
+      );
+      const out = JSON.parse(r.stdout);
+      assert.equal(r.status, 2, r.stdout);
+      assert.equal(out.data[8].error.code, code);
+      assert.equal(out.data[9].status, 'not_queried');
+      assert.equal(out.data[9].reason, code);
+      assert.equal(r.requests.length, 11);
+      assert.equal(r.requests.at(-1).path, '/oauth2/token');
+      assert.equal(Date.parse(out.retrievedAt) - r.requests[0].at, 120000);
+      assert.equal(r.stderr, `${'TIMEOUT\n'.repeat(7)}${code}\n`);
+      assert.doesNotMatch(r.stdout + r.stderr, /synthetic-(secret|token|client)/);
+      const next = await runCli(f, [], ['candles-batch', 'FIRST,LATER'], {
+        TEST_CLOCK_START: String(Date.parse('2026-11-06T15:03:00Z')),
+      });
+      const nextOut = JSON.parse(next.stdout);
+      assert.equal(next.status, 1, next.stdout);
+      assert.equal(nextOut.data[0].error.code, 'AUTH_ISSUANCE_UNKNOWN');
+      assert.equal(nextOut.data[1].status, 'not_queried');
+      assert.equal(nextOut.data[1].reason, 'AUTH_ISSUANCE_UNKNOWN');
+      assert.equal(next.requests.length, r.requests.length);
+      assert.equal(next.stderr, 'AUTH_ISSUANCE_UNKNOWN\n');
+    });
+  }
+});
+
 test('date-selected batch stops shared access failures at either request and preserves safe reasons', async (t) => {
   for (const path of ['/api/v1/stocks', '/api/v1/candles']) {
     for (const [status, providerCode, code] of [
