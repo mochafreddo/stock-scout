@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const cli = new URL('../scripts/pre-push.ts', import.meta.url).pathname;
+const cli = fileURLToPath(new URL('../scripts/pre-push.ts', import.meta.url));
 
 function git(cwd, ...args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
