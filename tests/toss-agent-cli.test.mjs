@@ -21,6 +21,91 @@ function consume(result) {
   });
 }
 
+test('consumer preserves currencies and declines mixed-currency close comparisons', () => {
+  const output = {
+    version: 1,
+    status: 'partial',
+    source: { endpoint: '/api/v1/candles', interval: '1d', symbol: 'DEMO' },
+    data: [
+      { timestamp: '2026-11-05T21:00:00Z', closePrice: '12500', volume: '200', currency: 'KRW' },
+      { timestamp: '2026-11-04T21:00:00Z', closePrice: '10.00', volume: '100', currency: 'USD' },
+    ],
+    omissions: [{ reason: 'next_page' }],
+    page: { nextBefore: '2026-11-03T21:00:00Z' },
+  };
+  const consumed = consume({ stdout: JSON.stringify(output) });
+  assert.equal(consumed.status, 0, consumed.stderr);
+  const result = JSON.parse(consumed.stdout);
+  assert.equal(result.status, 'partial');
+  const row = result.data[0];
+  assert.deepEqual(row.analysis, {
+    closeChangePercent: null,
+    closeChangeUnavailableReason: 'currency_mismatch',
+    totalVolume: 300,
+  });
+  assert.deepEqual(
+    row.bars,
+    output.data.map((bar) => ({ ...bar, tradeDate: null })),
+  );
+  assert.deepEqual(row.omissions, output.omissions);
+  assert.deepEqual(row.page, output.page);
+});
+
+test('actual CLI mixed-currency stdout retains bars and volume in the executable consumer', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const bars = [
+    {
+      timestamp: '2026-11-05T21:00:00Z',
+      openPrice: '12000',
+      highPrice: '13000',
+      lowPrice: '11000',
+      closePrice: '12500',
+      volume: '200',
+      currency: 'KRW',
+    },
+    {
+      timestamp: '2026-11-04T21:00:00Z',
+      openPrice: '9',
+      highPrice: '11',
+      lowPrice: '8',
+      closePrice: '10.00',
+      volume: '100',
+      currency: 'USD',
+    },
+  ];
+  for (const args of [
+    ['candles', 'DEMO', '1d'],
+    ['candles-batch', 'DEMO'],
+  ]) {
+    const result = await runCli(
+      f,
+      [{ path: '/api/v1/candles', body: { result: { candles: bars, nextBefore: null } } }],
+      args,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const consumed = consume(result);
+    assert.equal(consumed.status, 0, consumed.stderr);
+    const output = JSON.parse(consumed.stdout);
+    assert.equal(output.status, 'success');
+    const row = output.data[0];
+    assert.deepEqual(row.analysis, {
+      closeChangePercent: null,
+      closeChangeUnavailableReason: 'currency_mismatch',
+      totalVolume: 300,
+    });
+    assert.deepEqual(
+      row.bars.map((bar) => bar.currency),
+      ['KRW', 'USD'],
+    );
+    assert.deepEqual(
+      row.bars.map((bar) => bar.closePrice),
+      ['12500', '10.00'],
+    );
+    assert.deepEqual(row.page, { nextBefore: null });
+  }
+});
+
 test('consumer preserves early daily input errors without candle source metadata', async (t) => {
   const f = fixture();
   t.after(f.close);
@@ -116,12 +201,14 @@ test('daily synthetic stdout runs through the executable analysis consumer', () 
       tradeDate: '2026-11-05',
       closePrice: '12.50',
       volume: '200',
+      currency: 'USD',
     },
     {
       timestamp: '2026-11-03T23:00:00-06:00',
       tradeDate: '2026-11-04',
       closePrice: '10.00',
       volume: '100',
+      currency: 'USD',
     },
   ]);
   assert.deepEqual(row.analysis, { closeChangePercent: 25, totalVolume: 300 });

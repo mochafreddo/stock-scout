@@ -29,8 +29,15 @@ const data = rows.map((row) => {
     assert.ok(Number(bar.volume) >= 0, 'volume must be nonnegative');
     assert.ok(validTime(bar.timestamp), 'timestamp must be valid');
     const tradeDate = knownMarket ? tradeDateFormat.format(new Date(bar.timestamp)) : null;
-    return { timestamp: bar.timestamp, tradeDate, closePrice: bar.closePrice, volume: bar.volume };
+    return {
+      timestamp: bar.timestamp,
+      tradeDate,
+      closePrice: bar.closePrice,
+      volume: bar.volume,
+      currency: bar.currency,
+    };
   });
+  const currencyMismatch = bars.length > 0 && bars[0].currency !== bars.at(-1).currency;
   return {
     symbol: row.symbol,
     status: row.status,
@@ -47,9 +54,10 @@ const data = rows.map((row) => {
       usable && bars.length
         ? {
             closeChangePercent:
-              Number(bars.at(-1).closePrice) === 0
+              currencyMismatch || Number(bars.at(-1).closePrice) === 0
                 ? null
                 : (Number(bars[0].closePrice) / Number(bars.at(-1).closePrice) - 1) * 100,
+            ...(currencyMismatch ? { closeChangeUnavailableReason: 'currency_mismatch' } : {}),
             totalVolume: bars.reduce((total, bar) => total + Number(bar.volume), 0),
           }
         : null,
