@@ -345,7 +345,7 @@ function checkSnapshot(
           ? head.stdout.toString().trim()
           : git(['hash-object', '-t', 'tree', '--stdin'], source, '').toString().trim();
       git(['diff', '--check', base, tree], source);
-      changed = git(['diff', '--name-only', '-z', base, tree], source)
+      changed = git(['diff', '--no-renames', '--name-only', '-z', base, tree], source)
         .toString()
         .split('\0')
         .filter(Boolean);
@@ -398,7 +398,7 @@ try {
       ? git(['hash-object', '-t', 'tree', '--stdin'], undefined, '').toString().trim()
       : base;
     git(['diff', '--check', comparison, commit]);
-    const changed = git(['diff', '--name-only', '-z', comparison, commit])
+    const changed = git(['diff', '--no-renames', '--name-only', '-z', comparison, commit])
       .toString()
       .split('\0')
       .filter(Boolean);
