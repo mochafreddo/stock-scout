@@ -51,12 +51,52 @@ function fixture(t, initial = true) {
   return { root, base };
 }
 
-function run(root, tip, base, args = [], extraEnv = {}) {
+function run(root, tip, base, args = [], extraEnv = {}, timeout) {
   return spawnSync(process.execPath, [cli, ...args], {
     cwd: root,
     encoding: 'utf8',
+    timeout,
     input: `refs/heads/main ${tip} refs/heads/main ${base}\n`,
     env: { PATH: process.env.PATH, HOME: root, TMPDIR: tmpdir(), ...extraEnv },
+  });
+}
+
+for (const mode of ['docs', 'staged', 'push']) {
+  const args = mode === 'docs' ? ['--docs', 'README.md'] : mode === 'staged' ? ['--staged'] : [];
+  test(`${mode} CLI finishes checking a long unfinished inline link within the child-process limit`, (t) => {
+    const { root, base } = fixture(t);
+    writeFileSync(join(root, 'README.md'), `# Start\n\n[unfinished](${'a'.repeat(32_768)}\n`);
+    if (mode !== 'docs') git(root, 'add', 'README.md');
+    if (mode === 'push') git(root, 'commit', '-m', 'unfinished link');
+    const result = run(root, git(root, 'rev-parse', 'HEAD'), base, args, {}, 5_000);
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+  });
+
+  test(`${mode} CLI preserves normal and parenthesized links and rejects invalid local destinations`, (t) => {
+    const { root, base } = fixture(t);
+    writeFileSync(join(root, 'guide(v1).md'), '# Details\n');
+    const outside = mkdtempSync(join(tmpdir(), 'stock-scout-link-outside-'));
+    t.after(() => rmSync(outside, { recursive: true, force: true }));
+    writeFileSync(join(outside, 'outside.md'), '# Outside\n');
+    symlinkSync(join(outside, 'outside.md'), join(root, 'escape.txt'));
+    const valid =
+      '[normal](#start)\n[parentheses](guide(v1).md#details)\n[angle](<guide(v1).md#details>)\n[title](guide(v1).md#details "Guide")\n';
+    for (const [link, diagnostic] of [
+      ['', null],
+      ['[missing](missing(v1).md)', /missing local target/],
+      ['[heading](guide(v1).md#absent)', /missing heading/],
+      ['[outside](escape.txt)', /local target leaves snapshot/],
+      [`[unfinished](${'a'.repeat(32_768)}\n[missing](missing.md)`, /missing local target/],
+    ]) {
+      writeFileSync(join(root, 'README.md'), `# Start\n\n${valid}${link ? `\n${link}\n` : ''}`);
+      if (mode !== 'docs') git(root, 'add', '.');
+      if (mode === 'push') git(root, 'commit', '-m', 'link destination');
+      const result = run(root, git(root, 'rev-parse', 'HEAD'), base, args, {}, 5_000);
+      assert.ifError(result.error);
+      assert.equal(result.status, diagnostic ? 1 : 0, result.stderr);
+      if (diagnostic) assert.match(result.stderr, diagnostic);
+    }
   });
 }
 

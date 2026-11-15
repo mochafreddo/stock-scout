@@ -115,7 +115,7 @@ function checkLinks(root: string, files: string[], headingCache?: Map<string, Se
       throw new Error(`${file}: document leaves snapshot`);
     const text = markdownText(source).replace(/(`+)[^\n]*?\1/g, '');
     const links = [
-      ...text.matchAll(/\]\(\s*(<[^>\n]*>|(?:[^\s()]+|\([^()\n]*\))+)(?:\s+["'][^\n]*["'])?\s*\)/g),
+      ...text.matchAll(/\]\(\s*(<[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+["'][^\n]*["'])?\s*\)/g),
       ...text.matchAll(/^ {0,3}\[[^\]\n]+\]:\s*(<[^>\n]*>|\S+)/gm),
     ];
     for (const match of links) {
