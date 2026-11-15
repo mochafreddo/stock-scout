@@ -162,6 +162,50 @@ test('candles enforce inclusive bounds beyond millisecond precision', async () =
   }
 });
 
+test('candles prevent copying a future nextBefore into a second page beyond the original bound', async () => {
+  const before = '2026-11-06T15:00:00.123400001Z';
+  const nextBefore = '2026-11-07T00:00:00.123400002+09:00';
+  for (const interval of ['1d', '1m']) {
+    const first = await lookup({ candles: [], nextBefore }, ['AAPL', interval, `before=${before}`]);
+    if (first.out.page?.nextBefore) {
+      const second = await lookup(
+        { candles: [{ ...candle, timestamp: nextBefore }], nextBefore: null },
+        ['AAPL', interval, `before=${first.out.page.nextBefore}`],
+      );
+      assert.fail(`future boundary escaped the original bound: ${second.stdout}`);
+    }
+    assert.equal(first.status, 1, first.stdout);
+    assert.equal(first.out.error.code, 'RESPONSE_INVALID');
+    assert.deepEqual(first.out.data, []);
+    assert.equal(first.stderr, 'RESPONSE_INVALID\n');
+    assert.equal(first.requests.length, 2);
+  }
+});
+
+test('candles preserve equal and past nextBefore values across offsets on empty and populated pages', async () => {
+  const before = '2026-11-06T15:00:00.123400001Z';
+  for (const interval of ['1d', '1m']) {
+    for (const nextBefore of [
+      before,
+      '2026-11-07T00:00:00.1234000010+09:00',
+      '2026-11-06T10:00:00.12340000099999999999-05:00',
+    ]) {
+      for (const candles of [[], [candle]]) {
+        const r = await lookup({ candles, nextBefore }, ['AAPL', interval, `before=${before}`]);
+        assert.equal(r.status, 2, r.stdout);
+        assert.equal(r.stderr, '');
+        assert.deepEqual(r.out.page, { nextBefore });
+        assert.deepEqual(r.out.omissions, [{ reason: 'next_page' }]);
+        assert.deepEqual(
+          r.out.data,
+          candles.map((row) => ({ ...row, completion: 'unknown', inProgress: 'unknown' })),
+        );
+        assert.equal(r.requests.length, 2);
+      }
+    }
+  }
+});
+
 test('candles reject ascending submillisecond timestamps', async () => {
   for (const interval of ['1d', '1m']) {
     const r = await lookup(
