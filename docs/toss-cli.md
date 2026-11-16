@@ -63,6 +63,8 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 `reasons`는 기계적으로 해석할 코드 배열이며 `error.code`와 stderr는 첫 사유를 반환합니다. 구형 상태는 `AUTH_STATE_TRANSITION_REQUIRED`, 손상·보호 조건 위반은 `AUTH_STORAGE`, 잘못된 자격 증명 설정은 `AUTH_CONFIG`, 시계 기준 불일치·정보 확인 불가는 `CLOCK_UNCERTAIN`입니다. 설정 경로·필수 파일 부재는 기존 보호 저장소 검사에 따라 `AUTH_STORAGE`입니다. 상태나 대기 기록의 검증 실패를 잠금 존재로 덮지 않습니다.
 
+`CLOCK_UNCERTAIN`인 점검 결과에는 `data[0].clockCause`도 있습니다. `mismatch`는 저장된 상태 또는 대기 기록의 시계 기준이 현재 기준과 다르다는 뜻이며, `unavailable`은 현재 시계 정보를 확인할 수 없다는 뜻입니다. 원본 시계 식별자나 마감 시각은 출력하지 않습니다. 두 경우 모두 종료 코드는 1이며 일반 조회의 오류 형식은 바뀌지 않습니다. 원인별 조치는 [예약 상태와 복구](#예약-상태와-복구)를 확인하세요.
+
 정상 상태에서 `pending:true`는 `AUTH_ISSUANCE_UNKNOWN`, 아직 지나지 않은 예약 또는 대기 기록의 마감은 `WAIT_REQUIRED`, `client.lock`·`issuance.lock`·`account.lock`의 존재는 `LOCK_PRESENT`입니다. 여러 사유가 있으면 이 순서로 함께 반환하며 기다리거나 잠금을 빼앗지 않습니다. 만료된 대기 기록도 그대로 남깁니다. `pending:true`는 유효한 캐시 토큰이 있더라도 표시하는 보수적인 점검 차단입니다. 정상 조회의 기존 토큰 선택·복구 규칙은 바꾸지 않습니다.
 
 `token`은 `valid`·`missing`·`expired`·`refresh_required`·`unknown` 중 하나입니다. `valid`는 로컬 만료까지 15초를 초과해 남은 캐시, `refresh_required`는 만료 전이지만 정상 조회에서 재발급할 캐시입니다. 상태 검증을 마치지 못하면 `unknown`입니다. 토큰 부재·만료·재발급 필요만으로는 로컬 차단으로 처리하지 않으므로 다른 문제가 없다면 `ready`입니다. 일반 조회는 기존 계약대로 토큰을 자동 발급할 수 있습니다. 이를 공급자의 인증 거부나 상태 전환 승인으로 해석하지 마세요.

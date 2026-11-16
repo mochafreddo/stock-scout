@@ -1,18 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  readlinkSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fixture, runCli } from './toss-cli-helper.mjs';
+import { fixture, runCli, snapshot } from './toss-cli-helper.mjs';
 
 function writeState(f, changes = {}) {
   writeFileSync(
@@ -44,27 +35,6 @@ function writeState(f, changes = {}) {
   );
 }
 
-function snapshot(directory) {
-  const stat = lstatSync(directory, { bigint: true });
-  return {
-    mode: stat.mode,
-    uid: stat.uid,
-    mtimeNs: stat.mtimeNs,
-    ctimeNs: stat.ctimeNs,
-    ...(stat.isDirectory()
-      ? {
-          entries: Object.fromEntries(
-            readdirSync(directory)
-              .sort()
-              .map((name) => [name, snapshot(join(directory, name))]),
-          ),
-        }
-      : stat.isSymbolicLink()
-        ? { link: readlinkSync(directory) }
-        : { content: readFileSync(directory) }),
-  };
-}
-
 async function inspect(f, extra = {}, args = ['readiness']) {
   const before = snapshot(f.directory);
   const result = await runCli(f, [], args, { TEST_PLATFORM: 'darwin', ...extra });
@@ -81,6 +51,8 @@ async function inspect(f, extra = {}, args = ['readiness']) {
     'private-synthetic-account',
     '987654321012345678',
     '998877665544',
+    'another-boot',
+    '11111111-1111-4111-8111-111111111111',
     f.directory,
   ])
     assert.ok(!output.includes(value), 'readiness must not expose protected values');
@@ -197,6 +169,7 @@ test('readiness validates cooldown records before reporting locks and retains ex
       assert.equal(result.status, 1);
       assert.equal(result.out.error.code, code);
       assert.equal(result.out.data[0].readiness, kind === 'expired' ? 'blocked' : 'unavailable');
+      assert.equal(result.out.data[0].clockCause, kind === 'clock' ? 'mismatch' : undefined);
     } finally {
       f.close();
     }
@@ -246,7 +219,12 @@ test('readiness safely reports missing configuration, unsafe protection and unav
       assert.equal(result.out.error.code, code, kind);
       assert.equal(result.stderr.trim(), code);
       assert.deepEqual(result.out.data, [
-        { readiness: 'unavailable', token: 'unknown', reasons: [code] },
+        {
+          readiness: 'unavailable',
+          token: 'unknown',
+          reasons: [code],
+          ...(code === 'CLOCK_UNCERTAIN' ? { clockCause: 'unavailable' } : {}),
+        },
       ]);
     } finally {
       f.close();
@@ -318,7 +296,14 @@ test('readiness distinguishes legacy, corrupt and incompatible-clock states with
       assert.equal(result.out.status, 'error');
       assert.equal(result.out.error.code, code);
       assert.equal(result.stderr.trim(), code);
-      assert.deepEqual(result.out.data, [{ readiness, token: 'unknown', reasons: [code] }]);
+      assert.deepEqual(result.out.data, [
+        {
+          readiness,
+          token: 'unknown',
+          reasons: [code],
+          ...(code === 'CLOCK_UNCERTAIN' ? { clockCause: 'mismatch' } : {}),
+        },
+      ]);
     } finally {
       f.close();
     }

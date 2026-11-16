@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -31,6 +34,26 @@ export function readRequests(trace) {
     .filter(Boolean)
     .map((line) => JSON.parse(line));
 }
+export function snapshot(directory) {
+  const stat = lstatSync(directory, { bigint: true });
+  return {
+    mode: stat.mode,
+    uid: stat.uid,
+    mtimeNs: stat.mtimeNs,
+    ctimeNs: stat.ctimeNs,
+    ...(stat.isDirectory()
+      ? {
+          entries: Object.fromEntries(
+            readdirSync(directory)
+              .sort()
+              .map((name) => [name, snapshot(join(directory, name))]),
+          ),
+        }
+      : stat.isSymbolicLink()
+        ? { link: readlinkSync(directory) }
+        : { content: readFileSync(directory) }),
+  };
+}
 export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
   const child = spawn(
     process.execPath,
@@ -46,6 +69,7 @@ export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
         TOSS_STATE_DIR: f.directory,
         TEST_STEPS: JSON.stringify(steps),
         TEST_TRACE: f.trace,
+        TEST_CLI_TRACE: f.cliTrace,
         ...extra,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

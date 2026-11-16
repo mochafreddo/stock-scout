@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   accounts,
@@ -9,6 +10,7 @@ import {
   runAccountCli,
   runCli,
   selectAccount,
+  snapshot,
 } from './toss-cli-helper.mjs';
 
 const [scenario, ...args] = process.argv.slice(2);
@@ -62,7 +64,10 @@ if (
 process.umask(0o077);
 if (scenario === 'transition-required' || readinessFlow) {
   const f = fixture();
+  const cliTraceDirectory = mkdtempSync(join(tmpdir(), 'stock-scout-cli-trace-'));
   try {
+    f.cliTrace = join(cliTraceDirectory, 'argv.jsonl');
+    writeFileSync(f.cliTrace, '', { mode: 0o600 });
     writeFileSync(
       join(f.directory, 'state.json'),
       JSON.stringify({
@@ -90,40 +95,15 @@ if (scenario === 'transition-required' || readinessFlow) {
       JSON.stringify({ alias: 'primary', accountSeq: '741', scopes: ['holdings'] }),
       { mode: 0o600 },
     );
-    const snapshot = () => ({
-      mode: lstatSync(f.directory).mode,
-      files: readdirSync(f.directory)
-        .sort()
-        .map((name) => {
-          const path = join(f.directory, name);
-          const stat = lstatSync(path, { bigint: true });
-          return {
-            name,
-            mode: stat.mode,
-            uid: stat.uid,
-            mtimeNs: stat.mtimeNs,
-            ctimeNs: stat.ctimeNs,
-            content: readFileSync(path),
-          };
-        }),
-    });
-    let before = snapshot();
+    let before = snapshot(f.directory);
     let result;
     if (readinessFlow) {
-      const directoryBefore = lstatSync(f.directory, { bigint: true });
       const readiness = await runCli(f, [], ['readiness'], { TEST_PLATFORM: 'darwin' });
       assert.equal(readiness.requests.length, 0, 'consumer readiness must not send HTTP');
-      assert.deepEqual(snapshot(), before, 'consumer readiness must preserve protected files');
-      const directoryAfter = lstatSync(f.directory, { bigint: true });
-      assert.equal(
-        directoryAfter.mtimeNs,
-        directoryBefore.mtimeNs,
-        'consumer readiness must preserve directory mtime',
-      );
-      assert.equal(
-        directoryAfter.ctimeNs,
-        directoryBefore.ctimeNs,
-        'consumer readiness must preserve directory ctime',
+      assert.deepEqual(
+        snapshot(f.directory),
+        before,
+        'consumer readiness must preserve protected files',
       );
       console.error(
         `SYNTHETIC readiness=${JSON.parse(readiness.stdout).data[0].readiness} exit=${readiness.status}`,
@@ -138,7 +118,7 @@ if (scenario === 'transition-required' || readinessFlow) {
         delete state.clock;
         state.nextAt = 0;
         writeFileSync(statePath, JSON.stringify(state));
-        before = snapshot();
+        before = snapshot(f.directory);
       }
     }
     result ??= await runCli(
@@ -185,13 +165,30 @@ if (scenario === 'transition-required' || readinessFlow) {
           ? 'blocked consumer must not send market or account HTTP'
           : 'transition error must not send HTTP',
       );
-      assert.deepEqual(snapshot(), before, 'transition error must preserve protected files');
+      const after = snapshot(f.directory);
+      assert.deepEqual(
+        after.entries,
+        before.entries,
+        'transition error must preserve protected files',
+      );
+      assert.equal(after.mode, before.mode);
+      assert.equal(after.uid, before.uid);
     }
+    assert.deepEqual(
+      readRequests(f.cliTrace),
+      readinessFlow
+        ? scenario === 'readiness-transition'
+          ? [['readiness']]
+          : [['readiness'], ['prices', 'DEMO']]
+        : [['prices', 'DEMO']],
+      'consumer must start only the required CLI commands',
+    );
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);
     process.exitCode = result.status ?? 1;
   } finally {
     f.close();
+    rmSync(cliTraceDirectory, { recursive: true, force: true });
   }
   process.exit(process.exitCode);
 }

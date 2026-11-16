@@ -34,11 +34,18 @@ export class TossError extends Error {
   readonly code: string;
   readonly providerCode?: string;
   readonly requestId?: string;
-  constructor(code: string, providerCode?: string, requestId?: string) {
+  readonly clockCause?: 'unavailable' | 'mismatch';
+  constructor(
+    code: string,
+    providerCode?: string,
+    requestId?: string,
+    clockCause?: 'unavailable' | 'mismatch',
+  ) {
     super(code);
     this.code = code;
     this.providerCode = providerCode;
     this.requestId = requestId;
+    this.clockCause = clockCause;
   }
 }
 const accountScopes = [
@@ -131,7 +138,7 @@ function clockIdentity() {
       throw new TossError('CLOCK_UNCERTAIN');
     return `${family}:${boot.toLowerCase()}`;
   } catch {
-    throw new TossError('CLOCK_UNCERTAIN');
+    throw new TossError('CLOCK_UNCERTAIN', undefined, undefined, 'unavailable');
   }
 }
 function secure(path: string, directory = false) {
@@ -387,7 +394,8 @@ class SharedRequestCoordinator {
       !/^\d{30}$/.test(state.clock.nextNs)
     )
       throw new TossError('AUTH_STORAGE');
-    if (state.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
+    if (state.clock.id !== this.clockId)
+      throw new TossError('CLOCK_UNCERTAIN', undefined, undefined, 'mismatch');
     if (state.token) this.observeToken(state.token.value);
     return state;
   }
@@ -405,7 +413,8 @@ class SharedRequestCoordinator {
         !/^\d{30}$/.test(record.clock.nextNs)
       )
         throw new TossError('AUTH_STORAGE');
-      if (record.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
+      if (record.clock.id !== this.clockId)
+        throw new TossError('CLOCK_UNCERTAIN', undefined, undefined, 'mismatch');
       if (BigInt(record.clock.nextNs) > BigInt(state.clock.nextNs))
         state.clock.nextNs = record.clock.nextNs;
     }

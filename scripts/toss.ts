@@ -281,6 +281,9 @@ try {
                   detail.code === 'AUTH_STATE_TRANSITION_REQUIRED' ? 'blocked' : 'unavailable',
                 token: 'unknown',
                 reasons: [detail.code],
+                ...(error instanceof TossError && error.clockCause
+                  ? { clockCause: error.clockCause }
+                  : {}),
               },
             ]
           : [],

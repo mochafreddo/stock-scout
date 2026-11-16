@@ -6,6 +6,11 @@ import { mock } from 'node:test';
 import { setInterval as realInterval } from 'node:timers';
 import { setTimeout as realSleep } from 'node:timers/promises';
 
+if (process.env.TEST_CLI_TRACE)
+  appendFileSync(process.env.TEST_CLI_TRACE, `${JSON.stringify(process.argv.slice(2))}\n`, {
+    mode: 0o600,
+  });
+
 const nativeHrtime = process.hrtime.bigint.bind(process.hrtime);
 function publishJson(path, value) {
   const pending = `${path}.pending`;
