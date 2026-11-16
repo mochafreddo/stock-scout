@@ -8,7 +8,7 @@ Actual Toss data, account access, credential setup and transmission to external 
 
 1. Identify the user's request and the approved scope for queries, account access and data transmission/storage. Reuse existing authorization within that scope.
 2. Discover commands with `node scripts/toss.ts --help` and use the CLI reference to choose the queries and arguments needed for the request.
-3. Run the selected queries and inspect stdout JSON, exit codes, omissions and next-page information together.
+3. Before starting the query chain, run `node scripts/toss.ts readiness` within the approved local access scope. Inspect its JSON and exit code using [the readiness contract](toss-cli.md#로컬-조회-준비-점검). If blocked or unavailable, stop and report the reasons; for a transition requirement use [the recovery handoff](auth-recovery.md). If ready, run only the selected queries and inspect their stdout JSON, exit codes, omissions and next-page information together.
 4. If more data is needed, request additional queries or pages within the approved scope. Report unresolved gaps when the scope or query budget prevents further retrieval.
 5. Use the returned data to write the analysis and recommendations, reflecting its coverage and limits. The agent owns query order and analysis; the CLI owns retrieval, validation, timestamps and error handling. The user decides and executes actual trades.
 
@@ -66,6 +66,23 @@ Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments fo
 Start discovery with `node tests/toss-agent-cli.mjs success --help`. Choose subsequent arguments from its output and the reference. The fixture contains a `DEMO` listing and fixed synthetic market/account responses; date-selected daily batches supply matching synthetic identities for their requested symbols. Ranking requests for more than one item return a partial result. Outside the daily batch cases, other symbols and filters do not create new fixture data. Session fixtures use only `2026-11-06`; adjacent dates are synthetic closed days, not historical calendar evidence. The runner covers only the cases above; it is not a replacement provider or live execution mode.
 
 Account exercises select a synthetic `primary` account in the invocation's isolated state, without reading or changing the live selection. For account pagination, copy both `page.nextCursor` and `page.context` into `cursor=VALUE context=VALUE`, keeping the scenario `partial` and the same command, group, period and filters. The next invocation returns one item and no next page. The fixed synthetic identity lets this context work across isolated invocations; do not reuse synthetic cursors or contexts with live state. Never use `account-select` to prepare a real account during this exercise.
+
+### Exercise readiness before a query
+
+These executable flows accept exactly `prices DEMO` and reuse the same isolated runner, actual CLI and HTTP mock:
+
+```sh
+node tests/toss-agent-cli.mjs readiness-success prices DEMO
+node tests/toss-agent-cli.mjs readiness-transition prices DEMO
+node tests/toss-agent-cli.mjs readiness-error prices DEMO
+node tests/toss-agent-cli.mjs readiness-changed prices DEMO
+```
+
+`readiness-success` observes ready and retrieves the needed synthetic price (exit 0). `readiness-transition` observes blocked and returns that readiness JSON/error (exit 1) without attempting market or account queries. `readiness-error` observes ready, then preserves the price query's original permission error, empty data, safe provider details and exit 1. `readiness-changed` observes ready, then the fixture deliberately replaces its synthetic state with legacy state before the query; the real query rejects it with `AUTH_STATE_TRANSITION_REQUIRED` and exit 1, without HTTP. That fixture change is separate from the no-write readiness operation and is not an example of approved operational recovery.
+
+Each invocation prints a clearly synthetic readiness/exit summary on stderr and forwards the final CLI stdout JSON, stderr and exit code unchanged. Inspect those boundaries together. The runner checks no HTTP during readiness, preserved existing protected files, and only the expected price HTTP when a query can proceed; failures trigger no follow-up market or account requests. Its fixtures and checks do not validate an actual consumer's behavior.
+
+Readiness is an observation at one point in time. Concurrent processes can change state between the check and query; it is not an atomic snapshot, permission to skip query validators, or a guarantee of provider acceptance, account scope, data availability or later success. Missing/expired tokens can still be locally ready; normal queries retain their existing automatic issuance behavior. A query failure must retain its JSON, omissions, diagnostics and original exit code, even after readiness passed. Stop unchanged-state transition retries and report judgment deferred for insufficient data; a recommendation to wait requires separate investment evidence.
 
 ### Exercise a transition-required stop
 

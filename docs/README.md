@@ -11,6 +11,7 @@
 | 실행 환경과 인증 없는 합성 실행 | [시작 안내](getting-started.md) |
 | 시장·계좌 명령의 인수와 JSON 의미 | [토스 CLI 레퍼런스](toss-cli.md) |
 | Codex·dots의 명령 발견과 사용 | [에이전트 사용 지침](toss-agent-usage.md) |
+| 로컬 준비 점검과 승인 후 복구 인계 | [준비 점검 구현 기록](auth-readiness.md), [인증 상태 복구 안내](auth-recovery.md) |
 | 허용·권한·접근 준비 | [접근 준비와 사용자 재결정](toss-access-readiness.md) |
 | 로컬 검사와 Git 훅 | [개발 안내](development.md) |
 | 요청 흐름·모듈 경계·공유 상태의 소유권 | [구조 설명](architecture.md) |

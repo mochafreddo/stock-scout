@@ -14,6 +14,80 @@ function run(...args) {
   });
 }
 
+test('readiness consumer checks locally before attempting its needed price query', () => {
+  const result = run('readiness-success', 'prices', 'DEMO');
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.stdout, '', result.stderr);
+  assert.match(result.stderr, /SYNTHETIC readiness=ready exit=0/);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, 'success');
+  assert.equal(output.data[0].lastPrice, '10.0100');
+  assert.doesNotMatch(
+    result.stdout + result.stderr,
+    /synthetic-(client|secret|token)|stock-scout-toss-/,
+  );
+});
+
+test('readiness consumer stops before market or account followups when transition is required', () => {
+  const result = run('readiness-transition', 'prices', 'DEMO');
+  assert.ifError(result.error);
+  assert.equal(result.status, 1, result.stderr);
+  assert.notEqual(result.stdout, '', result.stderr);
+  assert.match(result.stderr, /SYNTHETIC readiness=blocked exit=1/);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.source.endpoint, 'local:readiness');
+  assert.deepEqual(output.data, [
+    { readiness: 'blocked', token: 'unknown', reasons: ['AUTH_STATE_TRANSITION_REQUIRED'] },
+  ]);
+  assert.deepEqual(output.error, { code: 'AUTH_STATE_TRANSITION_REQUIRED' });
+  assert.doesNotMatch(
+    result.stdout + result.stderr,
+    /synthetic-(client|secret|token)|stock-scout-toss-/,
+  );
+});
+
+test('ready consumer preserves a subsequent query failure, safe error details and original exit', () => {
+  const result = run('readiness-error', 'prices', 'DEMO');
+  const original = run('error', 'prices', 'DEMO');
+  assert.ifError(result.error);
+  assert.equal(result.status, original.status, result.stderr);
+  assert.notEqual(result.stdout, '', result.stderr);
+  assert.match(result.stderr, /SYNTHETIC readiness=ready exit=0/);
+  const { retrievedAt, ...query } = JSON.parse(result.stdout);
+  const { retrievedAt: originalRetrievedAt, ...originalQuery } = JSON.parse(original.stdout);
+  assert.equal(typeof retrievedAt, 'string');
+  assert.equal(typeof originalRetrievedAt, 'string');
+  assert.deepEqual(query, originalQuery);
+  assert.match(result.stderr, /PERMISSION_DENIED/);
+  assert.deepEqual(JSON.parse(result.stdout).error, {
+    code: 'PERMISSION_DENIED',
+    providerCode: 'ip-not-allowed',
+    requestId: 'SYNTHETIC_295',
+  });
+  assert.doesNotMatch(
+    result.stdout + result.stderr,
+    /synthetic-(client|secret|token)|private upstream|stock-scout-toss-/,
+  );
+});
+
+test('ready consumer still runs real query validation after synthetic state changes', () => {
+  const result = run('readiness-changed', 'prices', 'DEMO');
+  assert.ifError(result.error);
+  assert.equal(result.status, 1, result.stderr);
+  assert.notEqual(result.stdout, '', result.stderr);
+  assert.match(result.stderr, /SYNTHETIC readiness=ready exit=0/);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.source.endpoint, '/api/v1/prices');
+  assert.equal(output.status, 'error');
+  assert.deepEqual(output.data, []);
+  assert.deepEqual(output.error, { code: 'AUTH_STATE_TRANSITION_REQUIRED' });
+  assert.doesNotMatch(
+    result.stdout + result.stderr,
+    /synthetic-(client|secret|token)|stock-scout-toss-/,
+  );
+});
+
 test('agent receives a local transition error without protected-state changes or HTTP', () => {
   const result = run('transition-required', 'prices', 'DEMO');
   assert.ifError(result.error);

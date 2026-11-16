@@ -2,9 +2,22 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { accounts, fixture, runAccountCli, runCli, selectAccount } from './toss-cli-helper.mjs';
+import {
+  accounts,
+  fixture,
+  readRequests,
+  runAccountCli,
+  runCli,
+  selectAccount,
+} from './toss-cli-helper.mjs';
 
 const [scenario, ...args] = process.argv.slice(2);
+const readinessFlow = [
+  'readiness-success',
+  'readiness-transition',
+  'readiness-error',
+  'readiness-changed',
+].includes(scenario);
 console.error('SYNTHETIC: isolated state and mocked HTTP; no live Toss data.');
 const accountCommand = [
   'holdings',
@@ -20,8 +33,8 @@ const paginated =
   args[0] === 'conditional-orders' ||
   (args[0] === 'orders' && args[1] === 'CLOSED');
 if (
-  !['success', 'partial', 'error', 'transition-required'].includes(scenario) ||
-  (scenario === 'transition-required' &&
+  (!['success', 'partial', 'error', 'transition-required'].includes(scenario) && !readinessFlow) ||
+  ((scenario === 'transition-required' || readinessFlow) &&
     (args.length !== 2 || args[0] !== 'prices' || args[1] !== 'DEMO')) ||
   (!accountCommand &&
     ![
@@ -42,12 +55,12 @@ if (
   (args[0] === '--help' && scenario !== 'success')
 ) {
   console.error(
-    'Use success with --help; success|error with query commands; partial with candles, candles-batch or paginated account queries; transition-required with prices DEMO. Minute candles require partial.',
+    'Use success with --help; success|error with query commands; partial with candles, candles-batch or paginated account queries; transition-required or readiness-success|readiness-transition|readiness-error|readiness-changed with prices DEMO. Minute candles require partial.',
   );
   process.exit(1);
 }
 process.umask(0o077);
-if (scenario === 'transition-required') {
+if (scenario === 'transition-required' || readinessFlow) {
   const f = fixture();
   try {
     writeFileSync(
@@ -57,6 +70,16 @@ if (scenario === 'transition-required') {
           .update(JSON.stringify(['synthetic-client', 'synthetic-secret']))
           .digest('hex'),
         nextAt: 0,
+        ...(readinessFlow && scenario !== 'readiness-transition'
+          ? {
+              version: 2,
+              nextAt: null,
+              clock: {
+                id: 'darwin-mach-continuous:11111111-1111-4111-8111-111111111111',
+                nextNs: '0'.repeat(30),
+              },
+            }
+          : {}),
         pending: false,
         token: { value: 'synthetic-token', expiresAt: Date.parse('2026-11-07T15:00:00Z') },
       }),
@@ -74,13 +97,96 @@ if (scenario === 'transition-required') {
         .map((name) => {
           const path = join(f.directory, name);
           const stat = lstatSync(path, { bigint: true });
-          return { name, mode: stat.mode, mtimeNs: stat.mtimeNs, content: readFileSync(path) };
+          return {
+            name,
+            mode: stat.mode,
+            uid: stat.uid,
+            mtimeNs: stat.mtimeNs,
+            ctimeNs: stat.ctimeNs,
+            content: readFileSync(path),
+          };
         }),
     });
-    const before = snapshot();
-    const result = await runCli(f, [], args);
-    assert.equal(result.requests.length, 0, 'transition error must not send HTTP');
-    assert.deepEqual(snapshot(), before, 'transition error must preserve protected files');
+    let before = snapshot();
+    let result;
+    if (readinessFlow) {
+      const directoryBefore = lstatSync(f.directory, { bigint: true });
+      const readiness = await runCli(f, [], ['readiness'], { TEST_PLATFORM: 'darwin' });
+      assert.equal(readiness.requests.length, 0, 'consumer readiness must not send HTTP');
+      assert.deepEqual(snapshot(), before, 'consumer readiness must preserve protected files');
+      const directoryAfter = lstatSync(f.directory, { bigint: true });
+      assert.equal(
+        directoryAfter.mtimeNs,
+        directoryBefore.mtimeNs,
+        'consumer readiness must preserve directory mtime',
+      );
+      assert.equal(
+        directoryAfter.ctimeNs,
+        directoryBefore.ctimeNs,
+        'consumer readiness must preserve directory ctime',
+      );
+      console.error(
+        `SYNTHETIC readiness=${JSON.parse(readiness.stdout).data[0].readiness} exit=${readiness.status}`,
+      );
+      if (readiness.status !== 0) {
+        result = readiness;
+      }
+      if (scenario === 'readiness-changed') {
+        const statePath = join(f.directory, 'state.json');
+        const state = JSON.parse(readFileSync(statePath));
+        delete state.version;
+        delete state.clock;
+        state.nextAt = 0;
+        writeFileSync(statePath, JSON.stringify(state));
+        before = snapshot();
+      }
+    }
+    result ??= await runCli(
+      f,
+      readinessFlow
+        ? [
+            {
+              path: '/api/v1/prices',
+              ...(scenario === 'readiness-error'
+                ? {
+                    status: 403,
+                    body: {
+                      error: {
+                        code: 'ip-not-allowed',
+                        requestId: 'SYNTHETIC_295',
+                        message: 'private upstream synthetic-secret synthetic-token',
+                      },
+                    },
+                  }
+                : {
+                    body: {
+                      result: [
+                        { symbol: 'DEMO', lastPrice: '10.0100', currency: 'USD', timestamp: null },
+                      ],
+                    },
+                  }),
+            },
+          ]
+        : [],
+      args,
+      { TEST_PLATFORM: 'darwin' },
+    );
+    if (readinessFlow && !['readiness-transition', 'readiness-changed'].includes(scenario)) {
+      assert.deepEqual(
+        result.requests.map(({ method, path }) => ({ method, path })),
+        [{ method: 'GET', path: '/api/v1/prices' }],
+        'consumer must only send its needed price query',
+      );
+    } else {
+      assert.equal(
+        readRequests(f.trace).length,
+        0,
+        readinessFlow
+          ? 'blocked consumer must not send market or account HTTP'
+          : 'transition error must not send HTTP',
+      );
+      assert.deepEqual(snapshot(), before, 'transition error must preserve protected files');
+    }
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);
     process.exitCode = result.status ?? 1;
