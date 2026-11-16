@@ -48,6 +48,7 @@ const endpoints: Record<string, string> = {
   sessions: '/api/v1/market-calendar/US',
   constraints: '/api/v1/market-calendar/US',
   'account-select': 'local:account-selection',
+  readiness: 'local:readiness',
   'buying-power': '/api/v1/buying-power',
   holdings: '/api/v1/holdings',
   transactions: '/api/v1/transactions',
@@ -157,6 +158,12 @@ try {
             { name: 'buying-power', usage: 'node scripts/toss.ts buying-power CURRENCY' },
             { name: 'sessions', usage: 'node scripts/toss.ts sessions DATE' },
             { name: 'constraints', usage: 'node scripts/toss.ts constraints SYMBOL DATE' },
+            {
+              name: 'readiness',
+              usage: 'node scripts/toss.ts readiness',
+              semantics:
+                'Read-only local observation without HTTP, token issuance or file changes. Does not guarantee provider acceptance, account access, data availability or later query success.',
+            },
           ],
         },
       }),
@@ -168,6 +175,18 @@ try {
     return client.get(`${source.endpoint}?${query}`);
   }
   async function lookup() {
+    if (command === 'readiness') {
+      if (symbols !== undefined) throw new TossError('INPUT_INVALID');
+      client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
+      const inspection = client.readiness();
+      return {
+        data: [inspection],
+        omissions: [],
+        ...(inspection.reasons.length
+          ? { status: 'error' as const, error: { code: inspection.reasons[0] } }
+          : {}),
+      };
+    }
     if (command === 'account-select') {
       if (!symbols || rest.length) throw new TossError('INPUT_INVALID');
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
@@ -239,12 +258,14 @@ try {
     status,
     data: outputData,
     omissions,
+    ...('error' in result ? { error: result.error } : {}),
     ...('page' in result ? { page: result.page } : {}),
     source,
     retrievedAt,
   });
   if (client?.containsSecret(output)) throw new TossError('SENSITIVE_OUTPUT');
   console.log(output);
+  if ('error' in result && result.error) console.error(result.error.code);
   process.exitCode = status === 'error' ? 1 : status === 'partial' ? 2 : 0;
 } catch (error) {
   const detail = errorDetail(error);
@@ -252,7 +273,17 @@ try {
     JSON.stringify({
       version: 1,
       status: 'error',
-      data: [],
+      data:
+        command === 'readiness'
+          ? [
+              {
+                readiness:
+                  detail.code === 'AUTH_STATE_TRANSITION_REQUIRED' ? 'blocked' : 'unavailable',
+                token: 'unknown',
+                reasons: [detail.code],
+              },
+            ]
+          : [],
       source: client?.containsSecret(JSON.stringify(source)) ? { provider: 'tossinvest' } : source,
       retrievedAt: new Date().toISOString(),
       error: detail,

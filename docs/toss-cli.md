@@ -10,6 +10,7 @@ Codex와 dots에서 합성 자료로 연결을 확인하려면 [에이전트 사
 
 ```sh
 node scripts/toss.ts --help
+node scripts/toss.ts readiness
 node scripts/toss.ts stock AAPL
 node scripts/toss.ts prices AAPL
 node scripts/toss.ts prices AAPL,MSFT
@@ -22,10 +23,11 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 ## 명령 목록
 
-아래 인수 앞에 `node scripts/toss.ts`를 붙이세요. `[]`는 생략 가능한 인수이고 `|`는 선택입니다. `--help`의 `data.commands`와 같은 16개 명령이며, 값의 의미·기본값·응답 필드는 연결된 상세 계약에서 확인하세요.
+아래 인수 앞에 `node scripts/toss.ts`를 붙이세요. `[]`는 생략 가능한 인수이고 `|`는 선택입니다. `--help`의 `data.commands`에서 같은 명령을 발견할 수 있으며, 값의 의미·기본값·응답 필드는 연결된 상세 계약에서 확인하세요.
 
 | 명령과 인수 | 상세 계약 |
 | --- | --- |
+| `readiness` | [로컬 조회 준비 점검](#로컬-조회-준비-점검) |
 | `prices SYMBOL[,SYMBOL...] [staleAfterSeconds=SECONDS]` | [현재가와 가격 시각](#응답-계약) |
 | `tradable MARKET [status=STATUS] [securityType=TYPE] [commonShare=true\|false]` | [거래 가능 종목](#미국-시장-순위와-거래-가능-종목) |
 | `rankings TYPE DURATION [COUNT]` | [미국 시장 순위](#미국-시장-순위와-거래-가능-종목) |
@@ -43,13 +45,37 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 | `sessions DATE` | [미국 세션](#미국-세션과-거래-제약) |
 | `constraints SYMBOL DATE` | [문서상 거래 제약](#거래-제약-응답-해석) |
 
-`--help`는 위 명령을 발견하는 별도 입력입니다. `account-select`는 HTTP 없이 로컬 선택 상태를 저장하고, 나머지 명령은 공급자 조회를 수행합니다. 주문 제출·정정·취소는 제공하지 않습니다.
+`--help`는 위 명령을 발견하는 별도 입력입니다. `readiness`는 HTTP와 파일 변경 없이 로컬 조건만 확인합니다. `account-select`는 HTTP 없이 로컬 선택 상태를 저장하고, 나머지 명령은 공급자 조회를 수행합니다. 주문 제출·정정·취소는 제공하지 않습니다.
+
+## 로컬 조회 준비 점검
+
+`node scripts/toss.ts readiness`를 추가 인수 없이 실행하세요. 기존 `TOSS_STATE_DIR`의 설정·보호 조건·예약 상태·시계 기준·대기 기록·잠금·발급 결과 미확인 표시를 읽습니다. 토큰·자격 증명 지문·개인 경로·계좌 식별자나 원본 상태는 출력하지 않으며 계좌 선택 파일의 내용을 검사하지 않습니다. 실제 보호 상태를 읽으려면 해당 대상에 대한 별도 접근 승인이 필요합니다.
+
+점검은 HTTP 전송·토큰 발급·교체를 하지 않습니다. 파일·잠금·예약·대기 기록을 만들거나 수정·삭제·병합·정리하지 않고 권한도 고치지 않습니다. 읽기에 따라 운영체제가 접근 시각(atime)을 갱신할 수 있습니다. 파일 내용·목록·권한·수정 시각(mtime)·변경 시각(ctime)을 명시적으로 갱신하는 동작과 구분하세요.
+
+출력은 공통 `version`, `status`, `source`, `retrievedAt`과 `data` 배열의 점검 결과 하나를 포함합니다. `source.endpoint`는 `local:readiness`입니다. `data[0].readiness`와 종료 코드를 함께 읽으세요.
+
+| `readiness` | 공통 상태·종료 코드 | 의미 |
+| --- | --- | --- |
+| `ready` | `success`·0 | 관측한 로컬 조건에서 차단 사유를 찾지 못했습니다. `reasons=[]`입니다. |
+| `blocked` | `error`·1 | 구형 상태 전환·발급 결과 미확인·예약 대기·잠금처럼 확인한 차단 사유가 있습니다. |
+| `unavailable` | `error`·1 | 설정·보호 조건·상태 손상·시계 문제 등으로 준비 여부를 확인하지 못했습니다. |
+
+`reasons`는 기계적으로 해석할 코드 배열이며 `error.code`와 stderr는 첫 사유를 반환합니다. 구형 상태는 `AUTH_STATE_TRANSITION_REQUIRED`, 손상·보호 조건 위반은 `AUTH_STORAGE`, 잘못된 자격 증명 설정은 `AUTH_CONFIG`, 시계 기준 불일치·정보 확인 불가는 `CLOCK_UNCERTAIN`입니다. 설정 경로·필수 파일 부재는 기존 보호 저장소 검사에 따라 `AUTH_STORAGE`입니다. 상태나 대기 기록의 검증 실패를 잠금 존재로 덮지 않습니다.
+
+정상 상태에서 `pending:true`는 `AUTH_ISSUANCE_UNKNOWN`, 아직 지나지 않은 예약 또는 대기 기록의 마감은 `WAIT_REQUIRED`, `client.lock`·`issuance.lock`·`account.lock`의 존재는 `LOCK_PRESENT`입니다. 여러 사유가 있으면 이 순서로 함께 반환하며 기다리거나 잠금을 빼앗지 않습니다. 만료된 대기 기록도 그대로 남깁니다. `pending:true`는 유효한 캐시 토큰이 있더라도 표시하는 보수적인 점검 차단입니다. 정상 조회의 기존 토큰 선택·복구 규칙은 바꾸지 않습니다.
+
+`token`은 `valid`·`missing`·`expired`·`refresh_required`·`unknown` 중 하나입니다. `valid`는 로컬 만료까지 15초를 초과해 남은 캐시, `refresh_required`는 만료 전이지만 정상 조회에서 재발급할 캐시입니다. 상태 검증을 마치지 못하면 `unknown`입니다. 토큰 부재·만료·재발급 필요만으로는 로컬 차단으로 처리하지 않으므로 다른 문제가 없다면 `ready`입니다. 일반 조회는 기존 계약대로 토큰을 자동 발급할 수 있습니다. 이를 공급자의 인증 거부나 상태 전환 승인으로 해석하지 마세요.
+
+정상 예시의 자료 부분은 `"data":[{"readiness":"ready","token":"missing","reasons":[]}]`입니다. 발급 미확인·대기·잠금이 함께 있으면 `"data":[{"readiness":"blocked","token":"missing","reasons":["AUTH_ISSUANCE_UNKNOWN","WAIT_REQUIRED","LOCK_PRESENT"]}]`와 `"error":{"code":"AUTH_ISSUANCE_UNKNOWN"}`을 반환합니다.
+
+점검은 관측 시점의 로컬 결과입니다. 공급자의 자격 증명·토큰·권한·IP 수락, 계좌 유효성·조회 범위, 자료 가용성·최신성, 후속 조회 성공을 보장하지 않습니다. 동시 실행 전체의 원자적 상태 스냅샷도 아닙니다. 실제 조회는 점검 결과를 재사용해 검증을 생략하지 않으며 상태와 시계를 다시 확인합니다. `AUTH_STATE_TRANSITION_REQUIRED`에는 반복 조회를 중단하고 [예약 상태와 복구](#예약-상태와-복구)를 따르세요. 다른 차단도 상태 삭제나 자동 복구 승인이 아닙니다.
 
 ## 공통 출력과 종료 코드
 
 stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·공급자 메시지 없는 오류 코드만 출력합니다. 알려진 자격 증명·사용한 토큰이 결과에 나타나면 `SENSITIVE_OUTPUT`으로 자료 출력을 차단합니다. 공급자 추가 필드는 그대로 전달하지 않습니다.
 
-조회 결과는 `version`, `status`, `data`, `source`, `retrievedAt`을 포함합니다. 성공·부분 결과에는 `omissions`, 페이지가 있는 명령에는 `page`, 일반 오류에는 `error`가 있습니다. `data`는 명령별 배열이며 일봉 묶음은 그 안에 종목별 결과를 담습니다. 도움말은 예외로 `data={"commands":[...]}` 형식의 객체를 반환하며 조회 결과의 `source`·`retrievedAt`을 포함하지 않습니다.
+조회 결과는 `version`, `status`, `data`, `source`, `retrievedAt`을 포함합니다. 성공·부분 결과에는 `omissions`, 페이지가 있는 명령에는 `page`, 일반 오류에는 `error`가 있습니다. `data`는 명령별 배열이며 일봉 묶음은 그 안에 종목별 결과를 담습니다. `readiness`는 오류에도 점검 결과 하나를 `data`에 담습니다. 도움말은 예외로 `data={"commands":[...]}` 형식의 객체를 반환하며 조회 결과의 `source`·`retrievedAt`을 포함하지 않습니다.
 
 | 상태·종료 코드 | 의미 |
 | --- | --- |
@@ -62,6 +88,8 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다.
 
 오류 코드는 `IDENTITY_AMBIGUOUS`, `INPUT_INVALID`, `ACCOUNT_SELECTION_REQUIRED`, `ACCOUNT_SCOPE_DENIED`, `AUTH_CONFIG`, `AUTH_STORAGE`, `AUTH_STATE_TRANSITION_REQUIRED`, `CLOCK_UNCERTAIN`, `AUTH_FAILED`, `AUTH_RESPONSE_INVALID`, `AUTH_ISSUANCE_UNKNOWN`, `PERMISSION_DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `RESPONSE_INVALID`, `RATE_LIMIT`, `NETWORK_ERROR`, `UPSTREAM_ERROR`, `REQUEST_LIMIT`, `TIMEOUT`, `INTERRUPTED`, `SENSITIVE_OUTPUT`, `INTERNAL_ERROR`입니다. 인증·권한·미지원·한도 오류는 정상 빈 결과로 바꾸지 않습니다. 실행 예산과 자동 반복 범위는 [실행 한도와 재시도](#실행-한도와-재시도), 보호 상태 오류의 복구는 [예약 상태와 복구](#예약-상태와-복구)를 확인하세요.
+
+`readiness`는 추가로 `WAIT_REQUIRED`·`LOCK_PRESENT`를 반환합니다.
 
 ## 기본 계좌와 보유·매수 가능 금액
 

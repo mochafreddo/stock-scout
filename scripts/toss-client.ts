@@ -92,6 +92,12 @@ type State = {
   pending: boolean;
   token?: { value: string; expiresAt: number };
 };
+function tokenStatus(token: State['token']) {
+  if (!token) return 'missing';
+  const remaining = token.expiresAt - Date.now();
+  if (remaining <= 0) return 'expired';
+  return remaining > 15000 ? 'valid' : 'refresh_required';
+}
 function clockIdentity() {
   try {
     let boot: string;
@@ -255,6 +261,27 @@ class SharedRequestCoordinator {
   validateForAccountSelection() {
     this.load();
   }
+  inspect() {
+    const { state } = this.loadReservation();
+    const reasons: string[] = [];
+    if (state.pending) reasons.push('AUTH_ISSUANCE_UNKNOWN');
+    if (BigInt(state.clock.nextNs) > process.hrtime.bigint()) reasons.push('WAIT_REQUIRED');
+    let locked = false;
+    for (const name of ['client.lock', 'issuance.lock', 'account.lock']) {
+      try {
+        secure(join(this.directory, name), true);
+        locked = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    if (locked) reasons.push('LOCK_PRESENT');
+    return {
+      readiness: reasons.length ? 'blocked' : 'ready',
+      token: tokenStatus(state.token),
+      reasons,
+    };
+  }
   withTokenIssuance(operation: () => Promise<string>) {
     return withLock(this.directory, 'issuance.lock', this.check, this.wait, operation);
   }
@@ -364,25 +391,29 @@ class SharedRequestCoordinator {
     if (state.token) this.observeToken(state.token.value);
     return state;
   }
+  private loadReservation() {
+    const state = this.load();
+    const records = readdirSync(this.directory).filter((name) =>
+      /^cooldown-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/.test(name),
+    );
+    for (const name of records) {
+      const record = read(join(this.directory, name));
+      if (
+        record?.fingerprint !== this.fingerprint ||
+        typeof record.clock?.id !== 'string' ||
+        typeof record.clock?.nextNs !== 'string' ||
+        !/^\d{30}$/.test(record.clock.nextNs)
+      )
+        throw new TossError('AUTH_STORAGE');
+      if (record.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
+      if (BigInt(record.clock.nextNs) > BigInt(state.clock.nextNs))
+        state.clock.nextNs = record.clock.nextNs;
+    }
+    return { state, records };
+  }
   private locked<T>(operation: (state: State) => Promise<T>) {
     return withLock(this.directory, 'client.lock', this.check, this.wait, () => {
-      const state = this.load();
-      const records = readdirSync(this.directory).filter((name) =>
-        /^cooldown-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/.test(name),
-      );
-      for (const name of records) {
-        const record = read(join(this.directory, name));
-        if (
-          record?.fingerprint !== this.fingerprint ||
-          typeof record.clock?.id !== 'string' ||
-          typeof record.clock?.nextNs !== 'string' ||
-          !/^\d{30}$/.test(record.clock.nextNs)
-        )
-          throw new TossError('AUTH_STORAGE');
-        if (record.clock.id !== this.clockId) throw new TossError('CLOCK_UNCERTAIN');
-        if (BigInt(record.clock.nextNs) > BigInt(state.clock.nextNs))
-          state.clock.nextNs = record.clock.nextNs;
-      }
+      const { state, records } = this.loadReservation();
       if (records.length) {
         save(this.directory, state);
         for (const name of records) unlinkSync(join(this.directory, name));
@@ -511,6 +542,13 @@ export class TossClient {
   }
   containsSecret(json: string) {
     return contains(json, this.secrets);
+  }
+  readiness() {
+    try {
+      return this.coordination.inspect();
+    } catch (error) {
+      throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
+    }
   }
   containsAccountIdentifier(json: string) {
     return contains(json, this.accountIdentifiers);
@@ -749,7 +787,7 @@ export class TossClient {
     return this.coordination
       .withTokenIssuance(async () => {
         const cached = await this.coordination.selectToken((token, pending) => {
-          if (token && token.value !== rejected && token.expiresAt > Date.now() + 15000)
+          if (token && token.value !== rejected && tokenStatus(token) === 'valid')
             return token.value;
           if (pending) throw new TossError('AUTH_ISSUANCE_UNKNOWN');
           return undefined;
