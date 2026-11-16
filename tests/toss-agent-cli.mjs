@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { accounts, fixture, runAccountCli, runCli, selectAccount } from './toss-cli-helper.mjs';
 
 const [scenario, ...args] = process.argv.slice(2);
@@ -17,7 +20,9 @@ const paginated =
   args[0] === 'conditional-orders' ||
   (args[0] === 'orders' && args[1] === 'CLOSED');
 if (
-  !['success', 'partial', 'error'].includes(scenario) ||
+  !['success', 'partial', 'error', 'transition-required'].includes(scenario) ||
+  (scenario === 'transition-required' &&
+    (args.length !== 2 || args[0] !== 'prices' || args[1] !== 'DEMO')) ||
   (!accountCommand &&
     ![
       '--help',
@@ -37,11 +42,53 @@ if (
   (args[0] === '--help' && scenario !== 'success')
 ) {
   console.error(
-    'Use success with --help; success|error with query commands; partial with candles, candles-batch or paginated account queries. Minute candles require partial.',
+    'Use success with --help; success|error with query commands; partial with candles, candles-batch or paginated account queries; transition-required with prices DEMO. Minute candles require partial.',
   );
   process.exit(1);
 }
 process.umask(0o077);
+if (scenario === 'transition-required') {
+  const f = fixture();
+  try {
+    writeFileSync(
+      join(f.directory, 'state.json'),
+      JSON.stringify({
+        fingerprint: createHash('sha256')
+          .update(JSON.stringify(['synthetic-client', 'synthetic-secret']))
+          .digest('hex'),
+        nextAt: 0,
+        pending: false,
+        token: { value: 'synthetic-token', expiresAt: Date.parse('2026-11-07T15:00:00Z') },
+      }),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(f.directory, 'account.json'),
+      JSON.stringify({ alias: 'primary', accountSeq: '741', scopes: ['holdings'] }),
+      { mode: 0o600 },
+    );
+    const snapshot = () => ({
+      mode: lstatSync(f.directory).mode,
+      files: readdirSync(f.directory)
+        .sort()
+        .map((name) => {
+          const path = join(f.directory, name);
+          const stat = lstatSync(path, { bigint: true });
+          return { name, mode: stat.mode, mtimeNs: stat.mtimeNs, content: readFileSync(path) };
+        }),
+    });
+    const before = snapshot();
+    const result = await runCli(f, [], args);
+    assert.equal(result.requests.length, 0, 'transition error must not send HTTP');
+    assert.deepEqual(snapshot(), before, 'transition error must preserve protected files');
+    process.stdout.write(result.stdout);
+    process.stderr.write(result.stderr);
+    process.exitCode = result.status ?? 1;
+  } finally {
+    f.close();
+  }
+  process.exit(process.exitCode);
+}
 const f = fixture();
 try {
   const listed = {

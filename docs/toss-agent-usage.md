@@ -47,6 +47,7 @@ Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments fo
 | `partial` | `candles-batch DEMO,PARTIAL,EMPTY,INVALID,DENIED,LATER date=2026-11-05 count=3` | Read success, usable partial pages, invalid-item/pagination omissions, a permission error and an unqueried symbol with the actual CLI summaries. |
 | `error` | `candles DEMO 1d` or `candles-batch DEMO,LATER` | Preserve the permission failure and, for the batch, the unqueried remainder. |
 | `error` | `prices DEMO` | Receive a synthetic permission failure. |
+| `transition-required` | `prices DEMO` | Receive a local legacy-state transition error without sending HTTP or changing existing protected files. |
 | `success` | `prices DEMO/` | Observe the actual CLI rejecting invalid input. |
 | `success` | `stock DEMO` | Read one listing and its security type. |
 | `success` | `orderbook DEMO` | Preserve decimal prices, quantities and provider order. |
@@ -65,6 +66,18 @@ Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments fo
 Start discovery with `node tests/toss-agent-cli.mjs success --help`. Choose subsequent arguments from its output and the reference. The fixture contains a `DEMO` listing and fixed synthetic market/account responses; date-selected daily batches supply matching synthetic identities for their requested symbols. Ranking requests for more than one item return a partial result. Outside the daily batch cases, other symbols and filters do not create new fixture data. Session fixtures use only `2026-11-06`; adjacent dates are synthetic closed days, not historical calendar evidence. The runner covers only the cases above; it is not a replacement provider or live execution mode.
 
 Account exercises select a synthetic `primary` account in the invocation's isolated state, without reading or changing the live selection. For account pagination, copy both `page.nextCursor` and `page.context` into `cursor=VALUE context=VALUE`, keeping the scenario `partial` and the same command, group, period and filters. The next invocation returns one item and no next page. The fixed synthetic identity lets this context work across isolated invocations; do not reuse synthetic cursors or contexts with live state. Never use `account-select` to prepare a real account during this exercise.
+
+### Exercise a transition-required stop
+
+Run `node tests/toss-agent-cli.mjs transition-required prices DEMO`. This scenario accepts exactly `prices DEMO`, seeds legacy reservation state and an existing token plus account selection from synthetic literals, then invokes the real query CLI once. Read stdout JSON (`version:1`, `status:"error"`, empty `data`, `error.code:"AUTH_STATE_TRANSITION_REQUIRED"`), stderr (`SYNTHETIC` and the CLI-safe error code), and exit 1 together. Empty data means retrieval failed, not that the security or portfolio is empty. No provider rejection was observed.
+
+The runner asserts zero HTTP requests and compares the protected directory's final file list, file bytes, modification times and modes, plus directory mode, before forwarding the CLI output unchanged. An ordinary query briefly creates/removes its existing lock, so directory modification time is excluded; file access times may change on reads. This exercise does not establish the no-write behavior of a readiness command. Each invocation uses a fresh isolated fixture and removes it afterward; caller state is never used.
+
+On this error, stop the query chain, including holdings and open-order follow-ups and scheduled retries against unchanged state. Follow [the recovery handoff](auth-recovery.md) and the authoritative [reservation recovery contract](toss-cli.md#예약-상태와-복구). Do not inspect or repair actual protected state without the required authorization, delete state, or issue a token to bypass the error. Report a symbol-specific judgment as deferred for insufficient data. A recommendation to wait needs investment evidence independent of the retrieval failure.
+
+Example consumer report: “DEMO: judgment deferred because market data could not be retrieved (`AUTH_STATE_TRANSITION_REQUIRED`). Holdings and open orders were not queried after that failure. The error indicates a local reservation-state transition prerequisite; it does not establish provider authentication rejection. Recovery requires the executor, waiting-period and approval checks in the recovery guide. No investment recommendation follows from this failure alone.” Adapt this example to the actual results; do not claim account queries were skipped if they ran earlier.
+
+The scenario reuses `fixture` and `runCli` in `tests/toss-cli-helper.mjs` and the external HTTP boundary in `tests/toss-http-mock.mjs`. Extend that boundary for future readiness exercises rather than injecting fabricated stdout or adding live credentials. Keep readiness assertions separate: a read-only check must also preserve directory modification time and must not create transient locks. This scenario and the consumer guide are synthetic/code coverage, not observations of Toss or dots and not proof that a consumer follows the guide.
 
 ### Check changed candle analysis before real queries
 

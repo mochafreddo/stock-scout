@@ -14,6 +14,24 @@ function run(...args) {
   });
 }
 
+test('agent receives a local transition error without protected-state changes or HTTP', () => {
+  const result = run('transition-required', 'prices', 'DEMO');
+  assert.ifError(result.error);
+  assert.equal(result.status, 1, result.stderr);
+  assert.notEqual(result.stdout, '', result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.version, 1);
+  assert.equal(output.status, 'error');
+  assert.deepEqual(output.data, []);
+  assert.equal(output.error.code, 'AUTH_STATE_TRANSITION_REQUIRED');
+  assert.match(result.stderr, /SYNTHETIC/);
+  assert.match(result.stderr, /AUTH_STATE_TRANSITION_REQUIRED/);
+  assert.doesNotMatch(
+    result.stdout + result.stderr,
+    /synthetic-(secret|token|client)|99887766554|stock-scout-toss-/,
+  );
+});
+
 function copiedCheckout(t, name) {
   const directory = mkdtempSync(join(tmpdir(), 'stock-scout-checkout-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
