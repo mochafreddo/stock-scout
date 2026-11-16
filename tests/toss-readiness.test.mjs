@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fixture, runCli, snapshot } from './toss-cli-helper.mjs';
+import { authState, fixture, runCli, snapshot } from './toss-cli-helper.mjs';
 
 function writeState(f, changes = {}) {
   writeFileSync(
@@ -15,24 +15,9 @@ function writeState(f, changes = {}) {
     }),
     { mode: 0o600 },
   );
-  writeFileSync(
-    join(f.directory, 'state.json'),
-    JSON.stringify({
-      fingerprint: createHash('sha256')
-        .update(JSON.stringify(['synthetic-client', 'synthetic-secret']))
-        .digest('hex'),
-      version: 2,
-      nextAt: null,
-      clock: {
-        id: 'darwin-mach-continuous:11111111-1111-4111-8111-111111111111',
-        nextNs: '000000000000000000000000000000',
-      },
-      pending: false,
-      token: { value: 'synthetic-token', expiresAt: Date.parse('2026-11-07T15:00:00Z') },
-      ...changes,
-    }),
-    { mode: 0o600 },
-  );
+  writeFileSync(join(f.directory, 'state.json'), JSON.stringify(authState(changes)), {
+    mode: 0o600,
+  });
 }
 
 async function inspect(f, extra = {}, args = ['readiness']) {

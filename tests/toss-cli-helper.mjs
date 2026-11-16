@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
@@ -26,6 +27,22 @@ export function fixture(clientSecret = 'synthetic-secret') {
   const trace = join(directory, 'trace.jsonl');
   writeFileSync(trace, '', { mode: 0o600 });
   return { directory, trace, close: () => rmSync(directory, { recursive: true, force: true }) };
+}
+export function authState(changes = {}) {
+  return {
+    fingerprint: createHash('sha256')
+      .update(JSON.stringify(['synthetic-client', 'synthetic-secret']))
+      .digest('hex'),
+    version: 2,
+    nextAt: null,
+    clock: {
+      id: 'darwin-mach-continuous:11111111-1111-4111-8111-111111111111',
+      nextNs: '0'.repeat(30),
+    },
+    pending: false,
+    token: { value: 'synthetic-token', expiresAt: Date.parse('2026-11-07T15:00:00Z') },
+    ...changes,
+  };
 }
 export function readRequests(trace) {
   return readFileSync(trace, 'utf8')
