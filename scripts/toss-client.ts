@@ -111,16 +111,12 @@ export function readinessResult(
 ) {
   const failed = 'code' in observation;
   const reasons = failed ? [observation.code] : observation.reasons;
+  let readiness = reasons.length ? 'blocked' : 'ready';
+  if (failed && observation.code !== 'AUTH_STATE_TRANSITION_REQUIRED') readiness = 'unavailable';
   return {
     data: [
       {
-        readiness: failed
-          ? observation.code === 'AUTH_STATE_TRANSITION_REQUIRED'
-            ? 'blocked'
-            : 'unavailable'
-          : reasons.length
-            ? 'blocked'
-            : 'ready',
+        readiness,
         token: failed ? 'unknown' : observation.token,
         reasons,
         ...(failed && observation.clockCause ? { clockCause: observation.clockCause } : {}),
