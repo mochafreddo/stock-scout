@@ -10,7 +10,7 @@ import fs, {
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import {
   closeRuns,
@@ -31,7 +31,7 @@ for (const file of ['credentials.json', 'trace.jsonl', 'argv.jsonl'])
     const failure = new Error('synthetic initialization failure');
     process.env.TMPDIR = directory;
     t.mock.method(fs, 'writeFileSync', (path, ...args) => {
-      if (String(path).endsWith(`/${file}`)) throw failure;
+      if (basename(path) === file) throw failure;
       return write(path, ...args);
     });
     syncBuiltinESMExports();
