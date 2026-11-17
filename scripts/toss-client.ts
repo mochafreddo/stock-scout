@@ -105,6 +105,30 @@ function tokenStatus(token: State['token']) {
   if (remaining <= 0) return 'expired';
   return remaining > 15000 ? 'valid' : 'refresh_required';
 }
+type ReadinessObservation = { token: ReturnType<typeof tokenStatus>; reasons: string[] };
+export function readinessResult(
+  observation: ReadinessObservation | Pick<TossError, 'code' | 'clockCause'>,
+) {
+  const failed = 'code' in observation;
+  const reasons = failed ? [observation.code] : observation.reasons;
+  return {
+    data: [
+      {
+        readiness: failed
+          ? observation.code === 'AUTH_STATE_TRANSITION_REQUIRED'
+            ? 'blocked'
+            : 'unavailable'
+          : reasons.length
+            ? 'blocked'
+            : 'ready',
+        token: failed ? 'unknown' : observation.token,
+        reasons,
+        ...(failed && observation.clockCause ? { clockCause: observation.clockCause } : {}),
+      },
+    ],
+    ...(reasons.length ? { status: 'error' as const, error: { code: reasons[0] } } : {}),
+  };
+}
 function clockIdentity() {
   try {
     let boot: string;
@@ -268,7 +292,7 @@ class SharedRequestCoordinator {
   validateForAccountSelection() {
     this.load();
   }
-  inspect() {
+  inspect(): ReadinessObservation {
     const { state } = this.loadReservation();
     const reasons: string[] = [];
     if (state.pending) reasons.push('AUTH_ISSUANCE_UNKNOWN');
@@ -284,7 +308,6 @@ class SharedRequestCoordinator {
     }
     if (locked) reasons.push('LOCK_PRESENT');
     return {
-      readiness: reasons.length ? 'blocked' : 'ready',
       token: tokenStatus(state.token),
       reasons,
     };
@@ -554,7 +577,7 @@ export class TossClient {
   }
   readiness() {
     try {
-      return this.coordination.inspect();
+      return { ...readinessResult(this.coordination.inspect()), omissions: [] };
     } catch (error) {
       throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
     }

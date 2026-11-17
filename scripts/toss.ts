@@ -5,7 +5,7 @@ import {
   queryCandleBatch,
   queryCandlePage,
 } from './toss-candles.ts';
-import { isAccountScope, TossClient, TossError } from './toss-client.ts';
+import { isAccountScope, readinessResult, TossClient, TossError } from './toss-client.ts';
 import { discoveryQuery } from './toss-discovery.ts';
 import { marketQuery } from './toss-market.ts';
 import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
@@ -178,14 +178,7 @@ try {
     if (command === 'readiness') {
       if (symbols !== undefined) throw new TossError('INPUT_INVALID');
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
-      const inspection = client.readiness();
-      return {
-        data: [inspection],
-        omissions: [],
-        ...(inspection.reasons.length
-          ? { status: 'error' as const, error: { code: inspection.reasons[0] } }
-          : {}),
-      };
+      return client.readiness();
     }
     if (command === 'account-select') {
       if (!symbols || rest.length) throw new TossError('INPUT_INVALID');
@@ -275,17 +268,10 @@ try {
       status: 'error',
       data:
         command === 'readiness'
-          ? [
-              {
-                readiness:
-                  detail.code === 'AUTH_STATE_TRANSITION_REQUIRED' ? 'blocked' : 'unavailable',
-                token: 'unknown',
-                reasons: [detail.code],
-                ...(error instanceof TossError && error.clockCause
-                  ? { clockCause: error.clockCause }
-                  : {}),
-              },
-            ]
+          ? readinessResult({
+              code: detail.code,
+              clockCause: error instanceof TossError ? error.clockCause : undefined,
+            }).data
           : [],
       source: client?.containsSecret(JSON.stringify(source)) ? { provider: 'tossinvest' } : source,
       retrievedAt: new Date().toISOString(),

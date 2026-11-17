@@ -234,6 +234,52 @@ test('help discovers readiness and extra arguments are rejected without effects'
   }
 });
 
+test('readiness characterizes a final deadline failure without preserving the ready observation', async () => {
+  const f = fixture();
+  try {
+    writeState(f);
+    const result = await inspect(f, {
+      TEST_CLOCK_JUMP: 'monotonic',
+      TEST_CLOCK_JUMP_AT: '2',
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr.trim(), 'TIMEOUT');
+    assert.deepEqual(result.out.data, [
+      { readiness: 'unavailable', token: 'unknown', reasons: ['TIMEOUT'] },
+    ]);
+    assert.deepEqual(result.out.error, { code: 'TIMEOUT' });
+    assert.equal(Object.hasOwn(result.out, 'omissions'), false);
+  } finally {
+    f.close();
+  }
+});
+
+test('readiness characterizes failure classification after the CLI redacts its error code', async () => {
+  const secret = 'AUTH_STATE_TRANSITION_REQUIRED';
+  const f = fixture(secret);
+  try {
+    writeState(f, {
+      fingerprint: createHash('sha256')
+        .update(JSON.stringify(['synthetic-client', secret]))
+        .digest('hex'),
+      version: undefined,
+      clock: undefined,
+      nextAt: 0,
+    });
+    const result = await inspect(f);
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr.trim(), 'SENSITIVE_OUTPUT');
+    assert.deepEqual(result.out.data, [
+      { readiness: 'unavailable', token: 'unknown', reasons: ['SENSITIVE_OUTPUT'] },
+    ]);
+    assert.deepEqual(result.out.error, { code: 'SENSITIVE_OUTPUT' });
+    assert.equal(Object.hasOwn(result.out, 'omissions'), false);
+    assert.ok(!(result.stdout + result.stderr).includes(secret));
+  } finally {
+    f.close();
+  }
+});
+
 test('query after readiness still issues missing tokens and revalidates changed state', async () => {
   const f = fixture();
   try {
@@ -318,6 +364,7 @@ test('readiness reports pending issuance, waits and locks together without mergi
     assert.equal(result.status, 1);
     assert.equal(result.out.error.code, 'AUTH_ISSUANCE_UNKNOWN');
     assert.equal(result.stderr.trim(), 'AUTH_ISSUANCE_UNKNOWN');
+    assert.deepEqual(result.out.omissions, []);
     assert.deepEqual(result.out.data, [
       {
         readiness: 'blocked',
