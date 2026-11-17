@@ -18,15 +18,32 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 export function fixture(clientSecret = 'synthetic-secret') {
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-toss-')));
-  writeFileSync(
-    join(directory, 'credentials.json'),
-    JSON.stringify({ clientId: 'synthetic-client', clientSecret }),
-    { mode: 0o600 },
-  );
-  const trace = join(directory, 'trace.jsonl');
-  writeFileSync(trace, '', { mode: 0o600 });
-  return { directory, trace, close: () => rmSync(directory, { recursive: true, force: true }) };
+  const allocated = mkdtempSync(join(tmpdir(), 'stock-scout-toss-'));
+  let cliTraceDirectory;
+  const close = () => {
+    try {
+      rmSync(allocated, { recursive: true, force: true });
+    } finally {
+      if (cliTraceDirectory) rmSync(cliTraceDirectory, { recursive: true, force: true });
+    }
+  };
+  try {
+    const directory = realpathSync(allocated);
+    writeFileSync(
+      join(directory, 'credentials.json'),
+      JSON.stringify({ clientId: 'synthetic-client', clientSecret }),
+      { mode: 0o600 },
+    );
+    const trace = join(directory, 'trace.jsonl');
+    writeFileSync(trace, '', { mode: 0o600 });
+    cliTraceDirectory = mkdtempSync(join(tmpdir(), 'stock-scout-cli-trace-'));
+    const cliTrace = join(realpathSync(cliTraceDirectory), 'argv.jsonl');
+    writeFileSync(cliTrace, '', { mode: 0o600 });
+    return { directory, trace, cliTrace, close };
+  } catch (error) {
+    close();
+    throw error;
+  }
 }
 export function authState(changes = {}) {
   return {

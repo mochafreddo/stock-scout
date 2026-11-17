@@ -1,10 +1,99 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import fs, {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { closeRuns, fixture, price, runCli, runFreshCli, waitForFile } from './toss-cli-helper.mjs';
+import {
+  closeRuns,
+  fixture,
+  price,
+  readRequests,
+  runCli,
+  runFreshCli,
+  snapshot,
+  waitForFile,
+} from './toss-cli-helper.mjs';
+
+for (const file of ['credentials.json', 'trace.jsonl', 'argv.jsonl'])
+  test(`fixture creation removes allocated resources when ${file} initialization fails`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'fixture-failure-test-'));
+    const previousTmpdir = process.env.TMPDIR;
+    const write = fs.writeFileSync;
+    const failure = new Error('synthetic initialization failure');
+    process.env.TMPDIR = directory;
+    t.mock.method(fs, 'writeFileSync', (path, ...args) => {
+      if (String(path).endsWith(`/${file}`)) throw failure;
+      return write(path, ...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      assert.throws(
+        () => fixture(),
+        (error) => error === failure,
+      );
+      assert.deepEqual(readdirSync(directory), []);
+    } finally {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+      if (previousTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpdir;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+test('fixture owns CLI invocation tracing outside protected snapshots and removes both resources', async () => {
+  const f = fixture();
+  try {
+    assert.equal(typeof f.cliTrace, 'string');
+    const before = snapshot(f.directory);
+    for (let invocation = 0; invocation < 2; invocation++) {
+      const result = await runCli(f, [], ['--help']);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(JSON.parse(result.stdout).status, 'success');
+      assert.deepEqual(result.requests, []);
+    }
+    assert.deepEqual(readRequests(f.cliTrace), [['--help'], ['--help']]);
+    assert.deepEqual(snapshot(f.directory), before);
+  } finally {
+    f.close();
+  }
+  assert.equal(existsSync(f.directory), false);
+  assert.equal(existsSync(f.cliTrace), false);
+  assert.equal(existsSync(dirname(f.cliTrace)), false);
+  f.close();
+});
+
+test('fixture cleanup still removes CLI tracing when protected state removal fails', (t) => {
+  const f = fixture();
+  const remove = fs.rmSync;
+  const failure = new Error('synthetic cleanup failure');
+  t.mock.method(fs, 'rmSync', (path, options) => {
+    if (realpathSync(path) === f.directory) throw failure;
+    return remove(path, options);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.throws(
+      () => f.close(),
+      (error) => error === failure,
+    );
+    assert.equal(existsSync(f.directory), true);
+    assert.equal(existsSync(dirname(f.cliTrace)), false);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    f.close();
+  }
+});
 
 test('fresh CLI runs remove their fixture after success and spawn failure', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'fresh-cli-test-'));
@@ -140,6 +229,7 @@ test('normal helper runs preserve CLI output and keep concurrent and repeated fi
           assert.equal(output.status, 'success');
           assert.equal(output.data[0].symbol, symbol);
           assert.equal(output.data[0].lastPrice, '185.7000');
+          assert.deepEqual(readRequests(f.cliTrace), [['prices', symbol]]);
           assert.deepEqual(
             result.requests.map(({ method, path, query }) => ({ method, path, query })),
             [
