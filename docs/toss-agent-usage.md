@@ -134,6 +134,12 @@ Preserve decimal strings and distinguish null from zero and omission. Treat `ret
 
 For paginated account queries, copy both `page.nextCursor` and `page.context` from the previous response. Keep the same account, command, group, period and filters; consult [the CLI reference](toss-cli.md) for which commands support pagination and which changes require a fresh first page. An empty page with more coverage outstanding remains partial. If the response indicates a next page but supplies no usable cursor, report the missing coverage instead of guessing a cursor or treating the history as complete. Keep live cursors and context out of shared evidence.
 
+### Report holdings coverage
+
+- Report **no holdings in the queried scope** only when `holdings` returns `success` with exit code 0 and an explicit, validated empty `data[0].items` array.
+- For `partial`, report any usable holdings and their omissions. If only summary figures are usable, say the summary was read and the holdings list remains unconfirmed. This also applies when all rows were excluded and the returned array is empty.
+- For a valid CLI error response, preserve its safe `error.code`, such as `RESPONSE_INVALID` or `PERMISSION_DENIED`, and mark holdings as unconfirmed. If the consumer cannot decode stdout as JSON or validate its structure as a CLI response, report **holdings response interpretation failed** and mark holdings as unconfirmed.
+
 ## Choose daily queries and follow-up pages
 
 Use [the candle reference](toss-cli.md#일봉과-분봉) to select an inclusive US trade-date upper bound or a provider page boundary. Date selection verifies the market; it does not establish candle completion or finality. Do not infer a market from ticker spelling or a US trade date by slicing a timestamp's displayed date.
@@ -145,6 +151,8 @@ Use each item's summary to assess the actual returned coverage, then decide whet
 Preserve the query exit code and completed results when a batch stops. An item's `retrievedAt` for `not_queried` does not mean its data was fetched. Forced termination and process crashes have no recovery guarantee; save stdout only within approved storage scope. Synthetic checks establish their exercised path, not live provider or consumer validation, and authorize no real queries or data transmission.
 
 ## Classify prices at report time
+
+Show the **retrieval time** and **provider-confirmed price session** separately. Label a US retrieval as **before the regular-session open** only when `retrievedAt` precedes the valid `regularMarket.startTime` returned by `sessions` for the retrieval's New York local date. If that opening time is unavailable, show the retrieval timestamp alone for this item. Report the price session only when the provider explicitly identifies it for that price. Keep the price session **unconfirmed** for current `prices` results with `source.session=unknown`, including when a prior-day price is retrieved before the next regular-session open. A calendar window and a price timestamp cannot establish the price's source session.
 
 State one explicit report timestamp, then recalculate elapsed time from each original `timestamp` to that report timestamp. Use that row's `priceAge.thresholdSeconds`, which carries the threshold selected for the query. Do not reuse the query-time `seconds` or `exceedsThreshold` as the report-time decision: a price can cross the threshold during analysis. Classify only a strict excess as a **reference price** and separate it from prices within the threshold; equality remains within the threshold. Show the source timestamp, report timestamp, recalculated seconds and applied threshold alongside the price.
 
