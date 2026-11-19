@@ -140,6 +140,25 @@ For paginated account queries, copy both `page.nextCursor` and `page.context` fr
 - For `partial`, report any usable holdings and their omissions. If only summary figures are usable, say the summary was read and the holdings list remains unconfirmed. This also applies when all rows were excluded and the returned array is empty.
 - For a valid CLI error response, preserve its safe `error.code`, such as `RESPONSE_INVALID` or `PERMISSION_DENIED`, and mark holdings as unconfirmed. If the consumer cannot decode stdout as JSON or validate its structure as a CLI response, report **holdings response interpretation failed** and mark holdings as unconfirmed.
 
+### Report holding review status
+
+When the report already has a holdings response, show a **Holding review status** (`보유 종목 검토 상태`) section separate from the new-candidate ranking. Use only the data already received for the report. Include each confirmed holding in the queried scope, including holdings absent from the ranking. Apply the [holdings coverage rules](#report-holdings-coverage) to the section as a whole. For a partial holdings response, show the usable rows and identify the missing coverage. For an unconfirmed list, show the reason at section level.
+
+- Mark **Review complete** (`검토 완료`) only after confirming that the daily bars belong to the holding, checking that their actual coverage meets the review's needs, and interpreting them for that holding. Give one line of evidence from the review. A partial candle result can support a completed review when its usable bars cover the required period. Preserve any relevant limits on the evidence.
+- Mark **Judgment deferred: daily bars unconfirmed** (`일봉 미확인으로 판단 보류`) when usable daily bars cannot be confirmed for the holding. State the known reason, such as a missing query, an empty result, a query error, or ambiguous security identity.
+- Mark **Judgment deferred: insufficient daily coverage** (`일봉 범위 부족으로 판단 보류`) when confirmed daily bars fall short of the period the review needs. State the coverage gap.
+
+If the bars are sufficient and the review has yet to be performed, say that the holding is pending review.
+
+Synthetic example with alternative outcomes for one holding. `DEMO` is absent from the new-candidate ranking. This example uses the November 4–5, 2026 US trade dates as its review window.
+
+| Data already received | Holding review status |
+| --- | --- |
+| `holdings` is partial with one omitted row and a valid `DEMO` row. The partial daily result for `DEMO` contains both required dates. | Holdings list is partial. `DEMO` — **Review complete**. The returned close rose from USD 10.00 on November 4 to USD 12.50 on November 5. The page has an older continuation and candle finality is unconfirmed. |
+| The holdings response confirms `DEMO`. There is no usable daily result for it. | `DEMO` — **Judgment deferred: daily bars unconfirmed**. |
+| The holdings response confirms `DEMO`. Its usable daily result covers only November 5. | `DEMO` — **Judgment deferred: insufficient daily coverage**. The November 4 bar is missing. |
+| `holdings` failed with `PERMISSION_DENIED`. | Holdings list unconfirmed (`PERMISSION_DENIED`). |
+
 ## Choose daily queries and follow-up pages
 
 Use [the candle reference](toss-cli.md#일봉과-분봉) to select an inclusive US trade-date upper bound or a provider page boundary. Date selection verifies the market; it does not establish candle completion or finality. Do not infer a market from ticker spelling or a US trade date by slicing a timestamp's displayed date.
