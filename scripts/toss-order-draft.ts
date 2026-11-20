@@ -1,11 +1,14 @@
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
+import { isinPattern, usMarkets } from './toss-stock.ts';
 import { decimal, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
 
 const fields = [
   'symbol',
   'market',
+  'listingMarket',
+  'isinCode',
   'side',
   'orderType',
   'amount',
@@ -40,6 +43,8 @@ export function orderDraft(path: string | undefined, args: string[]) {
   const {
     symbol,
     market,
+    listingMarket = null,
+    isinCode = null,
     side,
     orderType,
     amount,
@@ -63,6 +68,9 @@ export function orderDraft(path: string | undefined, args: string[]) {
   if (
     typeof symbol !== 'string' ||
     !symbolPattern.test(symbol) ||
+    (listingMarket !== null &&
+      (typeof listingMarket !== 'string' || !usMarkets.has(listingMarket))) ||
+    (isinCode !== null && (typeof isinCode !== 'string' || !isinPattern.test(isinCode))) ||
     !positiveDecimal(side === 'BUY' ? amount : quantity) ||
     !validDate(tradeDate) ||
     typeof expiresAt !== 'string' ||
@@ -140,6 +148,8 @@ export function orderDraft(path: string | undefined, args: string[]) {
         draftVersion: 1,
         symbol,
         market,
+        listingMarket,
+        isinCode,
         side,
         orderType,
         ...(side === 'BUY' ? { amount } : { quantity }),
@@ -157,6 +167,9 @@ export function orderDraft(path: string | undefined, args: string[]) {
         appConditions: 'unknown',
       },
     ],
-    omissions: [{ field: 'appConditions', reason: 'not_verified' }],
+    omissions: [
+      ...(listingMarket === null ? [{ field: 'listingMarket', reason: 'not_verified' }] : []),
+      { field: 'appConditions', reason: 'not_verified' },
+    ],
   };
 }
