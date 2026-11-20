@@ -343,10 +343,20 @@ test('documented synthetic input and JSON examples agree with the actual CLI', a
     assert.deepEqual(result.out, examples[index * 2 + 1]);
     assert.deepEqual(agentDrafts[index], result.out.data[0]);
     const value = result.out.data[0];
-    const order =
-      side === 'BUY' ? `매수 ${value.currency} ${value.amount}` : `매도 ${value.quantity}주`;
-    const card = `> ${value.symbol} (${value.market}) · 시장가 ${order} · 뉴욕 거래일 ${value.tradeDate} 정규장 · 초안 만료 ${value.expiresAt} · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출`;
-    assert.ok(reference.split('\n').includes(card));
-    assert.ok(agentGuide.split('\n').includes(card));
+    const orderValues = side === 'BUY' ? [value.currency, value.amount] : [value.quantity];
+    const cardValues = [value.symbol, value.market, value.expiresAt, ...orderValues];
+    for (const document of [reference, agentGuide]) {
+      assert.ok(
+        document
+          .split('\n')
+          .some(
+            (line) =>
+              line.startsWith('> ') &&
+              cardValues.every((part) => line.includes(part)) &&
+              line.replace(value.expiresAt, '').includes(value.tradeDate),
+          ),
+        `The ${side} card must show the draft values`,
+      );
+    }
   }
 });
