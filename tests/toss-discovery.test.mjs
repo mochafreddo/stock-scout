@@ -44,6 +44,41 @@ const listed = {
   isCommonShare: false,
   isinCode: 'US0000000010',
 };
+test('rankings without aggregation time preserve valid rows and report partial results', async () => {
+  for (const type of [
+    'MARKET_TRADING_VOLUME',
+    'MARKET_TRADING_AMOUNT',
+    'TOP_GAINERS',
+    'TOP_LOSERS',
+  ]) {
+    const rows = [row, { ...row, rank: 7, symbol: 'SECOND' }];
+    for (const invalid of [false, true]) {
+      const rankings = invalid ? [rows[0], { ...row, rank: 4, currency: null }, rows[1]] : rows;
+      const r = await query(['rankings', type, '1d', String(rankings.length)], '/api/v1/rankings', {
+        rankings,
+      });
+      assert.equal(r.status, 2);
+      assert.equal(r.out.status, 'partial');
+      assert.equal(r.stderr, '');
+      assert.deepEqual(r.out.data, rows);
+      assert.deepEqual(r.out.omissions, [
+        ...(invalid ? [{ index: 1, reason: 'invalid_item' }] : []),
+        { reason: 'ranked_at_missing' },
+      ]);
+      assert.equal(Object.hasOwn(r.out.source, 'rankedAt'), false);
+      assert.equal(typeof r.out.retrievedAt, 'string');
+      assert.equal(r.requests.length, 2);
+      assert.equal(r.requests.at(-1).method, 'GET');
+      assert.equal(r.requests.at(-1).path, '/api/v1/rankings');
+      assert.deepEqual(Object.fromEntries(new URLSearchParams(r.requests.at(-1).query)), {
+        type,
+        duration: '1d',
+        count: String(rankings.length),
+        marketCountry: 'US',
+      });
+    }
+  }
+});
 test('tradable list returns every matching row from one filtered GET', async () => {
   const rows = Array.from({ length: 201 }, (_, i) => ({ ...listed, symbol: `DEMO${i}` }));
   const r = await query(
@@ -111,6 +146,9 @@ test('empty, incomplete, invalid and throttled responses are distinguishable', a
   ]) {
     const r = await query(args, path, empty);
     assert.equal(r.status, 0);
+    assert.equal(r.stderr, '');
+    assert.equal(r.out.status, 'success');
+    assert.deepEqual(r.out.omissions, []);
     assert.deepEqual(r.out.data, []);
     assert.equal(r.requests.length, 2);
     if (args[0] === 'rankings') assert.equal(r.out.source.rankedAt, null);
@@ -138,6 +176,10 @@ test('empty, incomplete, invalid and throttled responses are distinguishable', a
     rankedAt,
   });
   assert.equal(full.status, 0);
+  assert.equal(full.out.status, 'success');
+  assert.equal(full.stderr, '');
+  assert.equal(full.out.source.rankedAt, rankedAt);
+  assert.deepEqual(full.out.omissions, []);
   assert.deepEqual(
     full.out.data.map((x) => x.rank),
     [1, 2],
@@ -150,6 +192,7 @@ test('contradictory ranking values cannot be reported as success', async () => {
   assert.equal(reversed.status, 1);
   assert.equal(reversed.out.error.code, 'RESPONSE_INVALID');
   const mixed = await query(args, path, {
+    rankedAt,
     rankings: [
       { ...row, rank: 1, price: { lastPrice: '10', basePrice: '0.00', changeRate: '1' } },
       row,
