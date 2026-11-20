@@ -681,6 +681,89 @@ test('batch stops shared access failures and distinguishes the failed symbol fro
   }
 });
 
+test('batch prioritizes HTTP access failures over readable account errors at either request', async (t) => {
+  for (const path of ['/api/v1/stocks', '/api/v1/candles']) {
+    for (const [status, code] of [
+      [401, 'AUTH_FAILED'],
+      [403, 'PERMISSION_DENIED'],
+    ]) {
+      for (const providerCode of ['account-not-found', 'account-header-required']) {
+        await t.test(`${path} ${status} ${providerCode}`, async (t) => {
+          const f = fixture();
+          t.after(f.close);
+          const steps = [identity('FIRST'), page()];
+          if (path === '/api/v1/candles') steps.push(identity('BLOCKED'));
+          steps.push({
+            path,
+            status,
+            body: {
+              success: false,
+              error: { code: providerCode, requestId: 'SAFE_ACCESS', message: 'private body' },
+            },
+          });
+          const r = await runCli(f, steps, [
+            'candles-batch',
+            'FIRST,BLOCKED,LATER',
+            'date=2026-11-05',
+          ]);
+          const out = JSON.parse(r.stdout);
+          assert.equal(r.status, 2, r.stdout);
+          assert.equal(out.status, 'partial');
+          assert.deepEqual(
+            out.data.map(({ status }) => status),
+            ['success', 'error', 'not_queried'],
+          );
+          assert.deepEqual(out.data[0].data, [
+            { ...candle, completion: 'unknown', inProgress: 'unknown' },
+          ]);
+          assert.deepEqual(out.data[1].error, { code, providerCode, requestId: 'SAFE_ACCESS' });
+          assert.deepEqual(out.data[1].data, []);
+          assert.deepEqual(out.data[2].data, []);
+          assert.equal(out.data[2].reason, code);
+          assert.deepEqual(
+            r.requests.map(({ path }) => path),
+            ['/oauth2/token', ...steps.map(({ path }) => path)],
+          );
+          assert.equal(r.stderr, `${code}\n`);
+          assert.doesNotMatch(r.stdout + r.stderr, /private body|synthetic-(secret|token|client)/);
+        });
+      }
+    }
+  }
+});
+
+test('batch keeps ordinary account errors distinct and continues to later symbols', async (t) => {
+  for (const [status, providerCode] of [
+    [404, 'account-not-found'],
+    [400, 'account-header-required'],
+  ]) {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(
+      f,
+      [{ path: '/api/v1/candles', status, body: { error: { code: providerCode } } }, page([])],
+      ['candles-batch', 'FAILED,GOOD'],
+    );
+    const out = JSON.parse(r.stdout);
+    assert.equal(r.status, 2, r.stdout);
+    assert.equal(out.status, 'partial');
+    assert.deepEqual(
+      out.data.map(({ status }) => status),
+      ['error', 'success'],
+    );
+    assert.deepEqual(out.data[0].error, { code: 'ACCOUNT_SELECTION_REQUIRED', providerCode });
+    assert.deepEqual(
+      r.requests.filter(({ method }) => method === 'GET').map(({ query }) => query),
+      [
+        '?symbol=FAILED&interval=1d&count=100&adjusted=true',
+        '?symbol=GOOD&interval=1d&count=100&adjusted=true',
+      ],
+    );
+    assert.equal(r.requests.length, 3);
+    assert.equal(r.stderr, 'ACCOUNT_SELECTION_REQUIRED\n');
+  }
+});
+
 test('batch preserves received access failures when the deadline expires before reading the body', async () => {
   for (const [status, code] of [
     [401, 'AUTH_FAILED'],

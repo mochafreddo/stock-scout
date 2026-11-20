@@ -82,6 +82,8 @@ function rankingResult(value: unknown, count: number) {
     throw new TossError('RESPONSE_INVALID');
   if (rankings.length && rankings.length < count)
     result.omissions.push({ reason: 'fewer_than_requested' });
+  if (rankings.length && rankedAt === undefined)
+    result.omissions.push({ reason: 'ranked_at_missing' });
   return { ...result, source: { rankedAt } };
 }
 

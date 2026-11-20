@@ -31,17 +31,18 @@ Continue with [result interpretation](#interpret-query-results), [daily coverage
 
 ## Prepare a manual Toss app BUY or SELL draft
 
-Use `node scripts/toss.ts order-draft INPUT_JSON_FILE` after the user and agent have agreed the proposed conditions. This offline command needs no readiness check, authentication or state directory. It reads the supplied JSON file without querying sessions, securities, accounts or order endpoints. Use an already resolved `stock` symbol and market `US`; keep ambiguity unresolved until the user selects the security. Apply the existing authorization and transmission rules when obtaining or passing any real query results.
+Use `node scripts/toss.ts order-draft INPUT_JSON_FILE` after the user and agent have agreed the proposed conditions. This offline command needs no readiness check, authentication or state directory. It reads the supplied JSON file without querying sessions, securities, accounts or order endpoints. Copy the selected `stock` result's `symbol`, `market` and available `isinCode` into draft `symbol`, `listingMarket` and `isinCode`; keep draft `market=US`. Keep ambiguity unresolved until the user selects the security. Apply the existing authorization and transmission rules when obtaining or passing any real query results.
 
 Follow [the draft reference](toss-cli.md#오프라인-주문-초안) for the input schema, complete synthetic BUY/SELL input/output and errors. Pass the existing `sessions` CLI response for the target New York trade date, `session=regularMarket`, an offset-bearing `expiresAt` no later than its open, `orderType=MARKET` and `currency=USD`. Supply exactly one positive decimal string: USD `amount` for `BUY`, or share `quantity` for `SELL`. Quantity BUY, amount SELL and LIMIT orders are unsupported. The draft does not establish the symbol's current eligibility or the app's reservation acceptance window.
 
-Read stdout JSON and the process exit code together. Only `version=1`, `status=partial`, exit `2`, and a usable `data[0].draftVersion=1` form a draft for a review card. Keep `appConditions=unknown` visible. On `error` / exit `1`, report its safe `error.code` and show no draft/card. Recheck expiry against the time of display; when it has been reached, withhold the card and request refreshed conditions/evidence as needed. Do not extend expiry past the regular open or describe a draft as submitted, reserved or executed.
+Read stdout JSON and the process exit code together. Only `version=1`, `status=partial`, exit `2`, and a usable `data[0].draftVersion=1` form a draft for a review card. Require the selected `listingMarket` (`NYSE`, `NASDAQ`, `AMEX` or `US_ETC`) before displaying a card. Legacy inputs still return a draft, with `listingMarket=null` and its `not_verified` omission; withhold their cards until the selected listing is confirmed. Missing or null `isinCode` returns null: display a card only if the symbol and listing market distinguish the selected security, and label ISIN as unconfirmed. Never invent missing identity. Keep `appConditions=unknown` visible. On `error` / exit `1`, report its safe `error.code` and show no draft/card. Recheck expiry against the time of display; when it has been reached, withhold the card and request refreshed conditions/evidence as needed. Do not extend expiry past the regular open or describe a draft as submitted, reserved or executed.
 
 The reference's synthetic response contains this `data[0]` at validation time `2026-11-06T14:00:00Z`:
 
 ```json
 {
-  "draftVersion": 1, "symbol": "DEMO", "market": "US", "side": "BUY", "orderType": "MARKET",
+  "draftVersion": 1, "symbol": "DEMO", "market": "US", "listingMarket": "NASDAQ", "isinCode": "US0000000002",
+  "side": "BUY", "orderType": "MARKET",
   "amount": "25.50", "currency": "USD", "tradeDate": "2026-11-06", "session": "regularMarket",
   "regularMarket": {"startTime": "2026-11-06T23:30:00+09:00", "endTime": "2026-11-07T06:00:00+09:00"},
   "expiresAt": "2026-11-06T09:30:00-05:00",
@@ -50,15 +51,16 @@ The reference's synthetic response contains this `data[0]` at validation time `2
 }
 ```
 
-Map `symbol`, `market`, `side`, `orderType`, `currency`, `amount`, `tradeDate`, `session` and `expiresAt` to the same line. For this synthetic draft:
+Map `symbol`, `market`, `listingMarket`, available `isinCode`, `side`, `orderType`, `currency`, `amount`, `tradeDate`, `session` and `expiresAt` to the same line. This synthetic BUY has a selected listing and known ISIN:
 
-> DEMO (US) · 시장가 매수 USD 25.50 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
+> DEMO (US / NASDAQ) · ISIN US0000000002 · 시장가 매수 USD 25.50 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
 
 For a share quantity SELL, the reference's synthetic response contains this `data[0]` at the same validation time:
 
 ```json
 {
-  "draftVersion": 1, "symbol": "DEMO", "market": "US", "side": "SELL", "orderType": "MARKET",
+  "draftVersion": 1, "symbol": "DEMO", "market": "US", "listingMarket": "NYSE", "isinCode": null,
+  "side": "SELL", "orderType": "MARKET",
   "quantity": "0.1250", "currency": "USD", "tradeDate": "2026-11-06", "session": "regularMarket",
   "regularMarket": {"startTime": "2026-11-06T23:30:00+09:00", "endTime": "2026-11-07T06:00:00+09:00"},
   "expiresAt": "2026-11-06T09:30:00-05:00",
@@ -67,9 +69,9 @@ For a share quantity SELL, the reference's synthetic response contains this `dat
 }
 ```
 
-Map `quantity` to shares, preserving its decimal spelling. `currency=USD` does not make the quantity a dollar amount. The user must confirm the sellable quantity in the app. Display the same symbol, market, side, order type, trade date, session and expiry:
+Map `quantity` to shares, preserving its decimal spelling. `currency=USD` does not make the quantity a dollar amount. This synthetic SELL assumes `DEMO` and `NYSE` distinguish the selected security despite the unknown ISIN; otherwise withhold its card until identity is confirmed. The user must confirm the security and sellable quantity in the app. Display the same symbol, market, listing market, ISIN confirmation state, side, order type, trade date, session and expiry:
 
-> DEMO (US) · 시장가 매도 0.1250주 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
+> DEMO (US / NYSE) · ISIN 미확인 · 시장가 매도 0.1250주 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
 
 Always retain `종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출` on that line. The user searches for the security and manually enters, reviews and submits the fractional pre-market reservation in the Toss app. The CLI does not launch or control the app. If `referencePrice` is supplied, label its `price`, `currency` and `timestamp` as an observed reference, never an execution price. Keep account identifiers, credentials, tokens and raw real-order records out of draft inputs, cards and shared evidence.
 
