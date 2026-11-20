@@ -27,7 +27,7 @@ Use the following starting points, then choose only the queries needed to answer
 
 For account queries, use the existing approved selection and scopes. If the request needs an unapproved account or scope, report that prerequisite instead of changing selection or opening credential files. Keep arguments and response details in the approved consumer context; shared evidence should contain only the safe metadata described in [the real-data exercise](#real-data-consumer-exercise-298).
 
-Continue with [result interpretation](#interpret-query-results), [daily coverage](#choose-daily-queries-and-follow-up-pages), and [report-time price classification](#classify-prices-at-report-time). Use [the synthetic exercise](#synthetic-connection-exercise) to verify a consumer path before approved real queries.
+Continue with [result interpretation](#interpret-query-results), [daily coverage](#choose-daily-queries-and-follow-up-pages), and [report-time price classification](#classify-prices-at-report-time). For a swing report, also [check candidate earnings releases](#check-candidate-earnings-releases). Use [the synthetic exercise](#synthetic-connection-exercise) to verify a consumer path before approved real queries.
 
 ## Synthetic connection exercise
 
@@ -187,6 +187,14 @@ node --test tests/price-consumer.test.mjs
 The first command uses the runner's null source timestamp, so `report.prices[0].classification` is `timestamp_unknown`. The test command runs that same consumer with the actual CLI, isolated synthetic state, mocked HTTP and a substituted clock for threshold boundaries, elapsed analysis time, custom thresholds and unavailable timestamps. Inspect both process exit codes when invoking queries; consumer success does not replace the query's exit code or make partial coverage complete.
 
 The example retains the complete input in `query` and puts the report timestamp in `report.asOf`. Each `report.prices` row retains the price and original `timestamp`, adds `classification` (`reference_price`, `timestamp_unknown` or `within_threshold`), and recalculates `priceAge` at `report.asOf`. Read `timestamp`, `report.asOf`, `priceAge.seconds` and `priceAge.thresholdSeconds` together. This is a consumption example, not a report generator; synthetic checks establish its observed behavior, not every external agent's compliance or live Toss response validity. Real queries and data transmission still require their existing authorization.
+
+## Check candidate earnings releases
+
+For each selected US swing candidate, use the verified issuer's official investor relations (IR) calendar or announcement. Use the scheduled release of the results when the release and the earnings call have separate times. Follow an official notice that explicitly reschedules the release. If official sources disagree and you cannot establish which schedule applies, report `미확인` with the conflicting links and a short explanation.
+
+Use the explicit report timestamp and the first regular session that opens strictly after it. Start with `sessions` for the report's New York date. Use `nextBusinessDay` when `today.regularMarket` is explicitly `null` or that session has already opened. End the window at the selected session's `regularMarket.endTime`, including an early close. Compare timestamps as instants using their offsets. The window includes both endpoints. If the next opening or its closing time cannot be established, report `미확인` and retain any verified IR release timing and link. Keep any usable market and account findings in the report.
+
+Show one line per candidate with `구간 내 확인` if the release falls within the window, `구간 밖 확인` if the verified release falls outside it, or `미확인` if the timing or its relation to the window is unclear. Preserve the IR date and time zone or its published timing label and link to the official source. Use date-only or relative timing only when the entire range it allows falls inside or outside the window. For example, a date-only announcement on the closing day can straddle the close, and a before-open announcement can straddle the report timestamp. Leave either case `미확인` unless the IR notice provides enough detail. If no official source confirms a schedule, show `미확인` with the reason. Keep the candidate visible so the user can weigh the release timing alongside the price signal.
 
 ## Verify each consumer separately
 
