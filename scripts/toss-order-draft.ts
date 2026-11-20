@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
 import { decimal, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
@@ -26,7 +26,12 @@ export function orderDraft(path: string | undefined, args: string[]) {
   if (!path || args.length) throw new TossError('INPUT_INVALID');
   let input: unknown;
   try {
-    input = JSON.parse(readFileSync(path, 'utf8'));
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      if (fstatSync(fd).isFile()) input = JSON.parse(readFileSync(fd, 'utf8'));
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     throw new TossError('INPUT_INVALID');
   }

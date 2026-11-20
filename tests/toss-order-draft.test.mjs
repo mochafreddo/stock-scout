@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -296,6 +297,23 @@ test('partial calendar evidence and submillisecond expiry remain usable before e
     const result = await draft(value);
     assert.equal(result.status, 2);
     assert.equal(result.out.data[0].expiresAt, value.expiresAt);
+  }
+});
+
+// Regression: ISSUE-001 order draft blocks on a FIFO input
+// Found by qa-loop on 2026-11-20
+test('order draft rejects a FIFO without waiting for a writer', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'stock-scout-draft-fifo-'));
+  try {
+    const fifo = join(directory, 'input.json');
+    assert.equal(spawnSync('mkfifo', ['-m', '600', fifo]).status, 0);
+    const result = await draft(input(), undefined, ['order-draft', fifo]);
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr.trim(), 'INPUT_INVALID');
+    assert.equal(result.out.error.code, 'INPUT_INVALID');
+    assert.deepEqual(result.out.data, []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
