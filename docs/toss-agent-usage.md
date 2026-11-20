@@ -6,9 +6,9 @@ Actual Toss data, account access, credential setup and transmission to external 
 
 ## Use the CLI for a user request
 
-1. Identify the user's request and the approved scope for queries, account access and data transmission/storage. Reuse existing authorization within that scope.
+1. Identify the user's request and the approved scope for queries, account access and data transmission/storage. For real queries, locate the existing launcher approved for this consumer environment and use it for readiness and every query, including follow-up pages. If the launcher is unavailable, report the blocker and confirm the authorized connection route before proceeding.
 2. Discover commands with `node scripts/toss.ts --help` and use the CLI reference to choose the queries and arguments needed for the request.
-3. Before starting the query chain, run `node scripts/toss.ts readiness` within the approved local access scope. Inspect its JSON and exit code using [the readiness contract](toss-cli.md#로컬-조회-준비-점검). If blocked or unavailable, stop and report the reasons; for a transition requirement use [the recovery handoff](auth-recovery.md). If ready, run only the selected queries and inspect their stdout JSON, exit codes, omissions and next-page information together.
+3. Before starting real queries, run `<approved-launcher> readiness` using the launcher from step 1. Inspect its JSON and exit code using [the readiness contract](toss-cli.md#로컬-조회-준비-점검). If blocked or unavailable, stop and report the reasons. For a transition requirement, use [the recovery handoff](auth-recovery.md). If ready, run only the selected queries through the same launcher and inspect their stdout JSON, exit codes, omissions and next-page information together.
 4. If more data is needed, request additional queries or pages within the approved scope. Report unresolved gaps when the scope or query budget prevents further retrieval.
 5. Use the returned data to write the analysis and recommendations, reflecting its coverage and limits. The agent owns query order and analysis; the CLI owns retrieval, validation, timestamps and error handling. The user decides and executes actual trades.
 
@@ -210,6 +210,6 @@ Keep `node scripts/toss.ts --help` as the discovery entry point and [the referen
 
 The completed first-tool-set exercise is preserved in [the #298 record](toss-agent-live-validation.md), separating direct Codex execution from user-reported dots observations. Its one-time command sweep is not a routine query checklist. Use [the transition record](toss-transition.md) for legacy-path removal and residual limits.
 
-For a new consumer, verify its own discovery, execution and interpretation path as described above. Confirm the approved account, query budget, and transmission/storage scope before real queries; existing acceptance does not authorize a new account, consumer environment or transmission scope. Use the existing approved launcher and state. Do not open credential or selection files, copy credentials, or create a new client; report an unavailable launcher and request the authorized connection route.
+For a new consumer, verify its own discovery, execution and interpretation path. Follow [the query procedure](#use-the-cli-for-a-user-request) and confirm the approved account, query budget, and transmission/storage scope before real queries. Do not open credential or selection files, copy credentials, or create a new client.
 
 Keep financial JSON in the approved consumer context. Shared evidence may record consumer/host, revision, approved scope, safe command arguments, status/exit code, interpretation and limits, but must exclude raw responses, financial amounts, credentials, account identifiers and live cursors. Distinguish direct observations from user reports.
