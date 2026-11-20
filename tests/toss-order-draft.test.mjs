@@ -61,6 +61,46 @@ async function draft(value, now = '2026-11-06T14:00:00Z', args) {
   }
 }
 
+test('selected listings with the same symbol retain their market and known ISIN offline', async () => {
+  for (const [listingMarket, isinCode] of [
+    ['NASDAQ', 'US0000000002'],
+    ['NYSE', 'US0000000010'],
+  ]) {
+    const result = await draft({ ...input(), listingMarket, isinCode });
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.equal(result.stderr, '');
+    assert.equal(result.out.data[0].symbol, 'DEMO');
+    assert.equal(result.out.data[0].market, 'US');
+    assert.equal(result.out.data[0].listingMarket, listingMarket);
+    assert.equal(result.out.data[0].isinCode, isinCode);
+    assert.equal(result.out.data[0].draftVersion, 1);
+    assert.deepEqual(result.out.omissions, [{ field: 'appConditions', reason: 'not_verified' }]);
+  }
+});
+
+test('unknown ISIN remains usable with a selected market and legacy identity stays unverified', async () => {
+  for (const side of ['BUY', 'SELL']) {
+    for (const isinCode of [null, undefined]) {
+      const selected = await draft({ ...input(side), listingMarket: 'NASDAQ', isinCode });
+      assert.equal(selected.status, 2, selected.stdout);
+      assert.equal(selected.out.data[0].listingMarket, 'NASDAQ');
+      assert.equal(selected.out.data[0].isinCode, null);
+      assert.deepEqual(selected.out.omissions, [
+        { field: 'appConditions', reason: 'not_verified' },
+      ]);
+    }
+    const legacy = await draft(input(side));
+    assert.equal(legacy.status, 2, legacy.stdout);
+    assert.equal(legacy.stderr, '');
+    assert.equal(legacy.out.data[0].listingMarket, null);
+    assert.equal(legacy.out.data[0].isinCode, null);
+    assert.deepEqual(legacy.out.omissions, [
+      { field: 'listingMarket', reason: 'not_verified' },
+      { field: 'appConditions', reason: 'not_verified' },
+    ]);
+  }
+});
+
 test('USD MARKET BUY returns an offline partial draft for manual app submission', async () => {
   const result = await draft(input());
   assert.equal(result.status, 2, result.stdout + result.stderr);
@@ -73,6 +113,8 @@ test('USD MARKET BUY returns an offline partial draft for manual app submission'
       draftVersion: 1,
       symbol: 'DEMO',
       market: 'US',
+      listingMarket: null,
+      isinCode: null,
       side: 'BUY',
       orderType: 'MARKET',
       amount: '25.50',
@@ -89,7 +131,10 @@ test('USD MARKET BUY returns an offline partial draft for manual app submission'
       appConditions: 'unknown',
     },
   ]);
-  assert.deepEqual(result.out.omissions, [{ field: 'appConditions', reason: 'not_verified' }]);
+  assert.deepEqual(result.out.omissions, [
+    { field: 'listingMarket', reason: 'not_verified' },
+    { field: 'appConditions', reason: 'not_verified' },
+  ]);
 });
 
 test('US MARKET share quantity SELL returns an offline partial draft for manual app submission', async () => {
@@ -104,6 +149,8 @@ test('US MARKET share quantity SELL returns an offline partial draft for manual 
       draftVersion: 1,
       symbol: 'DEMO',
       market: 'US',
+      listingMarket: null,
+      isinCode: null,
       side: 'SELL',
       orderType: 'MARKET',
       quantity: '0.1250',
@@ -120,7 +167,10 @@ test('US MARKET share quantity SELL returns an offline partial draft for manual 
       appConditions: 'unknown',
     },
   ]);
-  assert.deepEqual(result.out.omissions, [{ field: 'appConditions', reason: 'not_verified' }]);
+  assert.deepEqual(result.out.omissions, [
+    { field: 'listingMarket', reason: 'not_verified' },
+    { field: 'appConditions', reason: 'not_verified' },
+  ]);
 });
 
 test('invalid order combinations never return a draft', async () => {
@@ -134,6 +184,11 @@ test('invalid order combinations never return a draft', async () => {
     [{ currency: 'KRW' }, 'ORDER_UNSUPPORTED'],
     [{ market: 'KR' }, 'ORDER_UNSUPPORTED'],
     [{ symbol: 'DEMO\nextra' }, 'INPUT_INVALID'],
+    ...['KOSPI', 'KOSDAQ', 'KONEX', 'US', 'nasdaq', '', 1].map((listingMarket) => [
+      { listingMarket },
+      'INPUT_INVALID',
+    ]),
+    ...['', '-', 'bad', 'US0000000002\n', 2].map((isinCode) => [{ isinCode }, 'INPUT_INVALID']),
     [{ expiresAt: '2026-11-06T14:30:00' }, 'INPUT_INVALID'],
     [{ tradeDate: '2026-02-30' }, 'INPUT_INVALID'],
     [{ unexpected: 'discard-me' }, 'INPUT_INVALID'],
@@ -362,7 +417,15 @@ test('documented synthetic input and JSON examples agree with the actual CLI', a
     assert.deepEqual(agentDrafts[index], result.out.data[0]);
     const value = result.out.data[0];
     const orderValues = side === 'BUY' ? [value.currency, value.amount] : [value.quantity];
-    const cardValues = [value.symbol, value.market, value.expiresAt, ...orderValues];
+    const cardValues = [
+      value.symbol,
+      value.market,
+      value.listingMarket,
+      ...(value.isinCode === null ? [] : [value.isinCode]),
+      value.expiresAt,
+      ...orderValues,
+    ];
+    assert.ok(value.listingMarket, 'documented cards require a selected listing');
     for (const document of [reference, agentGuide]) {
       assert.ok(
         document

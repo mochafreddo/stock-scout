@@ -13,6 +13,7 @@ export const securityTypes = new Set([
   'STOCK_WARRANTS',
 ]);
 export const isinPattern = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
+export const usMarkets = new Set(['NYSE', 'NASDAQ', 'AMEX', 'US_ETC']);
 const marketPattern = /^[A-Z][A-Z0-9_]*$/;
 type StockChoice = { symbol: string; name: string | null; market: string; isinCode: string | null };
 export class AmbiguousStock extends TossError {
@@ -79,7 +80,7 @@ export async function confirmUsMarket(client: TossClient, symbol: string) {
   if (identity.omissions.some(({ reason }) => reason === 'invalid_item'))
     throw new TossError('RESPONSE_INVALID');
   const market = identity.data[0].market;
-  if (!['NYSE', 'NASDAQ', 'AMEX', 'US_ETC'].includes(market)) throw new TossError('UNSUPPORTED');
+  if (!usMarkets.has(market)) throw new TossError('UNSUPPORTED');
   return market;
 }
 

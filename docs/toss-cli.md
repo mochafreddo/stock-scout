@@ -50,7 +50,9 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 ## 오프라인 주문 초안
 
-`node scripts/toss.ts order-draft INPUT_JSON_FILE`은 JSON 파일 하나를 읽습니다. 기존 `stock` 조회에서 확정한 `symbol`과 `market=US`를 사용하세요. 이 명령은 종목을 다시 조회하거나 확정하지 않습니다. 지원 조합은 `orderType=MARKET`, `currency=USD`에서 `side=BUY`의 USD 금액 `amount` 또는 `side=SELL`의 주 수량 `quantity`입니다. 금액과 수량은 양수 소수 문자열입니다. 수량 매수·금액 매도·지정가는 미지원입니다.
+`node scripts/toss.ts order-draft INPUT_JSON_FILE`은 JSON 파일 하나를 읽습니다. 기존 `stock` 조회에서 선택한 `symbol`, `market` 값을 각각 초안의 `symbol`, `listingMarket`에 전달하고 확인 가능한 `isinCode`도 그대로 전달하세요. 초안의 `market=US`는 유지합니다. 이 명령은 종목을 다시 조회하거나 확정하지 않습니다. 지원 조합은 `orderType=MARKET`, `currency=USD`에서 `side=BUY`의 USD 금액 `amount` 또는 `side=SELL`의 주 수량 `quantity`입니다. 금액과 수량은 양수 소수 문자열입니다. 수량 매수·금액 매도·지정가는 미지원입니다.
+
+`listingMarket`은 `NYSE`, `NASDAQ`, `AMEX`, `US_ETC` 중 하나이며 `isinCode`는 `stock`과 같은 ISIN 형식을 받습니다. 두 필드는 생략하거나 `null`로 전달할 수 있고, 출력에서는 누락 값을 `null`로 표시합니다. 상장 시장이 빠진 기존 입력도 `draftVersion=1`, `partial`·종료 코드 `2`로 읽지만 `omissions`에 `{"field":"listingMarket","reason":"not_verified"}`가 추가됩니다. 이때 선택한 종목을 확인할 때까지 카드를 보류하세요. ISIN이 `null`이면 심볼과 상장 시장으로 대상을 구별할 수 있는지 확인한 뒤 카드를 표시할 수 있습니다. CLI는 전달된 식별자의 형식만 검사하므로 모호한 종목을 임의로 선택하거나 식별자를 만들어 넣지 마세요.
 
 입력 필수 필드는 `symbol`, `market`, `side`, `orderType`, `currency`, `tradeDate`, `session=regularMarket`, `expiresAt`, `sessions`와 매매 방향에 맞는 `amount` 또는 `quantity` 하나입니다. 출력도 매수는 `amount`, 매도는 `quantity`만 포함합니다. 매도에서 `currency=USD`는 시장의 통화이며 `quantity`의 단위는 주입니다. `tradeDate`는 뉴욕 현지 거래일입니다. `sessions`에는 해당 날짜의 기존 CLI `sessions` 응답 전체를 넣으며, 아래 합성 예제처럼 검사에 필요한 필드만 있어도 됩니다. `version=1`, `status=success|partial`, 공급자·일정 endpoint·날짜·뉴욕 시간대와 `data[0].today`를 검사합니다. 부분 결과라도 유효한 대상 정규장이 있으면 사용할 수 있습니다. 일정 조회는 이 명령이 대신하지 않습니다.
 
@@ -62,7 +64,8 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 ```json
 {
-  "symbol": "DEMO", "market": "US", "side": "BUY", "orderType": "MARKET",
+  "symbol": "DEMO", "market": "US", "listingMarket": "NASDAQ", "isinCode": "US0000000002",
+  "side": "BUY", "orderType": "MARKET",
   "amount": "25.50", "currency": "USD", "tradeDate": "2026-11-06",
   "session": "regularMarket", "expiresAt": "2026-11-06T09:30:00-05:00",
   "sessions": {
@@ -82,7 +85,8 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 {
   "version": 1, "status": "partial",
   "data": [{
-    "draftVersion": 1, "symbol": "DEMO", "market": "US", "side": "BUY", "orderType": "MARKET",
+    "draftVersion": 1, "symbol": "DEMO", "market": "US", "listingMarket": "NASDAQ", "isinCode": "US0000000002",
+    "side": "BUY", "orderType": "MARKET",
     "amount": "25.50", "currency": "USD", "tradeDate": "2026-11-06", "session": "regularMarket",
     "regularMarket": {"startTime": "2026-11-06T23:30:00+09:00", "endTime": "2026-11-07T06:00:00+09:00"},
     "expiresAt": "2026-11-06T09:30:00-05:00",
@@ -97,13 +101,14 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 정상 초안도 종목별 앱 예약 조건을 확인하지 못했으므로 `partial`·종료 코드 `2`이며 stderr는 비어 있습니다. `data[0]`의 `draftVersion=1`이 초안 스키마 버전이고, `submission`은 토스 앱 소수점 장 전 예약의 수동 입력·검토·제출 경로입니다. 접수·예약·체결의 증거가 아닙니다. 에이전트는 같은 JSON에서 다음 한 줄을 표시합니다.
 
-> DEMO (US) · 시장가 매수 USD 25.50 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
+> DEMO (US / NASDAQ) · ISIN US0000000002 · 시장가 매수 USD 25.50 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
 
 합성 매도 입력 (`sell-draft.json`):
 
 ```json
 {
-  "symbol": "DEMO", "market": "US", "side": "SELL", "orderType": "MARKET",
+  "symbol": "DEMO", "market": "US", "listingMarket": "NYSE", "isinCode": null,
+  "side": "SELL", "orderType": "MARKET",
   "quantity": "0.1250", "currency": "USD", "tradeDate": "2026-11-06",
   "session": "regularMarket", "expiresAt": "2026-11-06T09:30:00-05:00",
   "sessions": {
@@ -123,7 +128,8 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 {
   "version": 1, "status": "partial",
   "data": [{
-    "draftVersion": 1, "symbol": "DEMO", "market": "US", "side": "SELL", "orderType": "MARKET",
+    "draftVersion": 1, "symbol": "DEMO", "market": "US", "listingMarket": "NYSE", "isinCode": null,
+    "side": "SELL", "orderType": "MARKET",
     "quantity": "0.1250", "currency": "USD", "tradeDate": "2026-11-06", "session": "regularMarket",
     "regularMarket": {"startTime": "2026-11-06T23:30:00+09:00", "endTime": "2026-11-07T06:00:00+09:00"},
     "expiresAt": "2026-11-06T09:30:00-05:00",
@@ -136,9 +142,9 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 }
 ```
 
-같은 JSON의 `quantity`를 주 수량으로 표시한 한 줄 카드입니다. 매도 가능 수량은 토스 앱에서 직접 확인해야 합니다.
+같은 JSON의 `quantity`를 주 수량으로 표시한 한 줄 카드입니다. 이 합성 예제는 ISIN이 미확인이지만 `DEMO`와 `NYSE`로 선택한 종목을 구별할 수 있음을 전제로 표시합니다. 구별할 수 없으면 종목 확인까지 카드를 보류하세요. 상장 시장이 없는 기존 입력도 카드 보류 대상입니다. 매도 가능 수량과 최종 종목은 토스 앱에서 직접 확인해야 합니다.
 
-> DEMO (US) · 시장가 매도 0.1250주 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
+> DEMO (US / NYSE) · ISIN 미확인 · 시장가 매도 0.1250주 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
 
 오류는 `error`·종료 코드 `1`, `data=[]`이며 stderr에는 오류 코드 하나만 출력합니다. 이때 카드를 표시하지 마세요.
 
