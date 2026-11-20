@@ -50,13 +50,13 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 ## 오프라인 주문 초안
 
-`node scripts/toss.ts order-draft INPUT_JSON_FILE`은 JSON 파일 하나를 읽습니다. 기존 `stock` 조회에서 확정한 `symbol`과 `market=US`를 사용하세요. 이 명령은 종목을 다시 조회하거나 확정하지 않습니다. 현재 지원 조합은 `side=BUY`, `orderType=MARKET`, 양수 소수 문자열 `amount`, `currency=USD`입니다. 수량 매수·지정가·매도는 미지원입니다. 매도 초안은 #341의 후속 범위입니다.
+`node scripts/toss.ts order-draft INPUT_JSON_FILE`은 JSON 파일 하나를 읽습니다. 기존 `stock` 조회에서 확정한 `symbol`과 `market=US`를 사용하세요. 이 명령은 종목을 다시 조회하거나 확정하지 않습니다. 지원 조합은 `orderType=MARKET`, `currency=USD`에서 `side=BUY`의 USD 금액 `amount` 또는 `side=SELL`의 주 수량 `quantity`입니다. 금액과 수량은 양수 소수 문자열입니다. 수량 매수·금액 매도·지정가는 미지원입니다.
 
-입력 필수 필드는 `symbol`, `market`, `side`, `orderType`, `amount`, `currency`, `tradeDate`, `session=regularMarket`, `expiresAt`, `sessions`입니다. `tradeDate`는 뉴욕 현지 거래일입니다. `sessions`에는 해당 날짜의 기존 CLI `sessions` 응답 전체를 넣으며, 아래 합성 예제처럼 검사에 필요한 필드만 있어도 됩니다. `version=1`, `status=success|partial`, 공급자·일정 endpoint·날짜·뉴욕 시간대와 `data[0].today`를 검사합니다. 부분 결과라도 유효한 대상 정규장이 있으면 사용할 수 있습니다. 일정 조회는 이 명령이 대신하지 않습니다.
+입력 필수 필드는 `symbol`, `market`, `side`, `orderType`, `currency`, `tradeDate`, `session=regularMarket`, `expiresAt`, `sessions`와 매매 방향에 맞는 `amount` 또는 `quantity` 하나입니다. 출력도 매수는 `amount`, 매도는 `quantity`만 포함합니다. 매도에서 `currency=USD`는 시장의 통화이며 `quantity`의 단위는 주입니다. `tradeDate`는 뉴욕 현지 거래일입니다. `sessions`에는 해당 날짜의 기존 CLI `sessions` 응답 전체를 넣으며, 아래 합성 예제처럼 검사에 필요한 필드만 있어도 됩니다. `version=1`, `status=success|partial`, 공급자·일정 endpoint·날짜·뉴욕 시간대와 `data[0].today`를 검사합니다. 부분 결과라도 유효한 대상 정규장이 있으면 사용할 수 있습니다. 일정 조회는 이 명령이 대신하지 않습니다.
 
 `expiresAt`은 오프셋이 있는 유효 시각이고 정규장 개장 시각 이하여야 합니다. 실제 시각과 소수 초를 비교하며 검증 시각이 만료와 같아도 오류입니다. 개장·폐장 시각의 뉴욕 날짜가 대상일과 일치해야 합니다. 초안 검토 기한은 토스 앱 예약 접수 마감의 확인이 아닙니다.
 
-선택 `referencePrice`는 `price`(0 이상 소수 문자열), `currency=USD`, `timestamp`(오프셋 포함, 검증 시각 이후 금지)를 모두 받습니다. 출력의 `meaning=observed_not_execution`은 관측 기준가이며 체결가가 아님을 나타냅니다. 금액·가격은 최대 30자 문자열이고 원래 표기를 보존합니다. 알 수 없는 최상위 입력 필드와 기준가 필드는 거부합니다. 계좌 식별자·토큰·자격 증명·실거래 원문을 입력에 넣지 마세요. 일정 전체를 초안에 복사하지 않고 검증한 개장·폐장 시각만 반환합니다.
+선택 `referencePrice`는 `price`(0 이상 소수 문자열), `currency=USD`, `timestamp`(오프셋 포함, 검증 시각 이후 금지)를 모두 받습니다. 출력의 `meaning=observed_not_execution`은 관측 기준가이며 체결가가 아님을 나타냅니다. 금액·수량·가격은 최대 30자 문자열이고 원래 표기를 보존합니다. 알 수 없는 최상위 입력 필드와 기준가 필드는 거부합니다. 계좌 식별자·토큰·자격 증명·실거래 원문을 입력에 넣지 마세요. 일정 전체를 초안에 복사하지 않고 검증한 개장·폐장 시각만 반환합니다.
 
 합성 매수 입력 (`buy-draft.json`):
 
@@ -99,6 +99,47 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 > DEMO (US) · 시장가 매수 USD 25.50 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
 
+합성 매도 입력 (`sell-draft.json`):
+
+```json
+{
+  "symbol": "DEMO", "market": "US", "side": "SELL", "orderType": "MARKET",
+  "quantity": "0.1250", "currency": "USD", "tradeDate": "2026-11-06",
+  "session": "regularMarket", "expiresAt": "2026-11-06T09:30:00-05:00",
+  "sessions": {
+    "version": 1, "status": "success",
+    "data": [{"today": {"date": "2026-11-06", "regularMarket": {
+      "startTime": "2026-11-06T23:30:00+09:00", "endTime": "2026-11-07T06:00:00+09:00"
+    }}}],
+    "source": {"provider": "tossinvest", "endpoint": "/api/v1/market-calendar/US",
+      "date": "2026-11-06", "dateTimeZone": "America/New_York"}
+  }
+}
+```
+
+같은 검증 시각 `2026-11-06T14:00:00Z`의 합성 출력입니다. 현재 이 입력을 실행하면 만료 오류가 납니다. 일정·만료·앱 조건 미확인과 종료 코드의 계약은 매수와 같습니다.
+
+```json
+{
+  "version": 1, "status": "partial",
+  "data": [{
+    "draftVersion": 1, "symbol": "DEMO", "market": "US", "side": "SELL", "orderType": "MARKET",
+    "quantity": "0.1250", "currency": "USD", "tradeDate": "2026-11-06", "session": "regularMarket",
+    "regularMarket": {"startTime": "2026-11-06T23:30:00+09:00", "endTime": "2026-11-07T06:00:00+09:00"},
+    "expiresAt": "2026-11-06T09:30:00-05:00",
+    "submission": {"route": "toss_app", "method": "manual", "workflow": "fractional_pre_market_reservation"},
+    "appConditions": "unknown"
+  }],
+  "omissions": [{"field": "appConditions", "reason": "not_verified"}],
+  "source": {"provider": "tossinvest", "endpoint": "local:order-draft", "freshness": "unknown"},
+  "retrievedAt": "2026-11-06T14:00:00.000Z"
+}
+```
+
+같은 JSON의 `quantity`를 주 수량으로 표시한 한 줄 카드입니다. 매도 가능 수량은 토스 앱에서 직접 확인해야 합니다.
+
+> DEMO (US) · 시장가 매도 0.1250주 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
+
 오류는 `error`·종료 코드 `1`, `data=[]`이며 stderr에는 오류 코드 하나만 출력합니다. 이때 카드를 표시하지 마세요.
 
 | `error.code` | 사유 |
@@ -106,7 +147,7 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 | `INPUT_INVALID` | 인수·JSON·필드·날짜·시각·소수 문자열 또는 기준가 오류 |
 | `DRAFT_AMOUNT_REQUIRED` | 금액과 수량 모두 누락 |
 | `DRAFT_AMOUNT_QUANTITY_CONFLICT` | 금액과 수량 동시 지정 |
-| `ORDER_UNSUPPORTED` | 현재 지원하지 않는 시장·매매 방향·주문 유형·통화·수량 매수 |
+| `ORDER_UNSUPPORTED` | 현재 지원하지 않는 시장·매매 방향·주문 유형·통화·수량 매수·금액 매도 |
 | `DRAFT_DATE_MISMATCH` | 일정 조회 날짜 또는 `today.date`와 대상 거래일 불일치 |
 | `DRAFT_SESSION_MISMATCH` | 대상 세션 또는 정규장 시각·뉴욕 거래일 불일치 |
 | `DRAFT_SCHEDULE_MISSING` | 유효한 일정 증거·정규장 시각 누락 |

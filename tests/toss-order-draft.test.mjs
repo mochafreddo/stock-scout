@@ -9,13 +9,13 @@ const regularMarket = {
   startTime: '2026-11-06T23:30:00+09:00',
   endTime: '2026-11-07T06:00:00+09:00',
 };
-function input() {
+function input(side = 'BUY') {
   return {
     symbol: 'DEMO',
     market: 'US',
-    side: 'BUY',
+    side,
     orderType: 'MARKET',
-    amount: '25.50',
+    ...(side === 'BUY' ? { amount: '25.50' } : { quantity: '0.1250' }),
     currency: 'USD',
     tradeDate: '2026-11-06',
     session: 'regularMarket',
@@ -91,6 +91,37 @@ test('USD MARKET BUY returns an offline partial draft for manual app submission'
   assert.deepEqual(result.out.omissions, [{ field: 'appConditions', reason: 'not_verified' }]);
 });
 
+test('US MARKET share quantity SELL returns an offline partial draft for manual app submission', async () => {
+  const result = await draft(input('SELL'));
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.out.version, 1);
+  assert.equal(result.out.status, 'partial');
+  assert.equal(result.out.source.endpoint, 'local:order-draft');
+  assert.deepEqual(result.out.data, [
+    {
+      draftVersion: 1,
+      symbol: 'DEMO',
+      market: 'US',
+      side: 'SELL',
+      orderType: 'MARKET',
+      quantity: '0.1250',
+      currency: 'USD',
+      tradeDate: '2026-11-06',
+      session: 'regularMarket',
+      regularMarket,
+      expiresAt: '2026-11-06T09:30:00-05:00',
+      submission: {
+        route: 'toss_app',
+        method: 'manual',
+        workflow: 'fractional_pre_market_reservation',
+      },
+      appConditions: 'unknown',
+    },
+  ]);
+  assert.deepEqual(result.out.omissions, [{ field: 'appConditions', reason: 'not_verified' }]);
+});
+
 test('invalid order combinations never return a draft', async () => {
   for (const [changes, code] of [
     [{ amount: undefined }, 'DRAFT_AMOUNT_REQUIRED'],
@@ -113,6 +144,30 @@ test('invalid order combinations never return a draft', async () => {
     assert.equal(result.out.error.code, code, JSON.stringify(changes));
     assert.equal(result.stderr.trim(), code);
     assert.ok(!result.stdout.includes('discard-me'));
+  }
+});
+
+test('SELL rejects missing, conflicting, unsupported and invalid share quantities', async () => {
+  for (const [changes, code] of [
+    [{ quantity: undefined }, 'DRAFT_AMOUNT_REQUIRED'],
+    [{ amount: '25.50' }, 'DRAFT_AMOUNT_QUANTITY_CONFLICT'],
+    [{ quantity: undefined, amount: '25.50' }, 'ORDER_UNSUPPORTED'],
+    [{ orderType: 'LIMIT' }, 'ORDER_UNSUPPORTED'],
+    [{ side: 'BUY' }, 'ORDER_UNSUPPORTED'],
+    [{ side: 'OTHER' }, 'ORDER_UNSUPPORTED'],
+    [{ currency: 'KRW' }, 'ORDER_UNSUPPORTED'],
+    [{ market: 'KR' }, 'ORDER_UNSUPPORTED'],
+    ...['0', '-1', 'NaN', '1e3', '', null, 0.125, '1'.repeat(31)].map((quantity) => [
+      { quantity },
+      'INPUT_INVALID',
+    ]),
+  ]) {
+    const result = await draft({ ...input('SELL'), ...changes });
+    assert.equal(result.status, 1, JSON.stringify(changes));
+    assert.equal(result.out.status, 'error');
+    assert.deepEqual(result.out.data, []);
+    assert.equal(result.out.error.code, code, JSON.stringify(changes));
+    assert.equal(result.stderr.trim(), code);
   }
 });
 
@@ -194,14 +249,16 @@ test('schedule evidence and expiry boundaries distinguish safe failure reasons',
       },
     ],
   ];
-  for (const [code, change] of cases) {
-    const value = input();
-    change(value);
-    const result = await draft(value);
-    assert.equal(result.status, 1, code);
-    assert.deepEqual(result.out.data, []);
-    assert.equal(result.out.error.code, code);
-    assert.equal(result.stderr.trim(), code);
+  for (const side of ['BUY', 'SELL']) {
+    for (const [code, change] of cases) {
+      const value = input(side);
+      change(value);
+      const result = await draft(value);
+      assert.equal(result.status, 1, `${side}: ${code}`);
+      assert.deepEqual(result.out.data, []);
+      assert.equal(result.out.error.code, code);
+      assert.equal(result.stderr.trim(), code);
+    }
   }
 });
 
@@ -232,12 +289,14 @@ test('observed reference price is retained separately from execution and rejects
 });
 
 test('partial calendar evidence and submillisecond expiry remain usable before expiry', async () => {
-  const value = input();
-  value.sessions.status = 'partial';
-  value.expiresAt = '2026-11-06T14:00:00.0001Z';
-  const result = await draft(value);
-  assert.equal(result.status, 2);
-  assert.equal(result.out.data[0].expiresAt, value.expiresAt);
+  for (const side of ['BUY', 'SELL']) {
+    const value = input(side);
+    value.sessions.status = 'partial';
+    value.expiresAt = '2026-11-06T14:00:00.0001Z';
+    const result = await draft(value);
+    assert.equal(result.status, 2);
+    assert.equal(result.out.data[0].expiresAt, value.expiresAt);
+  }
 });
 
 test('help discovers the offline command and malformed input stays a safe JSON error', async () => {
@@ -268,12 +327,26 @@ test('documented synthetic input and JSON examples agree with the actual CLI', a
   const examples = [...reference.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) =>
     JSON.parse(match[1]),
   );
-  const result = await draft(examples[0]);
-  assert.equal(result.status, 2);
-  assert.deepEqual(result.out, examples[1]);
   const agentGuide = readFileSync(new URL('../docs/toss-agent-usage.md', import.meta.url), 'utf8')
-    .split('## Prepare a manual Toss app BUY draft\n')[1]
+    .split('## Prepare a manual Toss app BUY or SELL draft\n')[1]
     .split('\n## ')[0];
-  const agentDraft = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(agentGuide)[1]);
-  assert.deepEqual(agentDraft, result.out.data[0]);
+  const agentDrafts = [...agentGuide.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) =>
+    JSON.parse(match[1]),
+  );
+  assert.equal(examples.length, 4);
+  assert.equal(agentDrafts.length, 2);
+  for (const [index, side] of ['BUY', 'SELL'].entries()) {
+    const result = await draft(examples[index * 2]);
+    assert.equal(result.status, 2);
+    assert.equal(result.stderr, '');
+    assert.equal(result.out.data[0].side, side);
+    assert.deepEqual(result.out, examples[index * 2 + 1]);
+    assert.deepEqual(agentDrafts[index], result.out.data[0]);
+    const value = result.out.data[0];
+    const order =
+      side === 'BUY' ? `매수 ${value.currency} ${value.amount}` : `매도 ${value.quantity}주`;
+    const card = `> ${value.symbol} (${value.market}) · 시장가 ${order} · 뉴욕 거래일 ${value.tradeDate} 정규장 · 초안 만료 ${value.expiresAt} · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출`;
+    assert.ok(reference.split('\n').includes(card));
+    assert.ok(agentGuide.split('\n').includes(card));
+  }
 });

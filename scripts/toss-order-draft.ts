@@ -32,24 +32,33 @@ export function orderDraft(path: string | undefined, args: string[]) {
   }
   if (!record(input) || Object.keys(input).some((key) => !fields.includes(key)))
     throw new TossError('INPUT_INVALID');
-  const { symbol, market, side, orderType, amount, currency, tradeDate, session, expiresAt } =
-    input;
-  if (amount === undefined && input.quantity === undefined)
-    throw new TossError('DRAFT_AMOUNT_REQUIRED');
-  if (amount !== undefined && input.quantity !== undefined)
+  const {
+    symbol,
+    market,
+    side,
+    orderType,
+    amount,
+    quantity,
+    currency,
+    tradeDate,
+    session,
+    expiresAt,
+  } = input;
+  if (amount === undefined && quantity === undefined) throw new TossError('DRAFT_AMOUNT_REQUIRED');
+  if (amount !== undefined && quantity !== undefined)
     throw new TossError('DRAFT_AMOUNT_QUANTITY_CONFLICT');
   if (
     market !== 'US' ||
-    side !== 'BUY' ||
+    (side !== 'BUY' && side !== 'SELL') ||
     orderType !== 'MARKET' ||
     currency !== 'USD' ||
-    input.quantity !== undefined
+    (side === 'BUY' ? quantity !== undefined : amount !== undefined)
   )
     throw new TossError('ORDER_UNSUPPORTED');
   if (
     typeof symbol !== 'string' ||
     !symbolPattern.test(symbol) ||
-    !positiveDecimal(amount) ||
+    !positiveDecimal(side === 'BUY' ? amount : quantity) ||
     !validDate(tradeDate) ||
     typeof expiresAt !== 'string' ||
     !validTime(expiresAt)
@@ -128,7 +137,7 @@ export function orderDraft(path: string | undefined, args: string[]) {
         market,
         side,
         orderType,
-        amount,
+        ...(side === 'BUY' ? { amount } : { quantity }),
         currency,
         tradeDate,
         session,
