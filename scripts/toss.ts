@@ -8,6 +8,7 @@ import {
 import { isAccountScope, readinessResult, TossClient, TossError } from './toss-client.ts';
 import { discoveryQuery } from './toss-discovery.ts';
 import { marketQuery } from './toss-market.ts';
+import { orderDraft } from './toss-order-draft.ts';
 import { priceAge, priceQuery, priceResult } from './toss-prices.ts';
 import { sessionQuery } from './toss-sessions.ts';
 import { AmbiguousStock, stockQuery, stockResult } from './toss-stock.ts';
@@ -49,6 +50,7 @@ const endpoints: Record<string, string> = {
   constraints: '/api/v1/market-calendar/US',
   'account-select': 'local:account-selection',
   readiness: 'local:readiness',
+  'order-draft': 'local:order-draft',
   'buying-power': '/api/v1/buying-power',
   holdings: '/api/v1/holdings',
   transactions: '/api/v1/transactions',
@@ -157,6 +159,12 @@ try {
             { name: 'holdings', usage: 'node scripts/toss.ts holdings [SYMBOL]' },
             { name: 'buying-power', usage: 'node scripts/toss.ts buying-power CURRENCY' },
             { name: 'sessions', usage: 'node scripts/toss.ts sessions DATE' },
+            {
+              name: 'order-draft',
+              usage: 'node scripts/toss.ts order-draft INPUT_JSON_FILE',
+              semantics:
+                'Offline USD MARKET BUY draft using supplied sessions evidence; partial means app conditions remain unknown. Submit manually in the Toss app.',
+            },
             { name: 'constraints', usage: 'node scripts/toss.ts constraints SYMBOL DATE' },
             {
               name: 'readiness',
@@ -175,6 +183,7 @@ try {
     return client.get(`${source.endpoint}?${query}`);
   }
   async function lookup() {
+    if (command === 'order-draft') return orderDraft(symbols, rest);
     if (command === 'readiness') {
       if (symbols !== undefined) throw new TossError('INPUT_INVALID');
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);

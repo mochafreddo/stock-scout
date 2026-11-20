@@ -29,6 +29,35 @@ For account queries, use the existing approved selection and scopes. If the requ
 
 Continue with [result interpretation](#interpret-query-results), [daily coverage](#choose-daily-queries-and-follow-up-pages), and [report-time price classification](#classify-prices-at-report-time). For a swing report, also [check candidate earnings releases](#check-candidate-earnings-releases). Use [the synthetic exercise](#synthetic-connection-exercise) to verify a consumer path before approved real queries.
 
+## Prepare a manual Toss app BUY draft
+
+Use `node scripts/toss.ts order-draft INPUT_JSON_FILE` after the user and agent have agreed the proposed conditions. This offline command needs no readiness check, authentication or state directory. It reads the supplied JSON file without querying sessions, securities, accounts or order endpoints. Use an already resolved `stock` symbol and market `US`; keep ambiguity unresolved until the user selects the security. Apply the existing authorization and transmission rules when obtaining or passing any real query results.
+
+Follow [the draft reference](toss-cli.md#오프라인-주문-초안) for the input schema, complete synthetic input/output and errors. Pass the existing `sessions` CLI response for the target New York trade date, `session=regularMarket`, an offset-bearing `expiresAt` no later than its open, and USD `amount` as a positive decimal string. The current supported order is `BUY` / `MARKET` / USD amount. SELL belongs to #341. The draft does not establish the symbol's current eligibility or the app's reservation acceptance window.
+
+Read stdout JSON and the process exit code together. Only `version=1`, `status=partial`, exit `2`, and a usable `data[0].draftVersion=1` form a draft for a review card. Keep `appConditions=unknown` visible. On `error` / exit `1`, report its safe `error.code` and show no draft/card. Recheck expiry against the time of display; when it has been reached, withhold the card and request refreshed conditions/evidence as needed. Do not extend expiry past the regular open or describe a draft as submitted, reserved or executed.
+
+The reference's synthetic response contains this `data[0]` at validation time `2026-11-06T14:00:00Z`:
+
+```json
+{
+  "draftVersion": 1, "symbol": "DEMO", "market": "US", "side": "BUY", "orderType": "MARKET",
+  "amount": "25.50", "currency": "USD", "tradeDate": "2026-11-06", "session": "regularMarket",
+  "regularMarket": {"startTime": "2026-11-06T23:30:00+09:00", "endTime": "2026-11-07T06:00:00+09:00"},
+  "expiresAt": "2026-11-06T09:30:00-05:00",
+  "submission": {"route": "toss_app", "method": "manual", "workflow": "fractional_pre_market_reservation"},
+  "appConditions": "unknown"
+}
+```
+
+Map `symbol`, `market`, `side`, `orderType`, `currency`, `amount`, `tradeDate`, `session` and `expiresAt` to the same line. For this synthetic draft:
+
+> DEMO (US) · 시장가 매수 USD 25.50 · 뉴욕 거래일 2026-11-06 정규장 · 초안 만료 2026-11-06T09:30:00-05:00 · 종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출
+
+Always retain `종목별 예약 조건 미확인 · 토스 앱에서 확인 후 직접 제출` on that line. The user searches for the security and manually enters, reviews and submits the fractional pre-market reservation in the Toss app. The CLI does not launch or control the app. If `referencePrice` is supplied, label its `price`, `currency` and `timestamp` as an observed reference, never an execution price. Keep account identifiers, credentials, tokens and raw real-order records out of draft inputs, cards and shared evidence.
+
+`node --test tests/toss-order-draft.test.mjs` exercises the real CLI with synthetic JSON and a substituted clock, asserting safe JSON/diagnostics, exit codes and zero external HTTP attempts. It does not establish live app eligibility, reservation acceptance, execution or another agent's card compliance.
+
 ## Synthetic connection exercise
 
 Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments for `node scripts/toss.ts`. The runner starts that actual CLI with the existing HTTP mock and a new temporary state directory for each invocation. It supplies only synthetic credentials and responses, ignores the caller's `TOSS_STATE_DIR` for the child, and deletes its temporary state after the invocation. No HTTP server or MCP server is needed. The `SYNTHETIC` stderr notice labels the entire exercise; the CLI's stdout JSON and exit code are forwarded unchanged. Even `source.provider=tossinvest` refers to mocked responses here.
