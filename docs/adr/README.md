@@ -8,6 +8,7 @@
 - [0019 토스 조회 도구로 전환하고 기존 KIS·내장 모델 경로를 제거한다](0019-toss-query-tools-transition.md)
 - [0020 저장 완료한 기본 계좌 선택은 성공으로 반환한다](0020-account-selection-commit-result.md): 합의한 설계이며 구현 완료를 뜻하지 않는다.
 - [0021 훅은 스냅샷의 lockfile로 개발 의존성을 준비한다](0021-pnpm-snapshot-dependencies.md)
+- [0022 주문 초안은 호출자가 제공한 일정으로 오프라인에서 검증한다](0022-offline-order-draft-validation.md): 합의한 설계이며 구현 완료를 뜻하지 않는다.
 
 현재 실행 흐름은 [구조 설명](../architecture.md), 인수·JSON 계약은 [CLI 레퍼런스](../toss-cli.md)를 따른다. 이 색인은 결정의 적용 관계를 안내하며 실행 계약을 별도로 유지하지 않는다.
 
