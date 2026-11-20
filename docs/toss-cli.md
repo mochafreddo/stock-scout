@@ -336,7 +336,7 @@ node scripts/toss.ts tradable NYSE status=ACTIVE commonShare=false
 
 `rankings TYPE DURATION [COUNT]`는 미국 시장 전체를 집계한 순위를 한 번 조회합니다. 거래량·거래대금은 시장 체결 기준이며, 상승·하락은 기간 등락률 기준입니다. 기간은 `realtime`, `1d`, `1w`, `1mo`, `3mo`, `6mo`, `1y`이고, 상승·하락에는 `realtime`을 쓸 수 없습니다. 개수는 1~100이며 CLI 기본값은 20입니다. 공급자의 순서와 `rank`를 그대로 읽으세요. `source.rankedAt`은 집계 시각이고 `retrievedAt`은 CLI 조회 시각입니다. `price.changeRate`는 소수 비율입니다. 상승·하락에서는 기간 시작 가격, 거래량·거래대금에서는 전일 기준가와 비교합니다.
 
-집계 자료가 없어 순위가 비었으면 정상 빈 결과입니다. 예를 들어 20개 요청에 17개를 받으면 종료 코드 2와 `fewer_than_requested`를 반환합니다. 공급자가 시세를 얻지 못해 제외한 종목이 있을 수 있습니다. `invalid_item`은 받은 행의 필수 값이 잘못됐다는 뜻이며, 사용할 수 있는 행이 하나도 남지 않으면 종료 코드 1입니다.
+집계 자료가 없어 순위가 비었으면 정상 빈 결과입니다. 비어 있지 않은 순위에서 공급자가 `rankedAt`을 생략하면 유효한 행의 순서와 원래 순위를 보존하고 `partial`·종료 코드 2와 `ranked_at_missing`을 반환합니다. 요청 개수만큼 유효한 행이 있어도 동일하며, `source.rankedAt`을 조회 시각으로 채우지 않습니다. 예를 들어 20개 요청에 17개를 받으면 종료 코드 2와 `fewer_than_requested`를 반환합니다. 공급자가 시세를 얻지 못해 제외한 종목이 있을 수 있습니다. `invalid_item`은 받은 행의 필수 값이 잘못됐다는 뜻이며, 사용할 수 있는 행이 하나도 남지 않으면 종료 코드 1입니다.
 
 `tradable MARKET`은 NYSE·NASDAQ·AMEX·US_ETC 중 한 시장에서 토스증권으로 거래 가능한 종목을 조회합니다. `status`는 ACTIVE(기본값)·SCHEDULED·DELISTED 중 하나입니다. `securityType`은 아래 종목 정보 표의 아홉 유형 중 하나이며, `commonShare=true|false`로 보통주·우선주를 지정할 수 있습니다. 두 필터 모두 생략하면 해당 조건으로 제한하지 않습니다. `source`에는 적용한 시장과 필터가 담기며, 결과는 해당 조건의 목록입니다.
 
