@@ -4,13 +4,13 @@
 
 ## 로컬 테스트로 시작하기
 
-[package.json](../package.json)은 Node.js 24 이상을 요구합니다. 다음 명령으로 설치된 버전을 확인하세요. 선택 사항인 mise의 개발 버전은 [mise.toml](../mise.toml)에 있습니다.
+[package.json](../package.json)은 Node.js 24 이상을 요구합니다. 다음 명령으로 설치된 버전을 확인하세요. mise로 개발 환경을 준비할 때 사용하는 Node.js 버전은 [mise.toml](../mise.toml)에 있습니다.
 
 ```sh
 node --version
 ```
 
-아래 연습은 Node.js 기본 기능과 저장소 코드만 사용하므로 `npm ci`, 실제 자격 증명, `TOSS_STATE_DIR` 설정이 필요하지 않습니다. macOS 또는 Linux에서 실행하세요. 내장 모델이나 OpenAI 인증도 필요하지 않습니다.
+아래 연습은 Node.js 기본 기능과 저장소 코드만 사용하므로 개발 의존성 설치, 실제 자격 증명, `TOSS_STATE_DIR` 설정이 필요하지 않습니다. macOS 또는 Linux에서 실행하세요. 내장 모델이나 OpenAI 인증도 필요하지 않습니다.
 
 ### 1. 명령 찾기
 

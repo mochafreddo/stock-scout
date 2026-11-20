@@ -234,42 +234,77 @@ function checkSkills(root: string, files: string[]) {
 }
 
 function qualityChecks(root: string, source: string, staged = false) {
-  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const manifestPath = join(root, 'package.json');
+  if (!lstatSync(manifestPath).isFile()) throw new Error('Expected a snapshot package.json file');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   const commands = staged ? ['check', 'typecheck'] : ['check', 'typecheck', 'test'];
   for (const name of commands) {
     if (typeof manifest.scripts?.[name] !== 'string' || !manifest.scripts[name].trim())
-      throw new Error(`Quality check unavailable: npm run ${name} is not configured`);
+      throw new Error(`Quality check unavailable: pnpm run ${name} is not configured`);
   }
-  if (Object.keys({ ...manifest.dependencies, ...manifest.devDependencies }).length) {
-    const lock = join(root, 'package-lock.json');
-    if (
-      !existsSync(lock) ||
-      !existsSync(join(source, 'package-lock.json')) ||
-      !readFileSync(lock).equals(readFileSync(join(source, 'package-lock.json'))) ||
-      !existsSync(join(source, 'node_modules'))
-    ) {
-      throw new Error(
-        `Prepare installed dependencies for the ${staged ? 'staged' : 'pushed'} package-lock.json first`,
-      );
-    }
-    cpSync(join(source, 'node_modules'), join(root, 'node_modules'), { recursive: true });
-  }
-  const env = {
+
+  const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,
     HOME: root,
     TMPDIR: dirname(root),
+    CI: 'true',
     npm_config_offline: 'true',
-    npm_config_audit: 'false',
+    npm_config_modules_dir: 'node_modules',
+    npm_config_manage_package_manager_versions: 'false',
     npm_config_update_notifier: 'false',
   };
-  for (const args of [['ls', '--offline', '--all'], ...commands.map((name) => ['run', name])]) {
-    const result = spawnSync('npm', args, { cwd: root, env, stdio: ['ignore', 2, 2] });
+  const runPnpm = (args: string[], remedy = '') => {
+    const result = spawnSync('pnpm', args, { cwd: root, env, stdio: ['ignore', 2, 2] });
     if (result.error)
-      throw new Error(`Quality check unavailable: npm ${args.join(' ')}: ${result.error.message}`);
+      throw new Error(`Quality check unavailable: pnpm ${args.join(' ')}: ${result.error.message}`);
     if (result.signal)
-      throw new Error(`Quality check unavailable: npm stopped by ${result.signal}`);
-    if (result.status !== 0) throw new Error(`npm ${args.join(' ')} failed`);
+      throw new Error(`Quality check unavailable: pnpm stopped by ${result.signal}`);
+    if (result.status !== 0) throw new Error(`pnpm ${args.join(' ')} failed${remedy}`);
+  };
+
+  const lock = lstatSync(join(root, 'pnpm-lock.yaml'), { throwIfNoEntry: false });
+  const dependencies = {
+    ...manifest.dependencies,
+    ...manifest.devDependencies,
+    ...manifest.optionalDependencies,
+    ...manifest.peerDependencies,
+  };
+  if (lock || Object.keys(dependencies).length) {
+    if (!lock?.isFile())
+      throw new Error('Quality check unavailable: expected a snapshot pnpm-lock.yaml file');
+    if (lstatSync(join(root, 'node_modules'), { throwIfNoEntry: false }))
+      throw new Error('Quality check unavailable: snapshot already contains node_modules');
+
+    const store = spawnSync('pnpm', ['store', 'path'], {
+      cwd: source,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        npm_config_offline: 'true',
+        npm_config_manage_package_manager_versions: 'false',
+      },
+    });
+    const storePath = store.stdout?.trim();
+    if (store.status !== 0 || !storePath || !isAbsolute(storePath))
+      throw new Error('Quality check unavailable: could not resolve the local pnpm store');
+    env.npm_config_store_dir = storePath;
+    runPnpm(
+      [
+        'install',
+        '--offline',
+        '--frozen-lockfile',
+        '--ignore-scripts',
+        '--ignore-pnpmfile',
+        '--ignore-workspace',
+        '--lockfile-dir=.',
+        '--virtual-store-dir=node_modules/.pnpm',
+        '--config.enable-global-virtual-store=false',
+        '--package-import-method=copy',
+      ],
+      '. Prepare dependencies with pnpm install --frozen-lockfile first',
+    );
   }
+  for (const name of commands) runPnpm(['run', name]);
 }
 
 function installHook(staged = false) {

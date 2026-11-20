@@ -4,7 +4,14 @@
 
 ## 개발 환경 준비
 
-[package.json](../package.json)의 Node.js 조건을 확인하세요. 선택 사항인 mise의 개발 버전은 [mise.toml](../mise.toml)에 있습니다. 개발 의존성이 없다면 저장소 루트에서 `npm ci`를 실행하세요. 이 명령은 lockfile 기준으로 패키지를 설치하고 기존 `node_modules/`를 다시 구성합니다. 인증 없는 CLI·합성 실행과 달리 형식·린트·타입 검사에는 개발 의존성이 필요합니다.
+[mise.toml](../mise.toml)은 개발용 Node.js와 pnpm 버전을 고정합니다. 저장소 루트에서 도구와 개발 의존성을 준비하세요.
+
+```sh
+mise install
+mise exec -- pnpm install --frozen-lockfile
+```
+
+pnpm은 [lockfile](../pnpm-lock.yaml)에 따라 개발 의존성을 설치합니다. 이 단계에서 뒤의 Git 훅에 필요한 로컬 pnpm 저장소도 준비합니다. 인증 없는 CLI와 합성 예제는 Node.js만으로 실행할 수 있습니다.
 
 [TypeScript 설정](../tsconfig.json)은 `scripts/*.ts`를 검사합니다. JavaScript 테스트·소비 예제는 [형식·린트 설정](../biome.json)과 실제 실행 검사로 확인하세요. 형식 검사가 이 파일들의 타입까지 검사한다고 해석하지 마세요.
 
@@ -13,12 +20,12 @@
 저장소 루트에서 실행하세요. 명령 정의와 검사 대상은 [package.json](../package.json)의 `scripts`를 기준으로 합니다.
 
 ```sh
-npm run check
-npm run typecheck
-npm test
+mise exec -- pnpm run check
+mise exec -- pnpm run typecheck
+mise exec -- pnpm test
 ```
 
-`npm test`는 먼저 로컬 루프백 소켓을 열 수 있는지 확인하고 전체 테스트를 실행합니다. 환경 사전 검사에 실패하면 테스트를 실행한 결과로 취급하지 마세요. 토스 검사는 외부 HTTP를 합성 응답으로 대체하고 시계는 사례에 따라 대체합니다. 실제 프로세스 경합·호출 간격 검사는 실제 시계를 사용합니다. 합성 통과는 실제 공급자·계좌·소비 환경 검증과 구분합니다. 테스트 범위와 근거는 [CLI 검증 안내](toss-cli.md#합성-검사와-후속-확장)와 [검증 기록 목록](README.md#토스-검증-기록)에서 확인하세요.
+`pnpm test`는 먼저 로컬 루프백 소켓을 열 수 있는지 확인하고 전체 테스트를 실행합니다. 환경 사전 검사에 실패하면 테스트를 실행한 결과로 취급하지 마세요. 토스 검사는 외부 HTTP를 합성 응답으로 대체하고 시계는 사례에 따라 대체합니다. 실제 프로세스 경합·호출 간격 검사는 실제 시계를 사용합니다. 합성 통과는 실제 공급자·계좌·소비 환경 검증과 구분합니다. 테스트 범위와 근거는 [CLI 검증 안내](toss-cli.md#합성-검사와-후속-확장)와 [검증 기록 목록](README.md#토스-검증-기록)에서 확인하세요.
 
 ### 테스트와 도우미 찾기
 
@@ -34,7 +41,7 @@ npm test
 | [pre-push.test.mjs](../tests/pre-push.test.mjs) | 문서·스킬·스냅샷 검사와 훅 설치 경계 |
 | [test-preflight.test.mjs](../tests/test-preflight.test.mjs), [check.test.mjs](../tests/check.test.mjs) | 테스트 실행 환경 오류 구분과 예제 린트 포함 여부 |
 
-한 영역을 수정하는 동안에는 해당 파일을 지정해 빠르게 확인하세요. 예를 들어 봉 날짜 선택은 다음처럼 검사할 수 있습니다. 이 명령은 npm의 `pretest`를 실행하지 않으므로 전체 완료 검증은 위의 `npm test`로 수행하세요.
+한 영역을 수정하는 동안에는 해당 파일을 지정해 빠르게 확인하세요. 예를 들어 봉 날짜 선택은 다음처럼 검사할 수 있습니다. 이 명령은 루프백 사전 점검을 건너뛰므로 전체 완료 검증은 위의 `pnpm test`로 수행하세요.
 
 ```sh
 node --test tests/toss-candle-date.test.mjs
@@ -99,15 +106,17 @@ node scripts/pre-push.ts --docs README.md docs/getting-started.md
 저장소 루트에서 필요한 Git 훅을 각각 설치하세요. `--install`은 기존과 같이 pre-push만 설치합니다.
 
 ```sh
-node scripts/pre-push.ts --install-pre-commit
-node scripts/pre-push.ts --install
+mise exec -- node scripts/pre-push.ts --install-pre-commit
+mise exec -- node scripts/pre-push.ts --install
 ```
 
-pre-commit은 staged 스냅샷의 공백·로컬 Markdown 링크·프로젝트 스킬 설정을 검사합니다. 코드 변경이 있으면 staged 스냅샷에서 `npm run check`와 `npm run typecheck`도 실행합니다. 부분 스테이징과 최초 커밋을 지원하며 작업 파일과 인덱스를 자동 수정하지 않습니다. 인덱스에 충돌이 남아 있거나 검사 중 staged 내용이 바뀌면 커밋을 차단합니다. 훅을 설치하지 않고 검사하려면 `node scripts/pre-push.ts --staged`를 실행하세요.
+pre-commit은 staged 스냅샷의 공백·로컬 Markdown 링크·프로젝트 스킬 설정을 검사합니다. 코드 변경이 있으면 staged 스냅샷에서 `pnpm run check`와 `pnpm run typecheck`도 실행합니다. 부분 스테이징과 최초 커밋을 지원하며 작업 파일과 인덱스를 자동 수정하지 않습니다. 인덱스에 충돌이 남아 있거나 검사 중 staged 내용이 바뀌면 커밋을 차단합니다. 훅을 설치하지 않고 검사하려면 `mise exec -- node scripts/pre-push.ts --staged`를 실행하세요.
 
-staged·push의 변경 분류는 Git의 이름 변경 탐지를 끄고 삭제 경로와 추가 경로를 모두 확인합니다. 코드 파일을 `.md`로 이름 변경해도 삭제된 코드 경로를 기준으로 코드 검사를 실행합니다. 문서끼리 이름 변경하면 문서 검사를 유지하며, 코드끼리 또는 문서에서 코드로 이름 변경하면 코드 검사를 실행합니다. push는 코드 변경이 있으면 `npm run check`, `npm run typecheck`, `npm test`를 모두 실행합니다. 모듈 이름 변경 뒤 남은 호출자의 실제 타입 오류는 작업 디렉터리에서 고쳤더라도 staged·push 스냅샷에 남아 있으면 차단합니다.
+staged·push의 변경 분류는 Git의 이름 변경 탐지를 끄고 삭제 경로와 추가 경로를 모두 확인합니다. 코드 파일을 `.md`로 이름 변경해도 삭제된 코드 경로를 기준으로 코드 검사를 실행합니다. 문서끼리 이름 변경하면 문서 검사를 유지하며, 코드끼리 또는 문서에서 코드로 이름 변경하면 코드 검사를 실행합니다. push는 코드 변경이 있으면 `pnpm run check`, `pnpm run typecheck`, `pnpm test`를 모두 실행합니다. 모듈 이름 변경 뒤 남은 호출자의 실제 타입 오류는 작업 디렉터리에서 고쳤더라도 staged·push 스냅샷에 남아 있으면 차단합니다.
 
-코드 검사에는 staged `package-lock.json`과 일치하는 작업 디렉터리의 lockfile 및 설치된 의존성이 필요합니다. 의존성이 없거나 버전이 맞지 않으면 먼저 개발 환경에서 준비한 뒤 다시 커밋하세요. 훅은 패키지를 설치하지 않으며 검사 실패와 검사 실행 불가를 오류 메시지로 구분합니다. 전체 테스트는 최종 검증과 pre-push에서 실행합니다.
+코드 검사는 작업 트리에서 확인한 로컬 pnpm 저장소를 사용합니다. 훅은 staged·push 스냅샷의 manifest와 lockfile에 맞는 의존성을 그 스냅샷에 오프라인으로 설치합니다. 설치 스크립트 실행을 끄고 패키지 파일을 임시 스냅샷에 복사합니다. 저장소에 필요한 패키지가 없으면 위의 개발 의존성 설치를 먼저 실행하세요. manifest와 lockfile이 불일치하면 두 파일을 함께 갱신한 뒤 다시 검사하세요. [스냅샷 의존성 결정](adr/0021-pnpm-snapshot-dependencies.md)에서 이 방식의 근거를 확인할 수 있습니다.
+
+Git을 실행하는 환경의 `PATH`에서 고정된 Node.js와 pnpm을 찾을 수 있어야 합니다. 셸에서 mise 활성화를 사용하거나 `mise exec -- git commit ...`, `mise exec -- git push ...`처럼 Git을 실행하세요.
 
 설치기는 기존 훅을 덮어쓰지 않습니다. 기존 gstack-redact pre-push는 보존하고 지원하는 로컬 훅 위치에 연결합니다. 기존 pre-commit이 있거나 `core.hooksPath`를 사용하면 설치를 중단하므로 기존 훅에 수동으로 통합해야 합니다.
 

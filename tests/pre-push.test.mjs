@@ -160,7 +160,7 @@ test('pre-commit blocks a module renamed to Markdown with a broken staged import
   });
   assert.notEqual(result.status, 0, result.stderr);
   assert.match(result.stderr, /Cannot find module ['"]\.\/module\.js['"]/);
-  assert.match(result.stderr, /npm run typecheck failed/);
+  assert.match(result.stderr, /pnpm run typecheck failed/);
   assert.doesNotMatch(result.stderr, /fixture test/);
   assert.equal(git(root, 'rev-parse', 'HEAD'), base);
   assert.equal(git(root, 'diff', '--cached', '--binary'), staged);
@@ -194,7 +194,7 @@ for (const renames of ['true', 'false']) {
     });
     assert.notEqual(result.status, 0, result.stderr);
     assert.match(result.stderr, /Cannot find module ['"]\.\/module\.js['"]/);
-    assert.match(result.stderr, /npm run typecheck failed/);
+    assert.match(result.stderr, /pnpm run typecheck failed/);
     assert.doesNotMatch(result.stderr, /fixture test/);
     assert.equal(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/main'), base);
     assert.deepEqual(readFileSync(join(root, '.git/index')), index);
@@ -373,7 +373,7 @@ process.exit(${failure ? 23 : 0});
       );
       assert.equal(result.status, failure ? 1 : 0, result.stderr);
       if (failure) {
-        assert.match(result.stderr, /npm run check failed/);
+        assert.match(result.stderr, /pnpm run check failed/);
         assert.doesNotMatch(result.stderr, /fixture typecheck|fixture test|Verified/);
       } else {
         assert.match(result.stderr, /fixture typecheck/);
@@ -469,7 +469,7 @@ test('pre-commit checks code in the index and honors the alternate index used by
     encoding: 'utf8',
   });
   assert.notEqual(failed.status, 0, failed.stderr);
-  assert.match(failed.stderr, /npm run check failed/);
+  assert.match(failed.stderr, /pnpm run check failed/);
   assert.equal(git(root, 'diff', '--cached', '--binary'), staged);
   git(root, 'reset', 'package.json');
   const fixed = JSON.parse(git(root, 'show', 'HEAD:package.json'));
@@ -615,56 +615,87 @@ test('pre-commit installation is idempotent and preserves occupied and custom ho
   assert.equal(readFileSync(hook, 'utf8'), scanner);
 });
 
-test('pre-commit requires installed dependencies for the staged lock before allowing code commits', (t) => {
+test('pre-commit installs locked dependencies from the store before running checks', (t) => {
   const { root, base } = fixture(t);
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  manifest.devDependencies = { 'fixture-dependency': '1.0.0' };
+  const actual = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  manifest.devDependencies = { ...actual.devDependencies };
+  manifest.scripts.check = 'node check.cjs';
+  writeFileSync(
+    join(root, 'check.cjs'),
+    `const { strictEqual } = require('node:assert');
+const { statSync } = require('node:fs');
+const manifest = require.resolve('typescript/package.json');
+strictEqual(statSync(manifest).nlink, 1);
+console.error('fixture check');
+`,
+  );
+  manifest.scripts.postinstall = `node -e "throw new Error('unexpected install script')"`;
   writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
-  const lock = JSON.stringify({
-    name: 'fixture',
-    lockfileVersion: 3,
-    packages: {
-      '': { devDependencies: manifest.devDependencies },
-      'node_modules/fixture-dependency': { version: '1.0.0', dev: true },
-    },
-  });
-  writeFileSync(join(root, 'package-lock.json'), lock);
-  git(root, 'add', 'package.json', 'package-lock.json');
+  copyFileSync(new URL('../pnpm-lock.yaml', import.meta.url), join(root, 'pnpm-lock.yaml'));
+  git(root, 'add', 'package.json', 'pnpm-lock.yaml', 'check.cjs');
   installCommitHook(root);
   const staged = git(root, 'diff', '--cached', '--binary');
-  const commit = () =>
-    spawnSync('git', ['commit', '-m', 'dependencies prepared'], { cwd: root, encoding: 'utf8' });
-  const missing = commit();
+  const prepared = spawnSync('pnpm', ['store', 'path'], { encoding: 'utf8' });
+  assert.equal(prepared.status, 0, prepared.stderr);
+  const commit = (store) =>
+    spawnSync('git', ['commit', '-m', 'dependencies prepared'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, npm_config_store_dir: store },
+    });
+  const missing = commit(join(root, 'empty-store'));
   assert.notEqual(missing.status, 0, missing.stderr);
-  assert.match(missing.stderr, /Prepare installed dependencies for the staged package-lock/);
+  assert.match(missing.stderr, /ERR_PNPM_NO_OFFLINE_TARBALL/);
   assert.doesNotMatch(missing.stderr, /fixture check/);
-  const dependency = join(root, 'node_modules/fixture-dependency');
-  mkdirSync(dependency, { recursive: true });
-  writeFileSync(
-    join(dependency, 'package.json'),
-    '{"name":"fixture-dependency","version":"2.0.0"}',
-  );
-  const invalid = commit();
-  assert.notEqual(invalid.status, 0, invalid.stderr);
-  assert.match(invalid.stderr, /npm ls --offline --all failed/);
-  assert.doesNotMatch(invalid.stderr, /fixture check/);
-  writeFileSync(
-    join(dependency, 'package.json'),
-    '{"name":"fixture-dependency","version":"1.0.0"}',
-  );
-  writeFileSync(join(root, 'package-lock.json'), `${lock}\n`);
-  const mismatch = commit();
-  assert.notEqual(mismatch.status, 0, mismatch.stderr);
-  assert.match(mismatch.stderr, /Prepare installed dependencies for the staged package-lock/);
   assert.equal(git(root, 'rev-parse', 'HEAD'), base);
   assert.equal(git(root, 'diff', '--cached', '--binary'), staged);
-  assert.equal(readFileSync(join(root, 'package-lock.json'), 'utf8'), `${lock}\n`);
-  writeFileSync(join(root, 'package-lock.json'), lock);
-  const good = commit();
+  assert.equal(existsSync(join(root, 'node_modules')), false);
+
+  manifest.devDependencies.typescript = '0.0.0';
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  git(root, 'add', 'package.json');
+  const mismatch = commit(prepared.stdout.trim());
+  assert.notEqual(mismatch.status, 0, mismatch.stderr);
+  assert.match(mismatch.stderr, /ERR_PNPM_OUTDATED_LOCKFILE/);
+  assert.doesNotMatch(mismatch.stderr, /fixture check/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+
+  manifest.devDependencies = {};
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  git(root, 'add', 'package.json');
+  const staleLock = commit(prepared.stdout.trim());
+  assert.notEqual(staleLock.status, 0, staleLock.stderr);
+  assert.match(staleLock.stderr, /ERR_PNPM_OUTDATED_LOCKFILE/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+
+  manifest.devDependencies = actual.devDependencies;
+  writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+  const outside = join(root, 'outside');
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'keep'), 'original');
+  writeFileSync(
+    join(root, '.npmrc'),
+    `modules-dir=${join(outside, 'modules')}\nvirtual-store-dir=${join(outside, 'virtual')}\n`,
+  );
+  git(root, 'add', 'package.json', '.npmrc');
+  const good = commit(prepared.stdout.trim());
+  assert.deepEqual(readdirSync(outside), ['keep'], good.stderr);
+  assert.equal(readFileSync(join(outside, 'keep'), 'utf8'), 'original');
   assert.equal(good.status, 0, good.stderr);
   assert.match(good.stderr, /fixture check/);
   assert.match(good.stderr, /fixture typecheck/);
-  assert.doesNotMatch(good.stderr, /fixture test/);
+  assert.doesNotMatch(good.stderr, /fixture test|unexpected install script/);
+  assert.equal(existsSync(join(root, 'node_modules')), false);
+
+  const push = run(root, git(root, 'rev-parse', 'HEAD'), base, [], {
+    npm_config_store_dir: prepared.stdout.trim(),
+  });
+  assert.equal(push.status, 0, push.stderr);
+  assert.match(push.stderr, /fixture check/);
+  assert.match(push.stderr, /fixture typecheck/);
+  assert.match(push.stderr, /fixture test/);
+  assert.equal(existsSync(join(root, 'node_modules')), false);
 });
 
 test('pre-commit distinguishes an unavailable quality check from a failed check', (t) => {
@@ -679,7 +710,7 @@ test('pre-commit distinguishes an unavailable quality check from a failed check'
     encoding: 'utf8',
   });
   assert.notEqual(result.status, 0, result.stderr);
-  assert.match(result.stderr, /Quality check unavailable: npm run typecheck is not configured/);
+  assert.match(result.stderr, /Quality check unavailable: pnpm run typecheck is not configured/);
   assert.equal(git(root, 'rev-parse', 'HEAD'), base);
 });
 
@@ -834,7 +865,7 @@ test('code pushes run every quality command and refuse missing dependencies', (t
   git(root, 'commit', '-am', 'requires dependencies');
   const missing = run(root, git(root, 'rev-parse', 'HEAD'), base);
   assert.equal(missing.status, 1, missing.stderr);
-  assert.match(missing.stderr, /Prepare installed dependencies/);
+  assert.match(missing.stderr, /expected a snapshot pnpm-lock.yaml file/);
   assert.doesNotMatch(missing.stderr, /fixture check/);
 });
 
@@ -1059,14 +1090,16 @@ test('pre-push requires a nonempty regular license only for adapted skills', (t)
   assert.equal(native.status, 0, native.stderr);
 });
 
-test('push CLI honors the npm test loopback preflight', (t) => {
+test('push CLI honors the pnpm test loopback preflight', (t) => {
   const { root, base } = fixture(t);
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   const actualManifest = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
   );
   manifest.type = 'module';
-  manifest.scripts.pretest = actualManifest.scripts.pretest;
+  manifest.scripts.test = actualManifest.scripts.test;
+  mkdirSync(join(root, 'tests'));
+  writeFileSync(join(root, 'tests/fixture.test.mjs'), "console.error('fixture test');\n");
   writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
   mkdirSync(join(root, 'scripts'));
   copyFileSync(

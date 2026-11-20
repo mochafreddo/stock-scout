@@ -21,16 +21,17 @@ function fixture(t, mode) {
   const root = mkdtempSync(join(tmpdir(), 'stock-scout-preflight-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'scripts'));
+  mkdirSync(join(root, 'tests'));
   if (existsSync(preflight)) copyFileSync(preflight, join(root, 'scripts/test-preflight.ts'));
   writeFileSync(
     join(root, 'package.json'),
     JSON.stringify({
       private: true,
       type: 'module',
-      scripts: { ...manifest.scripts, test: 'node suite.mjs' },
+      scripts: { test: manifest.scripts.test },
     }),
   );
-  writeFileSync(join(root, 'suite.mjs'), "console.log('SUITE_STARTED');\n");
+  writeFileSync(join(root, 'tests/suite.test.mjs'), "console.log('SUITE_STARTED');\n");
   const trace = join(root, 'trace');
   writeFileSync(
     join(root, 'network.cjs'),
@@ -59,17 +60,16 @@ net.Server.prototype.close = function (...args) {
 };
 `,
   );
-  return { root, trace };
+  const env = { ...process.env, NODE_OPTIONS: `--require=${join(root, 'network.cjs')}` };
+  delete env.NODE_TEST_CONTEXT;
+  const run = () => spawnSync('pnpm', ['test'], { cwd: root, encoding: 'utf8', env });
+  return { run, trace };
 }
 
 for (const code of ['EPERM', 'EACCES']) {
-  test(`npm test reports ${code} as an environment failure before starting the suite`, (t) => {
-    const { root, trace } = fixture(t, code);
-    const result = spawnSync('npm', ['test'], {
-      cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, NODE_OPTIONS: `--require=${join(root, 'network.cjs')}` },
-    });
+  test(`pnpm test reports ${code} as an environment failure before starting the suite`, (t) => {
+    const { run, trace } = fixture(t, code);
+    const result = run();
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /environment/i);
     assert.match(result.stderr, /test.*not run/i);
@@ -79,25 +79,17 @@ for (const code of ['EPERM', 'EACCES']) {
   });
 }
 
-test('npm test closes its loopback listener before starting the suite', (t) => {
-  const { root, trace } = fixture(t, 'success');
-  const result = spawnSync('npm', ['test'], {
-    cwd: root,
-    encoding: 'utf8',
-    env: { ...process.env, NODE_OPTIONS: `--require=${join(root, 'network.cjs')}` },
-  });
+test('pnpm test closes its loopback listener before starting the suite', (t) => {
+  const { run, trace } = fixture(t, 'success');
+  const result = run();
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /SUITE_STARTED/);
   assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), ['[0,"127.0.0.1"]', 'closed']);
 });
 
-test('npm test releases its listener and does not start the suite when interrupted', async (t) => {
-  const { root, trace } = fixture(t, 'interrupt');
-  const result = spawnSync('npm', ['test'], {
-    cwd: root,
-    encoding: 'utf8',
-    env: { ...process.env, NODE_OPTIONS: `--require=${join(root, 'network.cjs')}` },
-  });
+test('pnpm test releases its listener and does not start the suite when interrupted', async (t) => {
+  const { run, trace } = fixture(t, 'interrupt');
+  const result = run();
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(result.stdout, /SUITE_STARTED/);
   const port = Number(readFileSync(trace, 'utf8').trim().split('\n')[1]);

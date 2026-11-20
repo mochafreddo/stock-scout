@@ -15,7 +15,7 @@ test('the default check rejects lint errors in shipped examples', (t) => {
   symlinkSync(new URL('../node_modules', import.meta.url), join(root, 'node_modules'));
   const example = join(root, 'examples/consumer.mjs');
   writeFileSync(example, 'debugger;\n');
-  const check = () => spawnSync('npm', ['run', 'check'], { cwd: root, encoding: 'utf8' });
+  const check = () => spawnSync('pnpm', ['run', 'check'], { cwd: root, encoding: 'utf8' });
   const broken = check();
   assert.equal(broken.status, 1, broken.stdout + broken.stderr);
   assert.match(broken.stdout + broken.stderr, /examples\/consumer\.mjs/);

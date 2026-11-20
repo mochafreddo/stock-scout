@@ -485,7 +485,7 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 
 ```sh
 node --test tests/toss*.test.mjs tests/price-consumer.test.mjs
-npm run typecheck
+mise exec -- pnpm run typecheck
 ```
 
 공개 검증 경계는 실제 CLI 인수·stdout JSON·stderr·종료 코드·외부 HTTP입니다. 모듈별 책임과 공유 상태 소유권은 [구조 설명](architecture.md#모듈별-책임), 테스트 도우미와 수정 절차는 [개발 안내](development.md#테스트와-도우미-찾기)를 따르세요.
