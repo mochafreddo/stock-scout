@@ -197,7 +197,7 @@ stdout에는 JSON 하나를 출력하고 stderr에는 원자료·자격 증명·
 
 빈 배열이나 반환 개수만으로 조회 완료를 판단하지 마세요. 봉은 `page.nextBefore`, 계좌 페이지는 `page.hasNext`·`nextCursor`·`context`를 명령별 계약에 따라 읽으세요. 일부 페이지는 0건이어도 다음 페이지가 있거나 페이지 정보가 미확인인 부분 결과입니다. 자동 후속 페이지 조회는 하지 않습니다.
 
-오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다.
+오류 예시는 `{"version":1,"status":"error","data":[],"error":{"code":"PERMISSION_DENIED","providerCode":"ip-not-allowed","requestId":"SAFE_REQUEST_1"}}`입니다. 실제 출력에는 `source`와 `retrievedAt`도 포함됩니다. 안전한 형식의 공급자 오류 코드·요청 식별자만 보존하며 메시지·오류 상세 자료는 버립니다. HTTP `401`·`403`은 읽을 수 있는 본문의 `account-not-found`·`account-header-required`보다 우선하여 각각 `AUTH_FAILED`·`PERMISSION_DENIED`로 분류합니다. 명시적 `expired-token`의 기존 1회 복구 후에도 인증·권한 오류가 남거나 복구 대상이 아니면 일봉 묶음은 선행 결과와 실패한 종목의 오류를 보존하고 뒤 종목은 `not_queried`로 남깁니다. 다른 HTTP 상태의 두 계좌 오류 코드는 기존 `ACCOUNT_SELECTION_REQUIRED`로 분류합니다.
 
 오류 코드는 `IDENTITY_AMBIGUOUS`, `INPUT_INVALID`, `ACCOUNT_SELECTION_REQUIRED`, `ACCOUNT_SCOPE_DENIED`, `AUTH_CONFIG`, `AUTH_STORAGE`, `AUTH_STATE_TRANSITION_REQUIRED`, `CLOCK_UNCERTAIN`, `AUTH_FAILED`, `AUTH_RESPONSE_INVALID`, `AUTH_ISSUANCE_UNKNOWN`, `PERMISSION_DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `RESPONSE_INVALID`, `RATE_LIMIT`, `NETWORK_ERROR`, `UPSTREAM_ERROR`, `REQUEST_LIMIT`, `TIMEOUT`, `INTERRUPTED`, `SENSITIVE_OUTPUT`, `INTERNAL_ERROR`입니다. 인증·권한·미지원·한도 오류는 정상 빈 결과로 바꾸지 않습니다. 실행 예산과 자동 반복 범위는 [실행 한도와 재시도](#실행-한도와-재시도), 보호 상태 오류의 복구는 [예약 상태와 복구](#예약-상태와-복구)를 확인하세요.
 

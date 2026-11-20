@@ -473,10 +473,10 @@ function failure(response: Response, body: unknown) {
         response.headers.get('x-amz-cf-id'));
   const requestId = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;
   let code = 'UPSTREAM_ERROR';
-  if (providerCode === 'account-not-found' || providerCode === 'account-header-required')
-    code = 'ACCOUNT_SELECTION_REQUIRED';
-  else if (response.status === 403) code = 'PERMISSION_DENIED';
+  if (response.status === 403) code = 'PERMISSION_DENIED';
   else if (response.status === 401) code = 'AUTH_FAILED';
+  else if (providerCode === 'account-not-found' || providerCode === 'account-header-required')
+    code = 'ACCOUNT_SELECTION_REQUIRED';
   else if (
     providerCode?.startsWith('unsupported-') ||
     (response.status === 404 && providerCode === 'edge-blocked')
