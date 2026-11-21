@@ -455,6 +455,11 @@ class SharedRequestCoordinator {
   }
 }
 
+function accessFailureCode(status: number) {
+  if (status === 401) return 'AUTH_FAILED';
+  if (status === 403) return 'PERMISSION_DENIED';
+}
+
 function failure(response: Response, body: unknown) {
   const envelope = body && typeof body === 'object' && 'error' in body ? body.error : undefined;
   const raw =
@@ -472,9 +477,9 @@ function failure(response: Response, body: unknown) {
         response.headers.get('referenceId') ??
         response.headers.get('x-amz-cf-id'));
   const requestId = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;
+  const accessCode = accessFailureCode(response.status);
   let code = 'UPSTREAM_ERROR';
-  if (response.status === 403) code = 'PERMISSION_DENIED';
-  else if (response.status === 401) code = 'AUTH_FAILED';
+  if (accessCode) code = accessCode;
   else if (providerCode === 'account-not-found' || providerCode === 'account-header-required')
     code = 'ACCOUNT_SELECTION_REQUIRED';
   else if (
@@ -794,7 +799,7 @@ export class TossClient {
       checkRequest();
       return result;
     } catch (error) {
-      if (bodyResponse && [401, 403].includes(bodyResponse.status) && !this.signal.aborted) {
+      if (bodyResponse && accessFailureCode(bodyResponse.status) && !this.signal.aborted) {
         controller.abort();
         return { response: bodyResponse, body: undefined };
       }
@@ -829,7 +834,7 @@ export class TossClient {
               if (
                 !(error instanceof TossError) ||
                 error.code !== 'TIMEOUT' ||
-                ![401, 403].includes(response.status)
+                !accessFailureCode(response.status)
               )
                 throw error;
             });
