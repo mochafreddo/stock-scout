@@ -261,11 +261,24 @@ test('Toss CLI excludes every duplicate price and preserves omission order (char
   );
 });
 
+test('missing and unknown commands report input errors without a provider endpoint', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  for (const args of [[], ['prcies', 'AAPL']]) {
+    const r = await runCli(f, [], args);
+    assert.equal(r.status, 1, r.stdout);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.error.code, 'INPUT_INVALID');
+    assert.equal(Object.hasOwn(out.source, 'endpoint'), false);
+    assert.equal(r.stderr, 'INPUT_INVALID\n');
+    assert.equal(r.requests.length, 0);
+  }
+});
+
 test('Toss CLI rejects invalid arguments before authentication and advertises commands as JSON', async () => {
   const f = fixture();
   try {
     for (const args of [
-      [],
       ['prices'],
       ['prices', 'AAPL,,MSFT'],
       ['prices', 'AAPL/A'],

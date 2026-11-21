@@ -464,6 +464,59 @@ test('actual CLI mixed-currency stdout retains bars and volume in the executable
   }
 });
 
+test('actual CLI and candle consumer retain valid bars beside negative prices or volume', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const valid = {
+    timestamp: '2026-11-05T05:00:00Z',
+    openPrice: '10',
+    highPrice: '11',
+    lowPrice: '9',
+    closePrice: '10.00',
+    volume: '0',
+    currency: 'USD',
+  };
+  const invalid = ['openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume'].map((field) => ({
+    ...valid,
+    timestamp: '2026-11-04T05:00:00Z',
+    [field]: '-0.01',
+  }));
+  const page = (candles) => ({
+    path: '/api/v1/candles',
+    body: { result: { candles, nextBefore: null } },
+  });
+  for (const args of [
+    ['candles', 'DEMO', '1d'],
+    ['candles-batch', 'DEMO'],
+  ]) {
+    const result = await runCli(f, [page([valid, ...invalid])], args);
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    const consumed = consume(result);
+    assert.equal(consumed.status, 0, consumed.stderr);
+    const output = JSON.parse(consumed.stdout);
+    assert.equal(output.status, 'partial');
+    assert.deepEqual(output.data[0].bars, [
+      {
+        timestamp: valid.timestamp,
+        tradeDate: null,
+        closePrice: '10.00',
+        volume: '0',
+        currency: 'USD',
+      },
+    ]);
+    assert.deepEqual(output.data[0].omissions, [
+      { index: 1, reason: 'invalid_item' },
+      { index: 2, reason: 'invalid_item' },
+      { index: 3, reason: 'invalid_item' },
+      { index: 4, reason: 'invalid_item' },
+      { index: 5, reason: 'invalid_item' },
+    ]);
+  }
+  const failed = await runCli(f, [page(invalid)], ['candles', 'DEMO', '1d']);
+  assert.equal(failed.status, 1, failed.stdout);
+  assert.equal(JSON.parse(failed.stdout).error.code, 'RESPONSE_INVALID');
+});
+
 test('consumer preserves early daily input errors without candle source metadata', async (t) => {
   const f = fixture();
   t.after(f.close);

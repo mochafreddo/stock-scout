@@ -57,7 +57,7 @@ const endpoints: Record<string, string> = {
   orders: '/api/v1/orders',
   'conditional-orders': '/api/v1/conditional-orders',
 };
-const endpoint = Object.hasOwn(endpoints, command) ? endpoints[command] : endpoints.prices;
+const endpoint = Object.hasOwn(endpoints, command) ? endpoints[command] : undefined;
 const source = {
   provider: 'tossinvest',
   endpoint,
@@ -198,7 +198,12 @@ try {
       const request = accountQuery(command, symbols, rest);
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
       return client.queryAccount(
-        { scope: command, endpoint, query: request.query, context: request.context },
+        {
+          scope: command,
+          endpoint: endpoints[command],
+          query: request.query,
+          context: request.context,
+        },
         request.parse,
         (alias) =>
           Object.assign(source, {

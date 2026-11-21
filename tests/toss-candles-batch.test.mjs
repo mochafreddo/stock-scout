@@ -81,10 +81,10 @@ test('batch summarizes only returned valid candles without adding market or page
 
 test('batch derives the latest returned trade date from confirmed New York evidence across DST', async (t) => {
   for (const [date, timestamp, tradeDate] of [
-    ['2026-03-09', '2026-03-08T04:30:00Z', '2026-03-07'],
-    ['2026-03-10', '2026-03-09T03:30:00Z', '2026-03-08'],
-    ['2026-11-02', '2026-11-01T03:30:00Z', '2026-10-31'],
-    ['2026-11-03', '2026-11-02T04:30:00Z', '2026-11-01'],
+    ['2026-03-09', '2026-03-08T05:00:00Z', '2026-03-08'],
+    ['2026-03-10', '2026-03-09T04:00:00.000000Z', '2026-03-09'],
+    ['2026-11-02', '2026-11-01T04:00:00Z', '2026-11-01'],
+    ['2026-11-03', '2026-11-02T00:00:00-05:00', '2026-11-02'],
     ['2026-11-06', '2026-11-05T14:00:00+09:00', '2026-11-05'],
   ]) {
     const f = fixture();
@@ -107,6 +107,37 @@ test('batch derives the latest returned trade date from confirmed New York evide
       ['/oauth2/token', '/api/v1/stocks', '/api/v1/candles'],
     );
   }
+});
+
+test('date-selected candles omit non-midnight US bars before deriving the latest trade date', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const nonMidnight = { ...candle, timestamp: '2026-11-05T23:30:00-05:00' };
+  const fractionalMidnight = { ...candle, timestamp: '2026-11-05T05:00:00.000000001Z' };
+  const steps = [identity('AAPL'), page([nonMidnight, fractionalMidnight, candle])];
+  const expectedOmissions = [
+    { index: 0, reason: 'invalid_item' },
+    { index: 1, reason: 'invalid_item' },
+  ];
+
+  const single = await runCli(f, steps, ['candles', 'AAPL', '1d', 'date=2026-11-06']);
+  assert.equal(single.status, 2, single.stdout);
+  assert.deepEqual(JSON.parse(single.stdout).omissions, expectedOmissions);
+  assert.deepEqual(
+    JSON.parse(single.stdout).data.map(({ timestamp }) => timestamp),
+    [candle.timestamp],
+  );
+
+  const batch = await runCli(f, steps, ['candles-batch', 'AAPL', 'date=2026-11-06']);
+  assert.equal(batch.status, 2, batch.stdout);
+  const [row] = JSON.parse(batch.stdout).data;
+  assert.deepEqual(row.omissions, expectedOmissions);
+  assert.deepEqual(row.summary, {
+    returnedCount: 1,
+    latestTimestamp: candle.timestamp,
+    latestTradeDate: '2026-11-05',
+    tradeDateUnavailableReason: null,
+  });
 });
 
 test('batch distinguishes empty pages from failed and unqueried summaries', async (t) => {
@@ -831,7 +862,7 @@ test('batch preserves an oversized HTTP permission failure and stops later reque
   assert.doesNotMatch(r.stdout + r.stderr, /expired-token|synthetic-(secret|token|client)/);
 });
 
-test('batch preserves HTTP access failures when error bodies cannot be trusted or received', async (t) => {
+test('batch preserves HTTP access failures when headers or error bodies are invalid', async (t) => {
   for (const path of ['/api/v1/stocks', '/api/v1/candles']) {
     for (const [status, code] of [
       [401, 'AUTH_FAILED'],
@@ -842,6 +873,13 @@ test('batch preserves HTTP access failures when error bodies cannot be trusted o
         ['malformed JSON', { rawBody: '{"error":{"code":"expired-token"},"synthetic-secret":' }],
         ['missing token code', { rawBody: '{"error":{"message":"synthetic-secret"}}' }],
         ['invalid UTF-8', { responseChunks: ['{"error":{"code":"expired-token"}}', [255]] }],
+        [
+          'oversized rate header',
+          {
+            headers: { 'X-Request-Id': 'SAFE_ACCESS', 'Retry-After': '9'.repeat(400) },
+            body: { error: { code: 'expired-token' } },
+          },
+        ],
         ['failed stream', { bodyFailure: true }],
         ['body timeout', { bodyHang: true }],
       ]) {

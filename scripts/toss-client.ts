@@ -704,7 +704,7 @@ export class TossClient {
       rejectDeadline(new TossError(this.signal.aborted ? 'INTERRUPTED' : 'TIMEOUT'));
     signal.addEventListener('abort', abort, { once: true });
     let flight: Promise<Response> | undefined;
-    let bodyResponse: Response | undefined;
+    let receivedResponse: Response | undefined;
     let requestWall = 0,
       requestStarted = 0,
       requestLimit = 0;
@@ -754,6 +754,7 @@ export class TossClient {
         (async () => {
           const response = await flight;
           if (!response) throw new TossError('NETWORK_ERROR');
+          receivedResponse = response;
           const seconds = Math.max(
             0,
             ...['Retry-After', 'X-RateLimit-Reset'].map((name) => {
@@ -764,7 +765,6 @@ export class TossClient {
           if (!Number.isSafeInteger(Math.ceil(seconds * 1000)))
             throw new TossError('RESPONSE_INVALID');
           if (seconds) this.coordination.publishCooldown(Math.ceil(seconds * 1000));
-          bodyResponse = response;
           checkRequest();
           const reader = response.body?.getReader();
           const chunks: Uint8Array[] = [];
@@ -799,9 +799,14 @@ export class TossClient {
       checkRequest();
       return result;
     } catch (error) {
-      if (bodyResponse && accessFailureCode(bodyResponse.status) && !this.signal.aborted) {
+      if (
+        receivedResponse &&
+        accessFailureCode(receivedResponse.status) &&
+        !this.signal.aborted &&
+        !(error instanceof TossError && error.code === 'AUTH_STORAGE')
+      ) {
         controller.abort();
-        return { response: bodyResponse, body: undefined };
+        return { response: receivedResponse, body: undefined };
       }
       if (error instanceof TossError && TERMINAL_ERRORS.includes(error.code)) this.stopped = error;
       try {

@@ -7,6 +7,13 @@ const newYorkOffset = new Intl.DateTimeFormat('en', {
   timeZone: 'America/New_York',
   timeZoneName: 'longOffset',
 });
+const newYorkTime = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'America/New_York',
+  hourCycle: 'h23',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
 const tradeDateFormat = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/New_York',
   year: 'numeric',
@@ -187,7 +194,15 @@ export async function queryCandlePage(client: TossClient, request: ReturnType<ty
   };
 }
 
-export function candleResult(value: unknown, { query }: ReturnType<typeof candleQuery>) {
+function isNewYorkMidnight(timestamp: string) {
+  return newYorkTime.format(new Date(timestamp)) === '00:00:00' && !/\.\d*[1-9]/.test(timestamp);
+}
+
+function nonnegativeDecimal(value: unknown): value is string {
+  return decimal(value) && Number(value) >= 0;
+}
+
+export function candleResult(value: unknown, { query, date }: ReturnType<typeof candleQuery>) {
   const count = Number(query.get('count'));
   if (!record(value) || !Array.isArray(value.candles) || value.candles.length > count)
     throw new TossError('RESPONSE_INVALID');
@@ -196,11 +211,12 @@ export function candleResult(value: unknown, { query }: ReturnType<typeof candle
       !record(row) ||
       typeof row.timestamp !== 'string' ||
       !validTime(row.timestamp) ||
-      !decimal(row.openPrice) ||
-      !decimal(row.highPrice) ||
-      !decimal(row.lowPrice) ||
-      !decimal(row.closePrice) ||
-      !decimal(row.volume) ||
+      (date !== null && !isNewYorkMidnight(row.timestamp)) ||
+      !nonnegativeDecimal(row.openPrice) ||
+      !nonnegativeDecimal(row.highPrice) ||
+      !nonnegativeDecimal(row.lowPrice) ||
+      !nonnegativeDecimal(row.closePrice) ||
+      !nonnegativeDecimal(row.volume) ||
       typeof row.currency !== 'string' ||
       !row.currency.trim()
     )
