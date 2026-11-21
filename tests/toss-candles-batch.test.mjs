@@ -876,7 +876,7 @@ test('batch preserves HTTP access failures when headers or error bodies are inva
         [
           'oversized rate header',
           {
-            headers: { 'X-Request-Id': 'SAFE_ACCESS', 'Retry-After': '9'.repeat(400) },
+            headers: { 'Retry-After': '9'.repeat(400) },
             body: { error: { code: 'expired-token' } },
           },
         ],
@@ -886,7 +886,12 @@ test('batch preserves HTTP access failures when headers or error bodies are inva
         await t.test(`${path} ${status} ${name}`, async () => {
           const steps = [identity('FIRST'), page([])];
           if (path === '/api/v1/candles') steps.push(identity('BLOCKED'));
-          steps.push({ path, status, headers: { 'X-Request-Id': 'SAFE_ACCESS' }, ...failure });
+          steps.push({
+            path,
+            status,
+            ...failure,
+            headers: { 'X-Request-Id': 'SAFE_ACCESS', ...failure.headers },
+          });
           const r = await runFreshCli(steps, [
             'candles-batch',
             'FIRST,BLOCKED,LATER',
