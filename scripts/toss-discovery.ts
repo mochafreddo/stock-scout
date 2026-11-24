@@ -2,6 +2,14 @@ import { TossError } from './toss-client.ts';
 import { isinPattern, securityTypes } from './toss-stock.ts';
 import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
 
+export const rankingTypes = [
+  'MARKET_TRADING_AMOUNT',
+  'MARKET_TRADING_VOLUME',
+  'TOP_GAINERS',
+  'TOP_LOSERS',
+];
+export const rankingDurations = ['realtime', '1d', '1w', '1mo', '3mo', '6mo', '1y'];
+
 export function discoveryQuery(
   command: 'rankings' | 'tradable',
   target: string | undefined,
@@ -28,10 +36,8 @@ function rankingQuery(type: string | undefined, args: string[]) {
   const [duration, count = '20'] = args;
   if (
     !type ||
-    !['MARKET_TRADING_AMOUNT', 'MARKET_TRADING_VOLUME', 'TOP_GAINERS', 'TOP_LOSERS'].includes(
-      type,
-    ) ||
-    !['realtime', '1d', '1w', '1mo', '3mo', '6mo', '1y'].includes(duration) ||
+    !rankingTypes.includes(type) ||
+    !rankingDurations.includes(duration) ||
     (type.startsWith('TOP_') && duration === 'realtime') ||
     !/^(?:[1-9]\d?|100)$/.test(count) ||
     args.length > 2

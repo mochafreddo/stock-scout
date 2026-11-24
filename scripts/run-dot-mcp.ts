@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync } from 'node:fs';
+import { lstatSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { createDotServer } from './dot-mcp.ts';
 import { DotWindow } from './dot-mcp-window.ts';
@@ -31,6 +31,11 @@ export async function runScheduledDot(options: Options) {
     return;
   }
   mkdirSync(options.state, { recursive: true, mode: 0o700 });
+  const state = lstatSync(options.state);
+  if (!state.isDirectory() || state.uid !== process.getuid?.() || (state.mode & 0o077) !== 0) {
+    report('error', 'SESSION_STORAGE_UNSAFE');
+    return;
+  }
   try {
     mkdirSync(join(options.state, session), { mode: 0o700 });
   } catch (error) {

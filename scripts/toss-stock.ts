@@ -14,7 +14,7 @@ export const securityTypes = new Set([
 ]);
 export const isinPattern = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
 export const usMarkets = new Set(['NYSE', 'NASDAQ', 'AMEX', 'US_ETC']);
-const marketPattern = /^[A-Z][A-Z0-9_]*$/;
+export const marketPattern = /^[A-Z][A-Z0-9_]*$/;
 type StockChoice = { symbol: string; name: string | null; market: string; isinCode: string | null };
 export class AmbiguousStock extends TossError {
   readonly choices: StockChoice[];

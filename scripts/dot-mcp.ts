@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { isAbsolute } from 'node:path';
 import { marketArgs, marketTools } from './dot-mcp-tools.ts';
 import type { DotWindow } from './dot-mcp-window.ts';
 import { record } from './toss-values.ts';
@@ -47,35 +46,39 @@ function toolResult(payload: object, isError: boolean) {
   };
 }
 
-function rejected(window: DotWindow | undefined, code: string) {
-  window?.report('rejected', code);
+function rejected(window: DotWindow, code: string) {
+  window.report('rejected', code);
   return toolResult({ stage: 'admission', error: { code } }, true);
 }
 
-async function query(launcher: string, args: string[], window?: DotWindow) {
+async function query(launcher: string, args: string[], window: DotWindow) {
   let stage = 'readiness';
   try {
-    const beforeReadiness = window?.rejection();
+    const beforeReadiness = window.rejection();
     if (beforeReadiness) return rejected(window, beforeReadiness);
     const ready = await execute(launcher, ['readiness']);
     const rows = ready.response.data;
     if (ready.exitCode !== 0) {
-      window?.report('ready_blocked', 'READINESS_BLOCKED');
+      const readiness = Array.isArray(rows) && rows[0]?.readiness;
+      window.report(
+        'ready_blocked',
+        readiness === 'unavailable' ? 'READINESS_UNAVAILABLE' : 'READINESS_BLOCKED',
+      );
       return toolResult({ stage, ...ready }, true);
     }
     if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.readiness !== 'ready')
       throw new Error('Invalid readiness result');
     stage = 'query';
-    const beforeStart = window?.rejection();
+    const beforeStart = window.rejection();
     if (beforeStart) return rejected(window, beforeStart);
-    const output = await execute(launcher, args, window?.started);
-    window?.report(
+    const output = await execute(launcher, args, window.started);
+    window.report(
       ['success', 'query_error', 'partial'][output.exitCode],
       output.exitCode === 1 ? 'QUERY_ERROR' : undefined,
     );
     return toolResult({ stage, ...output }, output.exitCode === 1);
   } catch {
-    window?.report('result_unavailable', 'CLI_RESULT_UNAVAILABLE');
+    window.report('result_unavailable', 'CLI_RESULT_UNAVAILABLE');
     return toolResult({ stage, error: { code: 'CLI_RESULT_UNAVAILABLE' } }, true);
   }
 }
@@ -153,27 +156,8 @@ async function handle(
   }
 }
 
-export function createDotServer(launcher: string, window?: DotWindow) {
+export function createDotServer(launcher: string, window: DotWindow) {
   return createServer({ requestTimeout: 10000 }, (req, res) =>
-    handle(req, res, (args) =>
-      window ? window.run(() => query(launcher, args, window)) : query(launcher, args),
-    ),
+    handle(req, res, (args) => window.run(() => query(launcher, args, window))),
   );
-}
-
-if (import.meta.main) {
-  const [launcher, port] = process.argv.slice(2);
-  if (
-    process.argv.length !== 4 ||
-    !isAbsolute(launcher) ||
-    !/^\d+$/.test(port) ||
-    Number(port) > 65535
-  )
-    throw new Error('Expected an absolute approved launcher path and local port');
-
-  const server = createDotServer(launcher);
-  server.listen(Number(port), '127.0.0.1', () => {
-    const address = server.address();
-    if (address && typeof address === 'object') console.log(`http://127.0.0.1:${address.port}/mcp`);
-  });
 }

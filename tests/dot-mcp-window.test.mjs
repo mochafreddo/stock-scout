@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -37,6 +38,22 @@ test('a Mac waking after the KST close skips the tunnel and records only safe me
       code: 'WINDOW_CLOSED',
     },
   ]);
+});
+
+test('a shared claim directory cannot start the scheduled tunnel', async (t) => {
+  const { options, logs } = fixture(t);
+  chmodSync(options.state, 0o770);
+  assert.equal(await runScheduledDot({ ...options, tunnel: '/missing' }), undefined);
+  assert.equal(existsSync(join(options.state, '2026-11-24')), false);
+  assert.equal(logs.at(-1).code, 'SESSION_STORAGE_UNSAFE');
+});
+
+test('the adapter module does not open an unscheduled server when run directly', () => {
+  const output = execFileSync(process.execPath, ['scripts/dot-mcp.ts', '/unused', '0'], {
+    encoding: 'utf8',
+    timeout: 1500,
+  });
+  assert.equal(output, '');
 });
 
 function fixture(t) {

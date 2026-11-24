@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { startScheduledTestServer } from './dot-mcp-helper.mjs';
 import { authState, fixture, readRequests } from './toss-cli-helper.mjs';
 
 async function marketServer(t) {
@@ -22,32 +20,18 @@ async function marketServer(t) {
     { mode: 0o700 },
   );
   writeFileSync(join(f.directory, 'state.json'), JSON.stringify(authState()), { mode: 0o600 });
-  const child = spawn(process.execPath, ['scripts/dot-mcp.ts', launcher, '0'], {
-    env: {
-      PATH: process.env.PATH,
-      TEST_NODE: process.execPath,
-      TEST_MOCK: new URL('./toss-http-mock.mjs', import.meta.url).href,
-      TEST_CLI: fileURLToPath(new URL('../scripts/toss.ts', import.meta.url)),
-      TEST_PLATFORM: 'darwin',
-      TOSS_STATE_DIR: f.directory,
-      TEST_TRACE: f.trace,
-      TEST_CLI_TRACE: f.cliTrace,
-      TEST_STEP_FILE: steps,
-      TEST_CLOCK_FILE: clock,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const url = await startScheduledTestServer(t, dir, launcher, {
+    PATH: process.env.PATH,
+    TEST_NODE: process.execPath,
+    TEST_MOCK: new URL('./toss-http-mock.mjs', import.meta.url).href,
+    TEST_CLI: fileURLToPath(new URL('../scripts/toss.ts', import.meta.url)),
+    TEST_PLATFORM: 'darwin',
+    TOSS_STATE_DIR: f.directory,
+    TEST_TRACE: f.trace,
+    TEST_CLI_TRACE: f.cliTrace,
+    TEST_STEP_FILE: steps,
+    TEST_CLOCK_FILE: clock,
   });
-  const closed = once(child, 'close');
-  t.after(async () => {
-    child.kill();
-    await closed;
-  });
-  const [url] = await Promise.race([
-    once(createInterface({ input: child.stdout }), 'line'),
-    closed.then(([code]) => {
-      throw Error(`server exited ${code}`);
-    }),
-  ]);
   const call = async (name, args, mocks = []) => {
     now += 5000;
     writeFileSync(clock, String(now), { mode: 0o600 });

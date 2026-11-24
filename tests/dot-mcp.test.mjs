@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { startScheduledTestServer } from './dot-mcp-helper.mjs';
 import { authState, fixture, readRequests } from './toss-cli-helper.mjs';
 
 async function start(t, { steps = [], state = authState() } = {}) {
@@ -17,32 +15,17 @@ async function start(t, { steps = [], state = authState() } = {}) {
     mode: 0o700,
   });
   writeFileSync(join(f.directory, 'state.json'), JSON.stringify(state), { mode: 0o600 });
-  const child = spawn(process.execPath, ['scripts/dot-mcp.ts', launcher, '0'], {
-    env: {
-      PATH: process.env.PATH,
-      TEST_NODE: process.execPath,
-      TEST_MOCK: new URL('./toss-http-mock.mjs', import.meta.url).href,
-      TEST_CLI: fileURLToPath(new URL('../scripts/toss.ts', import.meta.url)),
-      TEST_PLATFORM: 'darwin',
-      TOSS_STATE_DIR: f.directory,
-      TEST_TRACE: f.trace,
-      TEST_CLI_TRACE: f.cliTrace,
-      TEST_STEPS: JSON.stringify(steps),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const url = await startScheduledTestServer(t, dirname(launcher), launcher, {
+    PATH: process.env.PATH,
+    TEST_NODE: process.execPath,
+    TEST_MOCK: new URL('./toss-http-mock.mjs', import.meta.url).href,
+    TEST_CLI: fileURLToPath(new URL('../scripts/toss.ts', import.meta.url)),
+    TEST_PLATFORM: 'darwin',
+    TOSS_STATE_DIR: f.directory,
+    TEST_TRACE: f.trace,
+    TEST_CLI_TRACE: f.cliTrace,
+    TEST_STEPS: JSON.stringify(steps),
   });
-  const closed = once(child, 'close');
-  t.after(async () => {
-    child.kill();
-    await closed;
-  });
-  const lines = createInterface({ input: child.stdout });
-  const [url] = await Promise.race([
-    once(lines, 'line'),
-    closed.then(([code]) => {
-      throw Error(`server exited ${code}`);
-    }),
-  ]);
   const post = (rpc, headers) =>
     new Promise((resolve, reject) => {
       const req = request(

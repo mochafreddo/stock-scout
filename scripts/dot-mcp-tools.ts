@@ -1,17 +1,10 @@
+import { rankingDurations, rankingTypes } from './toss-discovery.ts';
 import { validDate } from './toss-sessions.ts';
-import { isinPattern } from './toss-stock.ts';
+import { isinPattern, marketPattern } from './toss-stock.ts';
 import { record, symbolPattern, validTime } from './toss-values.ts';
 
 const symbol = { type: 'string', pattern: symbolPattern.source, not: { pattern: '^-' } };
 const date = { type: 'string', format: 'date' };
-const marketPattern = /^[A-Z][A-Z0-9_]*$/;
-const rankingTypes = [
-  'MARKET_TRADING_AMOUNT',
-  'MARKET_TRADING_VOLUME',
-  'TOP_GAINERS',
-  'TOP_LOSERS',
-];
-const durations = ['realtime', '1d', '1w', '1mo', '3mo', '6mo', '1y'];
 const integer = (minimum: number, maximum: number) => ({ type: 'integer', minimum, maximum });
 
 function tool(
@@ -50,7 +43,7 @@ export const marketTools = [
     'Query US market rankings by type and duration.',
     {
       type: { type: 'string', enum: rankingTypes },
-      duration: { type: 'string', enum: durations },
+      duration: { type: 'string', enum: rankingDurations },
       count: integer(1, 100),
     },
     ['type', 'duration'],
@@ -135,7 +128,7 @@ export function marketArgs(params: unknown): string[] | undefined {
         typeof type !== 'string' ||
         !rankingTypes.includes(type) ||
         typeof duration !== 'string' ||
-        !durations.includes(duration) ||
+        !rankingDurations.includes(duration) ||
         (type.startsWith('TOP_') && duration === 'realtime') ||
         (count !== undefined && !inRange(count, 1, 100))
       )
