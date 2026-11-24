@@ -10,6 +10,7 @@
 - [0021 훅은 스냅샷의 lockfile로 개발 의존성을 준비한다](0021-pnpm-snapshot-dependencies.md)
 - [0022 주문 초안은 호출자가 제공한 일정으로 오프라인에서 검증한다](0022-offline-order-draft-validation.md): 합의한 설계이며 구현 완료를 뜻하지 않는다.
 - [0023 주문 검토 카드에 선택한 상장 종목을 보존한다](0023-order-draft-listing-identity.md)
+- [0024 예약 Dot은 비공개 MCP로 시장 자료를 조회한다](0024-private-mcp-for-scheduled-dot.md): 합의한 설계이며 운영 검증은 별도로 진행한다.
 
 현재 실행 흐름은 [구조 설명](../architecture.md), 인수·JSON 계약은 [CLI 레퍼런스](../toss-cli.md)를 따른다. 이 색인은 결정의 적용 관계를 안내하며 실행 계약을 별도로 유지하지 않는다.
 
