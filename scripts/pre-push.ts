@@ -15,7 +15,6 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const checkerPath = 'scripts/pre-push.ts';
 
@@ -312,7 +311,7 @@ function qualityChecks(root: string, source: string, staged = false) {
 }
 
 function hookWrapper(name: 'pre-commit' | 'pre-push') {
-  const checker = readFileSync(fileURLToPath(import.meta.url)).toString('base64');
+  const checker = readFileSync(import.meta.filename, 'base64');
   return `#!/bin/sh
 # Stock Scout snapshot checker (pinned at installation)
 set -eu
@@ -469,7 +468,7 @@ function main() {
   }
 
   const source = git(['rev-parse', '--show-toplevel']).toString().trim();
-  const checker = installed ? readFileSync(fileURLToPath(import.meta.url)) : undefined;
+  const checker = installed ? readFileSync(import.meta.filename) : undefined;
   if (stagedCommand) {
     checkSnapshot(source, { mode: 'staged' }, checker);
     return;
