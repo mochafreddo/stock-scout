@@ -58,7 +58,14 @@ test('the adapter module does not open an unscheduled server when run directly',
 
 function fixture(t) {
   const state = mkdtempSync(join(tmpdir(), 'dot-window-'));
-  t.after(() => rmSync(state, { recursive: true, force: true }));
+  let stop;
+  t.after(async () => {
+    try {
+      await stop?.();
+    } finally {
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
   const tunnel = join(state, 'tunnel');
   const launcher = join(state, 'launcher');
   const trace = join(state, 'trace');
@@ -91,7 +98,12 @@ esac
     port: 0,
     log: (e) => logs.push(e),
   };
-  return { options, logs, trace };
+  const start = async () => {
+    const run = await runScheduledDot(options);
+    stop = run?.stop;
+    return run;
+  };
+  return { options, logs, trace, start };
 }
 
 async function price(url) {
@@ -124,9 +136,8 @@ async function openedTunnel(trace) {
 }
 
 test('the scheduled connection serves prices and a failed tunnel cannot restart the same session', async (t) => {
-  const { options, logs, trace } = fixture(t);
-  const run = await runScheduledDot(options);
-  t.after(() => run.stop());
+  const { options, logs, trace, start } = fixture(t);
+  const run = await start();
   assert.equal((await price(run.url)).response.data[0].symbol, 'DEMO');
   assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), ['readiness', 'prices DEMO']);
   await run.stop();
@@ -145,9 +156,8 @@ test('the scheduled connection serves prices and a failed tunnel cannot restart 
 });
 
 test('the session charges every started lookup including partial and failed results, and excludes blocked readiness', async (t) => {
-  const { options, logs, trace } = fixture(t);
-  const run = await runScheduledDot(options);
-  t.after(() => run.stop());
+  const { options, logs, trace, start } = fixture(t);
+  const run = await start();
   const program = readFileSync(options.launcher, 'utf8');
   const response = (status, exit) =>
     `echo '{"version":1,"data":[],"status":"${status}"}'; exit ${exit}`;
@@ -195,18 +205,17 @@ test('the session charges every started lookup including partial and failed resu
 });
 
 test('a readiness check crossing the deadline cannot start prices', async (t) => {
-  const { options, trace } = fixture(t);
+  const { options, trace, start } = fixture(t);
   options.now = () =>
     Date.parse(existsSync(trace) ? '2026-11-24T12:20:00Z' : '2026-11-24T12:19:59Z');
-  const run = await runScheduledDot(options);
-  t.after(() => run.stop());
+  const run = await start();
   assert.equal((await price(run.url)).error?.code, 'WINDOW_CLOSED');
   assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), ['readiness']);
 });
 
 test('at close the tunnel drains a started price response and turns away the waiting request', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
-  const { options, trace } = fixture(t);
+  const { options, trace, start } = fixture(t);
   const entered = Promise.withResolvers();
   const release = Promise.withResolvers();
   const control = createServer(async (_req, res) => {
@@ -233,8 +242,7 @@ test('at close the tunnel drains a started price response and turns away the wai
   };
   let time = Date.parse('2026-11-24T12:19:59Z');
   options.now = () => time;
-  const run = await runScheduledDot(options);
-  t.after(() => run.stop());
+  const run = await start();
   const tunnel = await openedTunnel(trace);
   assert.equal(tunnel.url, run.url);
   const active = price(tunnel.url);
@@ -275,11 +283,10 @@ test('failure to spawn the tunnel keeps the claim and records only a startup fai
 
 test('a silent connection closes the foreground tunnel at the deadline after sleep', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
-  const { options, trace, logs } = fixture(t);
+  const { options, trace, logs, start } = fixture(t);
   let time = Date.parse('2026-11-24T12:00:00Z');
   options.now = () => time;
-  const run = await runScheduledDot(options);
-  t.after(() => run.stop());
+  const run = await start();
   const tunnel = await openedTunnel(trace);
   assert.equal(tunnel.url, run.url);
   process.kill(tunnel.pid, 0);
