@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.stock-scout.dot</string>
+  <!-- The local wrapper must exec Node with scripts/run-dot-mcp.ts followed by
+       the absolute approved CLI launcher, absolute foreground tunnel wrapper,
+       absolute persistent owner-only claim directory, and loopback port.
+       The tunnel wrapper receives the local MCP URL as its sole argument.
+       Keep tunnel configuration and credentials on the Mac. -->
+  <key>ProgramArguments</key>
+  <array><string>/absolute/machine-local/path/to/run-stock-scout-dot</string></array>
+  <!-- launchd interprets this in the Mac's local timezone. This example assumes Asia/Seoul. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>20</integer>
+    <key>Minute</key><integer>55</integer>
+  </dict>
+  <key>ExitTimeOut</key><integer>90</integer>
+</dict>
+</plist>
