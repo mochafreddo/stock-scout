@@ -22,8 +22,7 @@ import { fileURLToPath } from 'node:url';
 const cli = fileURLToPath(new URL('../scripts/pre-push.ts', import.meta.url));
 
 const fixtureGitConfig = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
-// The hook builds a fresh environment for package scripts.
-const fixtureGitCommand = `${Object.entries(fixtureGitConfig)
+const gitForFixturePackageScript = `${Object.entries(fixtureGitConfig)
   .map(([name, value]) => `${name}=${value}`)
   .join(' ')} git`;
 
@@ -418,7 +417,7 @@ test('pre-commit checks the staged document and preserves an unstaged repair', (
 test('pre-commit refuses a changed active index after quality checks', (t) => {
   const { root, base } = fixture(t);
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  manifest.scripts.check = `${fixtureGitCommand} -C "${root}" add README.md`;
+  manifest.scripts.check = `${gitForFixturePackageScript} -C "${root}" add README.md`;
   writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
   git(root, 'add', 'package.json');
   writeFileSync(join(root, 'README.md'), '# Added during checks\n');
@@ -551,7 +550,7 @@ test('pre-commit rechecks an explicit alternate index after quality commands mut
   const alternate = join(root, 'alternate-index');
   copyFileSync(join(root, '.git/index'), alternate);
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  manifest.scripts.check = `GIT_INDEX_FILE="${alternate}" ${fixtureGitCommand} -C "${root}" add README.md`;
+  manifest.scripts.check = `GIT_INDEX_FILE="${alternate}" ${gitForFixturePackageScript} -C "${root}" add README.md`;
   writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
   const env = { GIT_INDEX_FILE: alternate };
   const added = fixtureProcess('git', ['add', 'package.json'], { cwd: root, env });
