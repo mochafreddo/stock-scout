@@ -237,7 +237,7 @@ node scripts/toss.ts buying-power KRW
 | --- | --- |
 | `holdings [SYMBOL]` | `GET /api/v1/holdings`의 국내(KR)·미국(US) 주식이며 해외 옵션·채권은 제외합니다. 심볼을 생략하면 전체 보유, 지정하면 해당 종목과 그 종목 기준 요약입니다. `data[0].items`에 종목·이름·시장 국가·통화·수량·현재가·평균매수가·평가금액·손익·일간 손익·비용을 반환합니다. |
 | 보유 요약 | `totalPurchaseAmount`, `marketValue`, `profitLoss`, `dailyProfitLoss`를 공급자 값 그대로 반환합니다. `krw`는 KRW 종목의 합, `usd`는 USD 종목의 합입니다. 통화 간 합산이나 환산을 하지 않습니다. 공급자의 전체 손익률은 현재 환율로 원화 환산한 비율이며 CLI가 계산한 값이 아닙니다. |
-| 소수·선택 필드 | 금액·가격·수량·비율은 최대 30자 소수 문자열로 보존합니다. 필수 값의 null·누락·숫자형은 거부합니다. 요약의 `usd`와 종목 비용의 `tax`는 선택 필드이며 생략·null·소수 문자열을 구분합니다. `"0"`을 빈 값으로 취급하지 않습니다. 손익률은 소수 비율입니다. |
+| 소수·선택 필드 | 금액·가격·수량·비율은 최대 30자 소수 문자열로 보존합니다. 필수 값의 null·누락·숫자형은 거부합니다. 요약의 `usd`와 종목 비용의 `tax`는 선택 필드이며 생략·null·소수 문자열을 구분합니다. `"0"`을 빈 값으로 취급하지 않습니다. 현재가와 평균매수가에 음수가 있으면 항목을 제외합니다. 정상 음수 손익과 손익률은 보존합니다. 손익률은 소수 비율입니다. |
 | `buying-power CURRENCY` | `GET /api/v1/buying-power?currency=...`의 `currency`·`cashBuyingPower`를 반환합니다. 미수거래를 제외한 현금 기반 매수 가능 금액이며 총 현금·출금 가능 금액이 아닙니다. KRW는 원, USD는 달러 단위입니다. 통화를 합산하지 않습니다. 요청은 대문자 세 자리 코드이며 확장 코드는 공급자가 지원 여부를 판단합니다. 응답 통화는 요청과 일치해야 합니다. |
 
 두 조회 모두 전체 반환 API이며 페이지·커서·개수 인수가 없습니다. 계좌나 심볼을 바꿀 때도 새 조회로 실행하고 이전 결과를 이어 붙이지 마세요. 정상 빈 보유는 `items=[]`와 공급자 요약을 반환합니다. 잘못된 항목은 제외하고 `omissions.index`·`invalid_item`을 남기며 유효 항목이 있으면 부분 결과입니다. 모든 항목이 잘못됐더라도 유효한 요약이 남으면 요약과 항목별 누락 사유를 부분 결과로 반환합니다. 잘못된 요약 필드는 제외하고 `omissions.field`·`invalid_summary`를 남깁니다. `items`가 누락되거나 배열이 아니면 해당 필드를 제외하고 `invalid_items`와 필드 경로를 표시하며 유효한 요약을 보존합니다. 이를 정상 빈 보유로 해석하지 마세요. 요약과 항목 모두 사용할 수 없으면 오류입니다. 사용 가능한 요약도 전체 조회 범위를 나타내므로 일부 항목이 제외된 경우 남은 항목의 합으로 해석하지 마세요.
@@ -313,7 +313,7 @@ node scripts/toss.ts orders CLOSED cursor=PROVIDER_CURSOR context=PREVIOUS_PAGE_
 | 응답 필드 | 필수·nullable·의미 |
 | --- | --- |
 | 일반 주문 | `orderId`, `symbol`, `side`, `orderType`, `timeInForce`, `status`, `quantity`, `currency`, `orderedAt`, `execution`이 필수입니다. `price`·`orderAmount`·`canceledAt`은 선택 nullable입니다. `orderedAt`은 주문 생성 시각, `canceledAt`은 취소 시각입니다. `orderType`·`timeInForce`를 함께 해석하세요. |
-| 일반 `execution` | `filledQuantity`가 필수 소수 문자열이고 `averageFilledPrice`·`filledAmount`·`commission`·`tax`·`filledAt`·`settlementDate`는 모두 필수 nullable입니다. `filledAt`은 최종 체결 시각, `settlementDate`는 KST 결제 예정일이며 거래내역의 `settled`를 대신하지 않습니다. |
+| 일반 `execution` | `filledQuantity`는 음수가 아닌 필수 소수 문자열이며 `averageFilledPrice`·`filledAmount`·`commission`·`tax`·`filledAt`·`settlementDate`는 모두 필수 nullable입니다. `filledAt`은 최종 체결 시각, `settlementDate`는 KST 결제 예정일이며 거래내역의 `settled`를 대신하지 않습니다. |
 | 조건 주문 | `conditionalOrderId`, `type`, `status`, `symbol`, `market`, `quantity`, `orderType`, `first`, `createdAt`이 필수입니다. `createdAt`은 등록 시각입니다. `expireDate`는 선택 날짜이며 null을 허용하지 않습니다. `second`는 선택 nullable 조건입니다. SINGLE은 첫 조건, OCO·OTO는 두 조건을 제공하며 두 조건의 타입은 같습니다. |
 | 조건 `first`·`second` | 객체가 있으면 `type`·`status`·`orderSide`가 필수입니다. `triggerPrice`·`targetProfitRate`·`orderPrice`·`triggeredOrderId`는 선택 nullable입니다. `targetProfitRate`는 퍼센트 단위이며 `10.5`는 +10.5%입니다. `triggeredOrderId`는 조건으로 생성된 일반 주문 식별자입니다. |
 
@@ -334,7 +334,7 @@ node scripts/toss.ts tradable NASDAQ securityType=ETF
 node scripts/toss.ts tradable NYSE status=ACTIVE commonShare=false
 ```
 
-`rankings TYPE DURATION [COUNT]`는 미국 시장 전체를 집계한 순위를 한 번 조회합니다. 거래량·거래대금은 시장 체결 기준이며, 상승·하락은 기간 등락률 기준입니다. 기간은 `realtime`, `1d`, `1w`, `1mo`, `3mo`, `6mo`, `1y`이고, 상승·하락에는 `realtime`을 쓸 수 없습니다. 개수는 1~100이며 CLI 기본값은 20입니다. 공급자의 순서와 `rank`를 그대로 읽으세요. `source.rankedAt`은 집계 시각이고 `retrievedAt`은 CLI 조회 시각입니다. `price.changeRate`는 소수 비율입니다. 상승·하락에서는 기간 시작 가격, 거래량·거래대금에서는 전일 기준가와 비교합니다.
+`rankings TYPE DURATION [COUNT]`는 미국 시장 전체를 집계한 순위를 한 번 조회합니다. 거래량·거래대금은 시장 체결 기준이며, 상승·하락은 기간 등락률 기준입니다. 기간은 `realtime`, `1d`, `1w`, `1mo`, `3mo`, `6mo`, `1y`이고, 상승·하락에는 `realtime`을 쓸 수 없습니다. 개수는 1~100이며 CLI 기본값은 20입니다. 공급자의 순서와 `rank`를 그대로 읽으세요. `source.rankedAt`은 집계 시각이고 `retrievedAt`은 CLI 조회 시각입니다. `price.changeRate`는 소수 비율입니다. 상승·하락에서는 기간 시작 가격, 거래량·거래대금에서는 전일 기준가와 비교합니다. 가격·기준가·거래량·거래대금에 음수가 있으면 해당 행을 제외합니다. 양의 기준가에서 현재가의 변화 방향과 0이 아닌 등락률의 부호가 반대인 행도 제외합니다. 양의 기준가에서는 가격이 같거나 등락률이 0으로 표시되는 경우와 표시 정밀도에 따른 비율 차이를 허용합니다. 기준가가 0이면 등락률의 null과 생략만 허용합니다.
 
 집계 자료가 없어 순위가 비었으면 정상 빈 결과입니다. 비어 있지 않은 순위에서 공급자가 `rankedAt`을 생략하면 유효한 행의 순서와 원래 순위를 보존하고 `partial`·종료 코드 2와 `ranked_at_missing`을 반환합니다. 요청 개수만큼 유효한 행이 있어도 동일하며, `source.rankedAt`을 조회 시각으로 채우지 않습니다. 예를 들어 20개 요청에 17개를 받으면 종료 코드 2와 `fewer_than_requested`를 반환합니다. 공급자가 시세를 얻지 못해 제외한 종목이 있을 수 있습니다. `invalid_item`은 받은 행의 필수 값이 잘못됐다는 뜻이며, 사용할 수 있는 행이 하나도 남지 않으면 종료 코드 1입니다.
 
@@ -363,7 +363,7 @@ node scripts/toss.ts trades BRK.B 10
 | 체결 `price`·`volume`·`timestamp`·`currency` | 네 필드 모두 필수이며 null·누락은 오류입니다. 가격·체결 수량은 최대 30자 소수 문자열, 체결 시각은 오프셋을 포함한 유효 시각입니다. 공급자 순서를 보존하고 값이 같은 체결도 삭제하지 않습니다. |
 | 통화와 단위 | `currency`는 공식 KRW·USD 및 비어 있지 않은 문자열인 확장 코드를 보존합니다. 가격은 표시 통화의 증권 단위 가격(`source.priceUnit`), `volume`은 증권 수량(`source.volumeUnit`)입니다. 호가 잔량과 개별 체결 수량을 누적 거래량으로 해석하지 마세요. |
 
-소수 문자열 `"0"`은 유효합니다. 가격·수량의 null·누락·숫자 자료형을 0으로 채우지 않습니다. 잘못된 호가 단계가 있으면 `omissions`에 `side`(asks 또는 bids)·0부터 시작하는 `index`·`reason="invalid_item"`을 남깁니다. 체결은 `index`와 같은 사유를 남깁니다. 유효 자료가 남으면 `partial`·종료 코드 2이며, 잘못된 항목만 남으면 `RESPONSE_INVALID`·종료 코드 1입니다. 호가의 필수 배열·통화가 잘못되면 전체 응답 오류입니다. 선택 시각만 잘못됐으면 시각을 제외하고 `omissions`에 `field="timestamp"`·`reason="invalid_timestamp"`를 표시한 부분 결과로 유효 호가를 보존합니다.
+가격·수량에 음수가 있으면 해당 호가 단계나 체결을 제외합니다. `"0"`과 `"-0.00"` 같은 0은 원래 표기대로 반환합니다. 가격·수량의 null·누락·숫자 자료형을 0으로 채우지 않습니다. 잘못된 호가 단계가 있으면 `omissions`에 `side`(asks 또는 bids)·0부터 시작하는 `index`·`reason="invalid_item"`을 남깁니다. 체결은 `index`와 같은 사유를 남깁니다. 유효 자료가 남으면 `partial`·종료 코드 2이며, 잘못된 항목만 남으면 `RESPONSE_INVALID`·종료 코드 1입니다. 호가의 필수 배열·통화가 잘못되면 전체 응답 오류입니다. 선택 시각만 잘못됐으면 시각을 제외하고 `omissions`에 `field="timestamp"`·`reason="invalid_timestamp"`를 표시한 부분 결과로 유효 호가를 보존합니다.
 
 호가 결과의 `data`에는 통화·선택 시각·두 배열을 담은 객체 하나가 있고, 체결 결과의 `data`에는 체결 항목들이 있습니다. 예를 들어 합성 호가 결과는 `data=[{"currency":"USD","timestamp":null,"asks":[{"price":"185.7500","volume":"0.1250"}],"bids":[]}]`입니다. 합성 체결 항목은 `{"price":"185.7000","volume":"0.0125","timestamp":"2026-11-06T10:30:42.100-05:00","currency":"USD"}`입니다.
 
@@ -445,7 +445,7 @@ node scripts/toss.ts candles AAPL 1m count=100 adjusted=true before=2026-11-06T0
 | 수정주가 | `source.adjusted`에 요청 선택값을 표시합니다. 미국 수정주가는 가격과 거래량을 함께 조정하며 기준가와 직전 정규장 종가의 차이가 5%를 초과할 때 적용됩니다. 기업행위 종류를 구분하지 않아 모든 배당·분배락의 반영을 보장하지 않습니다. 제공 시작 이전 구간은 `adjusted=false`여도 이미 조정된 자료일 수 있으므로 `source.originalPricesGuaranteed=false`를 표시합니다. |
 | 진행·완료 | 각 봉의 `inProgress`·`completion`은 `unknown`입니다. 응답에는 진행·완료 플래그와 공급자 현재 시각이 없고 이 명령은 일정을 추가 조회하지 않습니다. 로컬 시계보다 오래된 봉도 완료나 최종 확정으로 표시하지 않습니다. 현재 분의 봉도 포함될 수 있으며 미국 분봉은 늦게 보고된 체결로 과거 값이 바뀔 수 있습니다. `retrievedAt`은 조회 시각이며 자료 갱신 시각이 아닙니다. |
 
-`data`는 공급자 최신순과 같은 시각의 항목을 그대로 보존합니다. 20개 완료 세션 관문이나 장중 실행 거부를 적용하지 않습니다. 잘못된 필수 필드를 가진 항목은 `invalid_item`으로 제외하고, 유효 봉이 남으면 부분 결과를 반환합니다. 받은 항목이 모두 잘못됐거나 필수 배열·페이지 경계가 잘못되면 `RESPONSE_INVALID`입니다. 요청보다 많은 봉, 최신순 위반, 요청 `before`를 넘는 봉도 형식 오류입니다. 알려지지 않은 응답 필드는 출력하지 않습니다.
+`data`는 공급자 최신순과 같은 시각의 항목을 그대로 보존합니다. 20개 완료 세션 관문이나 장중 실행 거부를 적용하지 않습니다. 일봉의 시가와 종가는 정확한 십진수 비교에서 각각 저가 이상 고가 이하여야 합니다. 이 범위를 벗어나거나 필수 필드가 잘못된 항목은 `invalid_item`으로 제외하고, 유효 봉이 남으면 부분 결과를 반환합니다. 받은 항목이 모두 잘못됐거나 필수 배열·페이지 경계가 잘못되면 `RESPONSE_INVALID`입니다. 요청보다 많은 봉, 최신순 위반, 요청 `before`를 넘는 봉도 형식 오류입니다. 알려지지 않은 응답 필드는 출력하지 않습니다.
 
 `page.nextBefore`는 검증을 통과한 공급자의 다음 경계를 그대로 반환합니다. 요청 `before`보다 미래인 경계는 `RESPONSE_INVALID`로 거부하며, `date`에서 변환한 상한과 일봉 묶음에도 같은 검증을 적용합니다. 같은 시각의 다른 오프셋 표기는 실제 시각으로 비교하고 소수 초 정밀도를 유지하며, 동일·과거 경계는 보정하지 않습니다. 값이 있으면 빈 페이지라도 `omissions=[{"reason":"next_page"}]`·`partial`·종료 코드 2입니다. 에이전트는 같은 심볼·주기·수정 선택으로 그 값을 다음 `before`에 그대로 넣으세요. 위 마지막 예시처럼 `+09:00`도 입력할 수 있으며 CLI가 `+`를 `%2B`로 인코딩합니다. 1밀리초를 빼거나 마지막 봉에서 경계를 새로 계산하지 마세요. 페이지 사이에 같은 봉이 나타나도 CLI는 임의로 제거하지 않습니다.
 
@@ -548,7 +548,7 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 | 필드 | 공식 계약과 CLI 처리 |
 | --- | --- |
 | `symbol` | 필수 문자열. 요청한 식별자와 정확히 연결되는 유일한 행만 반환합니다. 요청 밖의 행과 중복 행은 제외합니다. |
-| `lastPrice` | 필수 소수 문자열, 최대 30자. 숫자로 바꾸거나 반올림하지 않습니다. `0` 문자열은 유효하며 null·누락·숫자 자료형은 오류입니다. |
+| `lastPrice` | 음수가 아닌 필수 소수 문자열, 최대 30자. `"-0.00"` 같은 부호 있는 0도 원래 표기대로 반환합니다. null·누락·숫자 자료형은 오류입니다. |
 | `currency` | 필수 통화 문자열. 공식 값은 `KRW`·`USD`이며 공식 확장 지침에 따라 다른 세 자리 대문자 코드도 원문으로 반환합니다. 서로 다른 통화는 합산하지 않습니다. |
 | `timestamp` | 선택 필드이며 문자열 또는 null입니다. 오프셋이 있는 유효한 날짜·시각 문자열을 검사하고 그대로 반환합니다. 생략과 null을 구분하며 조회 시각으로 채우지 않습니다. |
 | `priceAge` | CLI가 계산한 종목별 경과 시간 정보입니다. `seconds`는 원천 시각부터 결과의 `retrievedAt`까지 지난 초이며 소수초를 포함할 수 있습니다. `thresholdSeconds`는 이번 호출의 임계값, `exceedsThreshold`는 엄격한 초과 여부입니다. `seconds`의 숫자 표현은 JavaScript 정밀도에 따르며 경고 판정은 원천 시각의 소수초를 보존하여 비교합니다. |

@@ -632,3 +632,28 @@ test('leg-only statuses cannot describe a conditional order group and future typ
     f.close();
   }
 });
+
+test('regular orders exclude negative filled quantities and preserve signed zero', async () => {
+  const f = fixture();
+  try {
+    await select(f);
+    const zero = { ...order, execution: { ...order.execution, filledQuantity: '-0.000' } };
+    const negative = {
+      ...order,
+      orderId: 'order-two',
+      execution: { ...order.execution, filledQuantity: '-0.0001' },
+    };
+    const args = ['orders', 'CLOSED'];
+    const mixed = await runCli(f, [accounts, page('orders', [zero, negative])], args);
+    assert.equal(mixed.status, 2, mixed.stdout);
+    const output = JSON.parse(mixed.stdout);
+    assert.equal(output.status, 'partial');
+    assert.deepEqual(output.data, [zero]);
+    assert.deepEqual(output.omissions, [{ index: 1, reason: 'invalid_item' }]);
+    const invalid = await runCli(f, [accounts, page('orders', [negative])], args);
+    assert.equal(invalid.status, 1, invalid.stdout);
+    assert.equal(JSON.parse(invalid.stdout).error.code, 'RESPONSE_INVALID');
+  } finally {
+    f.close();
+  }
+});

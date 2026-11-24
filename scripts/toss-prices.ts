@@ -1,8 +1,8 @@
 import { TossError } from './toss-client.ts';
 import {
-  decimal,
   items,
   laterThan,
+  nonnegativeDecimal,
   record,
   symbolPattern,
   validTime,
@@ -51,7 +51,7 @@ export function priceResult(value: unknown, { symbols }: ReturnType<typeof price
       !('lastPrice' in row) ||
       !('currency' in row) ||
       counts.get(row.symbol) !== 1 ||
-      !decimal(row.lastPrice) ||
+      !nonnegativeDecimal(row.lastPrice) ||
       typeof row.currency !== 'string' ||
       !/^[A-Z]{3}$/.test(row.currency) ||
       (timestamp !== undefined &&

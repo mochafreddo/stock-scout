@@ -1,5 +1,5 @@
 import { TossError } from './toss-client.ts';
-import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
+import { items, nonnegativeDecimal, record, symbolPattern, validTime } from './toss-values.ts';
 
 export function marketQuery(
   command: 'orderbook' | 'trades',
@@ -27,7 +27,7 @@ function currency(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 function level(row: Record<string, unknown>) {
-  if (!decimal(row.price) || !decimal(row.volume)) return;
+  if (!nonnegativeDecimal(row.price) || !nonnegativeDecimal(row.volume)) return;
   return { price: row.price, volume: row.volume };
 }
 function orderbookResult(value: unknown) {

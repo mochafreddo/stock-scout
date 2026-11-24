@@ -1,7 +1,7 @@
 import { type AccountScope, TossError } from './toss-client.ts';
 import { orderQuery, orderResult } from './toss-orders.ts';
 import { transactionQuery, transactionResult } from './toss-transactions.ts';
-import { decimal, record, symbolPattern } from './toss-values.ts';
+import { decimal, nonnegativeDecimal, record, symbolPattern } from './toss-values.ts';
 
 export function accountQuery(command: AccountScope, firstArg: string | undefined, args: string[]) {
   if (command === 'transactions') {
@@ -89,7 +89,9 @@ function holdingsResult(value: unknown, symbol?: string) {
       (symbol !== undefined && row.symbol !== symbol) ||
       !['name', 'marketCountry', 'currency'].every(
         (key) => typeof row[key] === 'string' && row[key].trim().length > 0,
-      )
+      ) ||
+      !nonnegativeDecimal(row.lastPrice) ||
+      !nonnegativeDecimal(row.averagePurchasePrice)
     )
       return;
     try {
@@ -98,7 +100,9 @@ function holdingsResult(value: unknown, symbol?: string) {
         name: row.name,
         marketCountry: row.marketCountry,
         currency: row.currency,
-        ...decimals(row, ['quantity', 'lastPrice', 'averagePurchasePrice']),
+        ...decimals(row, ['quantity']),
+        lastPrice: row.lastPrice,
+        averagePurchasePrice: row.averagePurchasePrice,
         marketValue: valuation(row.marketValue, false),
         profitLoss: valuation(row.profitLoss, false, true),
         dailyProfitLoss: daily(row.dailyProfitLoss, false),

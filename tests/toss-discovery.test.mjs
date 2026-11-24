@@ -244,3 +244,41 @@ test('failed discovery queries preserve request source without unvalidated ranki
     }
   }
 });
+
+test('rankings reject negative trading values and opposite price and rate directions', async () => {
+  const lower = '9007199254740992.0000000000000';
+  const higher = '9007199254740992.0000000000001';
+  const loss = { ...row, price: { lastPrice: lower, basePrice: higher, changeRate: '-0.1' } };
+  const roundedZero = { ...loss, price: { ...loss.price, changeRate: '-0.000' } };
+  const roundedPrice = {
+    ...row,
+    price: { lastPrice: '001.0', basePrice: '1.000', changeRate: '0.01' },
+  };
+  const zero = { ...row, price: { ...row.price, lastPrice: '-0.00' }, tradingVolume: '-0.000' };
+  const valid = [loss, roundedZero, roundedPrice, zero];
+  const invalid = [
+    { ...loss, price: { ...loss.price, changeRate: '0.1' } },
+    { ...loss, price: { lastPrice: higher, basePrice: lower, changeRate: '-0.1' } },
+    { ...row, price: { ...row.price, lastPrice: '-1' } },
+    { ...row, price: { ...row.price, basePrice: '-1' } },
+    { ...row, tradingVolume: '-0.001' },
+    { ...row, tradingAmount: '-1.00' },
+  ];
+  const mixed = await query(['rankings', 'TOP_LOSERS', '1d', '10'], '/api/v1/rankings', {
+    rankedAt,
+    rankings: [...valid, ...invalid],
+  });
+  assert.equal(mixed.status, 2, mixed.stdout);
+  assert.equal(mixed.out.status, 'partial');
+  assert.deepEqual(mixed.out.data, valid);
+  assert.deepEqual(
+    mixed.out.omissions,
+    invalid.map((_, index) => ({ index: index + valid.length, reason: 'invalid_item' })),
+  );
+  const rejected = await query(['rankings', 'TOP_LOSERS', '1d', '6'], '/api/v1/rankings', {
+    rankedAt,
+    rankings: invalid,
+  });
+  assert.equal(rejected.status, 1, rejected.stdout);
+  assert.equal(rejected.out.error.code, 'RESPONSE_INVALID');
+});

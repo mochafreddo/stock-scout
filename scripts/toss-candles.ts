@@ -1,7 +1,15 @@
 import { type TossClient, TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
 import { confirmUsMarket } from './toss-stock.ts';
-import { decimal, items, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
+import {
+  compareNonnegativeDecimals,
+  items,
+  laterThan,
+  nonnegativeDecimal,
+  record,
+  symbolPattern,
+  validTime,
+} from './toss-values.ts';
 
 const newYorkOffset = new Intl.DateTimeFormat('en', {
   timeZone: 'America/New_York',
@@ -198,12 +206,9 @@ function isNewYorkMidnight(timestamp: string) {
   return newYorkTime.format(new Date(timestamp)) === '00:00:00' && !/\.\d*[1-9]/.test(timestamp);
 }
 
-function nonnegativeDecimal(value: unknown): value is string {
-  return decimal(value) && Number(value) >= 0;
-}
-
 export function candleResult(value: unknown, { query, date }: ReturnType<typeof candleQuery>) {
   const count = Number(query.get('count'));
+  const daily = query.get('interval') === '1d';
   if (!record(value) || !Array.isArray(value.candles) || value.candles.length > count)
     throw new TossError('RESPONSE_INVALID');
   const result = items(value.candles, (row) => {
@@ -217,6 +222,11 @@ export function candleResult(value: unknown, { query, date }: ReturnType<typeof 
       !nonnegativeDecimal(row.lowPrice) ||
       !nonnegativeDecimal(row.closePrice) ||
       !nonnegativeDecimal(row.volume) ||
+      (daily &&
+        (compareNonnegativeDecimals(row.openPrice, row.lowPrice) < 0 ||
+          compareNonnegativeDecimals(row.openPrice, row.highPrice) > 0 ||
+          compareNonnegativeDecimals(row.closePrice, row.lowPrice) < 0 ||
+          compareNonnegativeDecimals(row.closePrice, row.highPrice) > 0)) ||
       typeof row.currency !== 'string' ||
       !row.currency.trim()
     )

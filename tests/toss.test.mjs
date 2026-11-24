@@ -300,6 +300,35 @@ test('Toss CLI rejects invalid arguments before authentication and advertises co
   }
 });
 
+test('prices exclude negative prices and preserve signed zero', async () => {
+  const f = fixture();
+  try {
+    const zero = { ...price, lastPrice: '-0.0000' };
+    const negative = { ...price, symbol: 'MSFT', lastPrice: '-0.000000000000000000000000001' };
+    const mixed = await runCli(
+      f,
+      [{ body: { result: [zero, negative] } }],
+      ['prices', 'AAPL,MSFT'],
+    );
+    assert.equal(mixed.status, 2, mixed.stdout);
+    const partial = JSON.parse(mixed.stdout);
+    assert.equal(partial.status, 'partial');
+    assert.deepEqual(
+      partial.data.map(({ priceAge, ...row }) => row),
+      [zero],
+    );
+    assert.deepEqual(partial.omissions, [
+      { index: 1, reason: 'invalid_item' },
+      { symbol: 'MSFT', reason: 'missing_item' },
+    ]);
+    const invalid = await runCli(f, [{ body: { result: [negative] } }], ['prices', 'MSFT']);
+    assert.equal(invalid.status, 1, invalid.stdout);
+    assert.equal(JSON.parse(invalid.stdout).error.code, 'RESPONSE_INVALID');
+  } finally {
+    f.close();
+  }
+});
+
 test('Toss CLI distinguishes empty, partial and malformed prices without losing null, zero or missing time', async () => {
   const f = fixture();
   try {

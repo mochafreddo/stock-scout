@@ -38,6 +38,19 @@ export function decimal(value: unknown, maxLength = 30): value is string {
   return typeof value === 'string' && value.length <= maxLength && /^-?\d+(?:\.\d+)?$/.test(value);
 }
 
+export function nonnegativeDecimal(value: unknown): value is string {
+  return decimal(value) && (!value.startsWith('-') || !/[1-9]/.test(value));
+}
+
+export function compareNonnegativeDecimals(left: string, right: string) {
+  const [leftWhole, leftFraction = ''] = left.split('.');
+  const [rightWhole, rightFraction = ''] = right.split('.');
+  const scale = Math.max(leftFraction.length, rightFraction.length);
+  const scaledLeft = BigInt(leftWhole + leftFraction.padEnd(scale, '0'));
+  const scaledRight = BigInt(rightWhole + rightFraction.padEnd(scale, '0'));
+  return scaledLeft < scaledRight ? -1 : scaledLeft > scaledRight ? 1 : 0;
+}
+
 export function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }

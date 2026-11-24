@@ -334,3 +334,37 @@ test('invalid optional book time preserves valid levels as partial; new currency
   assert.equal(trades.status, 0, trades.stdout);
   assert.equal(trades.out.data[0].currency, 'USDT');
 });
+
+test('market prices and quantities reject negatives while preserving signed zero', async () => {
+  const zero = { ...trade, price: '-00.000', volume: '-0.00' };
+  const badPrice = { ...trade, price: '-1' };
+  const badVolume = { ...trade, volume: '-0.0001' };
+  const bookResult = await lookup('orderbook', {
+    ...book,
+    asks: [
+      { price: badPrice.price, volume: '1' },
+      { price: zero.price, volume: zero.volume },
+    ],
+    bids: [{ price: '1', volume: badVolume.volume }],
+  });
+  assert.equal(bookResult.status, 2, bookResult.stdout);
+  assert.equal(bookResult.out.status, 'partial');
+  assert.deepEqual(bookResult.out.data, [
+    { ...book, asks: [{ price: zero.price, volume: zero.volume }], bids: [] },
+  ]);
+  assert.deepEqual(bookResult.out.omissions, [
+    { side: 'asks', index: 0, reason: 'invalid_item' },
+    { side: 'bids', index: 0, reason: 'invalid_item' },
+  ]);
+  const trades = await lookup('trades', [badPrice, zero, badVolume]);
+  assert.equal(trades.status, 2, trades.stdout);
+  assert.equal(trades.out.status, 'partial');
+  assert.deepEqual(trades.out.data, [zero]);
+  assert.deepEqual(trades.out.omissions, [
+    { index: 0, reason: 'invalid_item' },
+    { index: 2, reason: 'invalid_item' },
+  ]);
+  const invalid = await lookup('trades', [badPrice, badVolume]);
+  assert.equal(invalid.status, 1, invalid.stdout);
+  assert.equal(invalid.out.error.code, 'RESPONSE_INVALID');
+});

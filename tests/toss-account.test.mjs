@@ -862,3 +862,32 @@ test('invalid or missing holdings arrays preserve independent summaries without 
     f.close();
   }
 });
+
+test('holdings exclude negative prices while preserving signed zero and losses', async () => {
+  const f = fixture();
+  try {
+    await selection(f);
+    const zero = { ...holding, lastPrice: '-0.0000', averagePurchasePrice: '-00.00' };
+    const invalid = [
+      { ...holding, lastPrice: '-0.00001' },
+      { ...holding, averagePurchasePrice: '-1.00' },
+    ];
+    for (const valid of [[zero], []]) {
+      const result = await runCli(
+        f,
+        [accounts, holdings({ ...overview, items: [...invalid, ...valid] })],
+        ['holdings'],
+      );
+      assert.equal(result.status, 2, result.stdout);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.status, 'partial');
+      assert.deepEqual(output.data, [{ ...overview, items: valid }]);
+      assert.deepEqual(output.omissions, [
+        { index: 0, reason: 'invalid_item' },
+        { index: 1, reason: 'invalid_item' },
+      ]);
+    }
+  } finally {
+    f.close();
+  }
+});

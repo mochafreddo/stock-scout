@@ -1,6 +1,14 @@
 import { TossError } from './toss-client.ts';
 import { isinPattern, securityTypes } from './toss-stock.ts';
-import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
+import {
+  compareNonnegativeDecimals,
+  decimal,
+  items,
+  nonnegativeDecimal,
+  record,
+  symbolPattern,
+  validTime,
+} from './toss-values.ts';
 
 export const rankingTypes = [
   'MARKET_TRADING_AMOUNT',
@@ -56,18 +64,23 @@ function rankingItem(row: unknown) {
     !symbolPattern.test(row.symbol) ||
     typeof row.currency !== 'string' ||
     !/^[A-Z]{3}$/.test(row.currency) ||
-    !decimal(row.tradingVolume) ||
-    !decimal(row.tradingAmount) ||
+    !nonnegativeDecimal(row.tradingVolume) ||
+    !nonnegativeDecimal(row.tradingAmount) ||
     !record(row.price)
   )
     return;
   const { lastPrice, basePrice, changeRate } = row.price;
   if (
-    !decimal(lastPrice) ||
-    !decimal(basePrice) ||
-    (changeRate != null && (!decimal(changeRate) || /^-?0+(?:\.0+)?$/.test(basePrice)))
+    !nonnegativeDecimal(lastPrice) ||
+    !nonnegativeDecimal(basePrice) ||
+    (changeRate != null && (!decimal(changeRate) || !/[1-9]/.test(basePrice)))
   )
     return;
+  if (changeRate != null && /[1-9]/.test(changeRate)) {
+    const priceDirection = compareNonnegativeDecimals(lastPrice, basePrice);
+    const rateDirection = changeRate.startsWith('-') ? -1 : 1;
+    if (priceDirection === -rateDirection) return;
+  }
   return {
     rank: row.rank,
     symbol: row.symbol,

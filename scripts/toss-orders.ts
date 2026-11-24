@@ -1,7 +1,14 @@
 import { accountPageQuery } from './toss-account-pagination.ts';
 import { TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
-import { decimal, items, record, symbolPattern, validTime } from './toss-values.ts';
+import {
+  decimal,
+  items,
+  nonnegativeDecimal,
+  record,
+  symbolPattern,
+  validTime,
+} from './toss-values.ts';
 
 export function orderQuery(status: string | undefined, args: string[], conditional: boolean) {
   if (status !== 'OPEN' && status !== 'CLOSED') throw new TossError('INPUT_INVALID');
@@ -117,7 +124,7 @@ function parseOrder(value: unknown, conditional: boolean) {
       { price: nullableDecimal, orderAmount: nullableDecimal, canceledAt: nullableTime },
     ),
     execution: fields(value.execution, {
-      filledQuantity: decimal,
+      filledQuantity: nonnegativeDecimal,
       averageFilledPrice: nullableDecimal,
       filledAmount: nullableDecimal,
       commission: nullableDecimal,
