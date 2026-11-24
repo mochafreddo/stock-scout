@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { isAbsolute } from 'node:path';
-import { record, symbolPattern } from './toss-values.ts';
+import { marketArgs, marketTools } from './dot-mcp-tools.ts';
+import { record } from './toss-values.ts';
 
 const [launcher, port] = process.argv.slice(2);
 if (
@@ -13,53 +14,6 @@ if (
   throw new Error('Expected an absolute approved launcher path and local port');
 
 const protocol = '2025-11-25';
-const prices = {
-  name: 'prices',
-  description:
-    'Query symbol prices. Provider timestamps can be absent or null. retrievedAt is the CLI retrieval time.',
-  inputSchema: {
-    type: 'object',
-    required: ['symbols'],
-    additionalProperties: false,
-    properties: {
-      symbols: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 200,
-        items: { type: 'string', pattern: symbolPattern.source, not: { pattern: '^-' } },
-      },
-      staleAfterSeconds: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
-    },
-  },
-  annotations: { readOnlyHint: true },
-};
-
-function priceArgs(params: unknown) {
-  if (!record(params) || params.name !== prices.name || !record(params.arguments)) return;
-  const args = params.arguments;
-  const { symbols, staleAfterSeconds } = args;
-  if (
-    Object.keys(args).some((key) => key !== 'symbols' && key !== 'staleAfterSeconds') ||
-    !Array.isArray(symbols) ||
-    !symbols.length ||
-    symbols.length > 200 ||
-    !symbols.every(
-      (symbol) =>
-        typeof symbol === 'string' && !symbol.startsWith('-') && symbolPattern.test(symbol),
-    ) ||
-    (staleAfterSeconds !== undefined &&
-      (typeof staleAfterSeconds !== 'number' ||
-        !Number.isSafeInteger(staleAfterSeconds) ||
-        staleAfterSeconds < 0))
-  )
-    return;
-  return [
-    'prices',
-    symbols.join(','),
-    ...(staleAfterSeconds === undefined ? [] : [`staleAfterSeconds=${staleAfterSeconds}`]),
-  ];
-}
-
 async function execute(
   args: string[],
 ): Promise<{ exitCode: number; response: Record<string, unknown> }> {
@@ -172,9 +126,9 @@ const server = createServer({ requestTimeout: 10000 }, async (req, res) => {
     case 'ping':
       return reply({ result: {} });
     case 'tools/list':
-      return reply({ result: { tools: [prices] } });
+      return reply({ result: { tools: marketTools } });
     case 'tools/call': {
-      const args = priceArgs(rpc.params);
+      const args = marketArgs(rpc.params);
       if (!args) return fail(-32602, 'Unknown tool or invalid arguments');
       return reply({ result: await query(args) });
     }

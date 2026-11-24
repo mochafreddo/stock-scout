@@ -93,7 +93,7 @@ test('prices forwards structured arguments and preserves decimal strings, absent
   const listed = await rpc('tools/list');
   assert.deepEqual(
     listed.result.tools.map((tool) => tool.name),
-    ['prices'],
+    ['prices', 'rankings', 'stock', 'candles', 'sessions'],
   );
   const { result } = await call({ symbols: ['DEMO', 'NEXT'], staleAfterSeconds: 60 });
   assert.deepEqual(readRequests(f.cliTrace), [
