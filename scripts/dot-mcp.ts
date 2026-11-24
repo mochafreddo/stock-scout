@@ -1,24 +1,18 @@
 import { execFile } from 'node:child_process';
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isAbsolute } from 'node:path';
 import { marketArgs, marketTools } from './dot-mcp-tools.ts';
+import type { DotWindow } from './dot-mcp-window.ts';
 import { record } from './toss-values.ts';
-
-const [launcher, port] = process.argv.slice(2);
-if (
-  process.argv.length !== 4 ||
-  !isAbsolute(launcher) ||
-  !/^\d+$/.test(port) ||
-  Number(port) > 65535
-)
-  throw new Error('Expected an absolute approved launcher path and local port');
 
 const protocol = '2025-11-25';
 async function execute(
+  launcher: string,
   args: string[],
+  onStart?: () => void,
 ): Promise<{ exitCode: number; response: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       launcher,
       args,
       { encoding: 'utf8', timeout: 70000, maxBuffer: 4 * 1024 * 1024 },
@@ -41,6 +35,7 @@ async function execute(
         }
       },
     );
+    if (onStart) child.once('spawn', onStart);
   });
 }
 
@@ -52,23 +47,44 @@ function toolResult(payload: object, isError: boolean) {
   };
 }
 
-async function query(args: string[]) {
+function rejected(window: DotWindow | undefined, code: string) {
+  window?.report('rejected', code);
+  return toolResult({ stage: 'admission', error: { code } }, true);
+}
+
+async function query(launcher: string, args: string[], window?: DotWindow) {
   let stage = 'readiness';
   try {
-    const ready = await execute(['readiness']);
+    const beforeReadiness = window?.rejection();
+    if (beforeReadiness) return rejected(window, beforeReadiness);
+    const ready = await execute(launcher, ['readiness']);
     const rows = ready.response.data;
-    if (ready.exitCode !== 0) return toolResult({ stage, ...ready }, true);
+    if (ready.exitCode !== 0) {
+      window?.report('ready_blocked', 'READINESS_BLOCKED');
+      return toolResult({ stage, ...ready }, true);
+    }
     if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.readiness !== 'ready')
       throw new Error('Invalid readiness result');
     stage = 'query';
-    const output = await execute(args);
+    const beforeStart = window?.rejection();
+    if (beforeStart) return rejected(window, beforeStart);
+    const output = await execute(launcher, args, window?.started);
+    window?.report(
+      ['success', 'query_error', 'partial'][output.exitCode],
+      output.exitCode === 1 ? 'QUERY_ERROR' : undefined,
+    );
     return toolResult({ stage, ...output }, output.exitCode === 1);
   } catch {
+    window?.report('result_unavailable', 'CLI_RESULT_UNAVAILABLE');
     return toolResult({ stage, error: { code: 'CLI_RESULT_UNAVAILABLE' } }, true);
   }
 }
 
-const server = createServer({ requestTimeout: 10000 }, async (req, res) => {
+async function handle(
+  req: IncomingMessage,
+  res: ServerResponse,
+  call: (args: string[]) => ReturnType<typeof query>,
+) {
   const host = `127.0.0.1:${req.socket.localPort}`;
   if (
     req.headers.host !== host ||
@@ -130,14 +146,34 @@ const server = createServer({ requestTimeout: 10000 }, async (req, res) => {
     case 'tools/call': {
       const args = marketArgs(rpc.params);
       if (!args) return fail(-32602, 'Unknown tool or invalid arguments');
-      return reply({ result: await query(args) });
+      return reply({ result: await call(args) });
     }
     default:
       return fail(-32601, 'Method not found');
   }
-});
+}
 
-server.listen(Number(port), '127.0.0.1', () => {
-  const address = server.address();
-  if (address && typeof address === 'object') console.log(`http://127.0.0.1:${address.port}/mcp`);
-});
+export function createDotServer(launcher: string, window?: DotWindow) {
+  return createServer({ requestTimeout: 10000 }, (req, res) =>
+    handle(req, res, (args) =>
+      window ? window.run(() => query(launcher, args, window)) : query(launcher, args),
+    ),
+  );
+}
+
+if (import.meta.main) {
+  const [launcher, port] = process.argv.slice(2);
+  if (
+    process.argv.length !== 4 ||
+    !isAbsolute(launcher) ||
+    !/^\d+$/.test(port) ||
+    Number(port) > 65535
+  )
+    throw new Error('Expected an absolute approved launcher path and local port');
+
+  const server = createDotServer(launcher);
+  server.listen(Number(port), '127.0.0.1', () => {
+    const address = server.address();
+    if (address && typeof address === 'object') console.log(`http://127.0.0.1:${address.port}/mcp`);
+  });
+}
