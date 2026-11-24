@@ -90,6 +90,7 @@ function holdingsResult(value: unknown, symbol?: string) {
       !['name', 'marketCountry', 'currency'].every(
         (key) => typeof row[key] === 'string' && row[key].trim().length > 0,
       ) ||
+      !decimal(row.quantity) ||
       !nonnegativeDecimal(row.lastPrice) ||
       !nonnegativeDecimal(row.averagePurchasePrice)
     )
@@ -100,7 +101,7 @@ function holdingsResult(value: unknown, symbol?: string) {
         name: row.name,
         marketCountry: row.marketCountry,
         currency: row.currency,
-        ...decimals(row, ['quantity']),
+        quantity: row.quantity,
         lastPrice: row.lastPrice,
         averagePurchasePrice: row.averagePurchasePrice,
         marketValue: valuation(row.marketValue, false),
