@@ -23,6 +23,7 @@ stdout은 버전이 있는 JSON입니다. `success`는 종료 코드 0, `partial
 | 인증 없이 처음 실행하기 | [시작 안내](docs/getting-started.md) |
 | 조회 명령과 JSON 계약 확인하기 | [CLI 레퍼런스](docs/toss-cli.md) |
 | 에이전트가 필요한 조회를 고르고 결과 해석하기 | [에이전트 지침](docs/toss-agent-usage.md) |
+| Mac에서 21시 예약 Dot의 시장 조회 운영하기 | [예약 Dot 운영 안내](docs/scheduled-dot-market.md) |
 | 코드 흐름과 상태 소유권 이해하기 | [구조 설명](docs/architecture.md) |
 | 코드·테스트·문서 수정하기 | [개발·로컬 검사](docs/development.md) |
 | 개념이나 결정·검증 근거 찾기 | [용어집](GLOSSARY.md), [문서 색인](docs/README.md) |
