@@ -173,14 +173,22 @@ Omit `date` to exercise unconfirmed market/timezone evidence: source timestamps 
 Read stdout as one JSON object and retain the process exit code even if it is nonzero. Interpret `version=1`, `status`, `data`, `omissions`, `page`, `source` and `error` together:
 
 - `success` / exit 0 means this request completed. It does not establish live freshness, investment suitability or future availability.
-- `partial` / exit 2 preserves usable data and identifies missing coverage. Empty `data` with `page.nextBefore` is not the last page. Request another page explicitly with the same symbol, interval, count and adjustment choice; copy the boundary without subtracting time. A null boundary ends pagination; inspect other omissions before treating the request as complete. Report unresolved coverage if the boundary is absent.
+- `partial` / exit 2 preserves usable data and identifies missing coverage. Apply the [follow-up page rules](#follow-up-pages) before requesting another page. Inspect all omissions before treating the requested coverage as complete.
 - `error` / exit 1 is a failed query, not evidence of no matching securities. Report the machine-readable error code. A permission failure requires checking access conditions; do not silently change providers, use KIS or start an authentication loop.
 
 For `prices`, read each original `timestamp` with its query-time `priceAge` using [the response contract](toss-cli.md#응답-계약). An elapsed-time warning is not a provider-delay measurement or a reason to discard a valid price. Apply [report-time classification](#classify-prices-at-report-time) when writing the analysis.
 
 Preserve decimal strings and distinguish null from zero and omission. Treat `retrievedAt` as retrieval time, not a provider update timestamp. US market rankings are not exchange-specific rankings. Tradable lists and rankings have no cursor; do not invent a page argument.
 
-For paginated account queries, copy both `page.nextCursor` and `page.context` from the previous response. Keep the same account, command, group, period and filters; consult [the CLI reference](toss-cli.md) for which commands support pagination and which changes require a fresh first page. An empty page with more coverage outstanding remains partial. If the response indicates a next page but supplies no usable cursor, report the missing coverage instead of guessing a cursor or treating the history as complete. Keep live cursors and context out of shared evidence.
+### Follow-up pages
+
+Before following pages for transactions, closed regular orders, conditional orders or candles, set the coverage you need and a finite maximum number of additional page requests for the task. Exclude initial pages and count each follow-up request against that task limit, across symbols and queries. Start a new boundary history when query conditions change. The CLI also applies its own budget to each invocation.
+
+- Track every boundary actually requested for the same query. Compare account cursors as exact strings within the same account, client, command, state, period and filters. For candles, compare instants using the offset and full fractional seconds, including differences smaller than a millisecond. Keep the same symbol, interval and adjustment choice. For date-based candles, record `source.before` as the first requested boundary. Track each batch item's candle boundaries separately.
+- End pagination at account `hasNext=false` or candle `nextBefore=null`. If pagination is unknown or the next page lacks a usable boundary or required account context, stop and report unconfirmed coverage. Stop if the next boundary matches any previously requested boundary in that query. If the boundary is new, the task budget remains and you still need data, follow it even when the current page is empty. For account queries, copy `page.nextCursor` and its accompanying `page.context` exactly. For candles, pass the exact `page.nextBefore` as `before`, omit `date` and keep the same count and adjustment choice.
+- Keep the valid data and omissions from pages already received. When stopping, report the coverage obtained and any requested coverage still unconfirmed, with the reason, such as a repeated boundary, exhausted budget or missing pagination information. Keep live cursors and context out of shared evidence.
+
+See the [CLI reference examples](toss-cli.md#후속-페이지-조회) for a repeated cursor, equivalent candle instants written with different offsets, distinct instants less than a millisecond apart, and an empty page with a new cursor.
 
 ### Report holdings coverage
 
@@ -213,7 +221,7 @@ Use [the candle reference](toss-cli.md#일봉과-분봉) to select an inclusive 
 
 For several requested symbols, use [the sequential daily batch](toss-cli.md#순차-일봉-묶음). Keep its shared execution budget; do not split it into parallel processes to bypass limits. Inspect every item's status, data, omissions, page and error/reason, including usable empty pages and unqueried symbols. The reference owns the input limits, aggregate status, summary fields and stop policy.
 
-Use each item's summary to assess the actual returned coverage, then decide whether it is sufficient for the requested analysis. Requested count and date are not returned count and date; a summary does not establish completion or analytical sufficiency. Choose only the needed follow-up pages, using individual `candles` queries with the exact `page.nextBefore` copied to `before`, no `date`, and the same count/adjustment. Do not rebuild the batch schema or duplicate its partial reasons in a new summary.
+Use each item's summary to assess the actual returned coverage, then decide whether it is sufficient for the requested analysis. Requested count and date are not returned count and date; a summary does not establish completion or analytical sufficiency. Choose only the needed follow-up pages under the [follow-up page rules](#follow-up-pages), using individual `candles` queries. Do not rebuild the batch schema or duplicate its partial reasons in a new summary.
 
 Preserve the query exit code and completed results when a batch stops. An item's `retrievedAt` for `not_queried` does not mean its data was fetched. Forced termination and process crashes have no recovery guarantee; save stdout only within approved storage scope. Synthetic checks establish their exercised path, not live provider or consumer validation, and authorize no real queries or data transmission.
 
