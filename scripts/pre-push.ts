@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -14,9 +15,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const checkerPath = 'scripts/pre-push.ts';
 
 function git(args: string[], cwd = process.cwd(), input?: string, index?: string) {
-  const result = spawnSync('git', args, {
+  const result = spawnSync('git', ['--no-replace-objects', ...args], {
     cwd,
     input,
     env: index ? { ...process.env, GIT_INDEX_FILE: index } : process.env,
@@ -307,50 +311,83 @@ function qualityChecks(root: string, source: string, staged = false) {
   for (const name of commands) runPnpm(['run', name]);
 }
 
-function installHook(staged = false) {
+function hookWrapper(name: 'pre-commit' | 'pre-push') {
+  const checker = readFileSync(fileURLToPath(import.meta.url)).toString('base64');
+  return `#!/bin/sh
+# Stock Scout snapshot checker (pinned at installation)
+set -eu
+temporary=$(mktemp -d "\${TMPDIR:-/tmp}/stock-scout-hook.XXXXXXXX")
+trap 'rm -rf -- "$temporary"' EXIT
+trap 'exit 1' HUP INT TERM
+checker="$temporary/pre-push.mts"
+printf '%s' '${checker}' | base64 -d > "$checker"
+node "$checker" --installed-${name} "$@"
+`;
+}
+
+function requirePinnedChecker(tree: string, checker: Buffer | undefined) {
+  if (!checker) return;
+  const entry = git(['ls-tree', tree, '--', checkerPath]).toString();
+  const oid = /^100(?:644|755) blob ([a-f\d]+)\t/.exec(entry)?.[1];
+  if (!oid) throw new Error(`Checker missing or not a regular file in ${tree}: ${checkerPath}`);
+  if (!checker.equals(git(['cat-file', 'blob', oid]))) {
+    throw new Error(`Checker differs in ${tree}: ${checkerPath}. Review and reinstall the hook`);
+  }
+}
+
+function installHook(name: 'pre-commit' | 'pre-push') {
   const hooks = resolve(git(['rev-parse', '--git-path', 'hooks']).toString().trim());
   const configured = spawnSync('git', ['config', '--get', 'core.hooksPath'], { encoding: 'utf8' });
   if (configured.status !== 1)
     throw new Error('Custom core.hooksPath requires manual hook integration');
-  const name = staged ? 'pre-commit' : 'pre-push';
   const primary = join(hooks, name);
-  const wrapper = `#!/bin/sh\nexec node "$(git rev-parse --show-toplevel)/scripts/pre-push.ts"${staged ? ' --staged' : ''} "$@"\n`;
+  const wrapper = Buffer.from(hookWrapper(name));
+  const primaryStat = lstatSync(primary, { throwIfNoEntry: false });
   let destination = primary;
-  if (
-    existsSync(primary) &&
-    (lstatSync(primary).isSymbolicLink() || !(lstatSync(primary).mode & 0o111))
-  ) {
-    throw new Error(`Existing ${name} hook is linked or not executable; preserved`);
-  }
-  if (existsSync(primary) && readFileSync(primary, 'utf8') !== wrapper) {
-    const text = readFileSync(primary, 'utf8');
-    if (
-      staged ||
-      !text.includes('# gstack-redact pre-push (managed)') ||
-      !text.includes('hooks/pre-push.local')
-    ) {
-      throw new Error(`Existing ${name} hook requires manual integration; preserved`);
+  if (primaryStat) {
+    if (!primaryStat.isFile() || !(primaryStat.mode & 0o111))
+      throw new Error(`Existing ${name} hook is not a regular executable file; preserved`);
+    const contents = readFileSync(primary);
+    if (!wrapper.equals(contents)) {
+      const text = contents.toString();
+      if (
+        name === 'pre-commit' ||
+        !text.split('\n').includes('# gstack-redact pre-push (managed)') ||
+        !text.includes('hooks/pre-push.local')
+      ) {
+        throw new Error(`Existing ${name} hook requires manual integration; preserved`);
+      }
+      destination = join(hooks, 'pre-push.local');
     }
-    destination = join(hooks, 'pre-push.local');
   }
-  if (existsSync(destination)) {
-    if (
-      lstatSync(destination).isSymbolicLink() ||
-      readFileSync(destination, 'utf8') !== wrapper ||
-      !(lstatSync(destination).mode & 0o111)
-    ) {
-      throw new Error('Existing hook preserved; integrate manually');
-    }
-  } else {
+
+  const existing = lstatSync(destination, { throwIfNoEntry: false });
+  if (!existing) {
     mkdirSync(hooks, { recursive: true });
-    writeFileSync(destination, wrapper, { flag: 'wx', mode: 0o700 });
+    const temporary = mkdtempSync(join(hooks, '.stock-scout-hook-'));
+    try {
+      const draft = join(temporary, name);
+      writeFileSync(draft, wrapper, { flag: 'wx', mode: 0o700 });
+      linkSync(draft, destination);
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  } else if (
+    !existing.isFile() ||
+    !(existing.mode & 0o111) ||
+    !wrapper.equals(readFileSync(destination))
+  ) {
+    throw new Error('Existing hook preserved; integrate manually');
   }
   process.stderr.write(`Installed ${destination}\n`);
 }
 
+type PushSelection = { mode: 'push'; commit: string; tree: string; changed: string[] };
+
 function checkSnapshot(
   source: string,
-  selection: { mode: 'staged' } | { mode: 'push'; commit: string; changed: string[] },
+  selection: { mode: 'staged' } | PushSelection,
+  checker?: Buffer,
 ) {
   const staged = selection.mode === 'staged';
   const temporary = realpathSync(
@@ -370,9 +407,14 @@ function checkSnapshot(
         return git(['write-tree'], source, undefined, copiedIndex).toString().trim();
       };
       tree = stagedTree();
-      const head = spawnSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
-        cwd: source,
-      });
+      requirePinnedChecker(tree, checker);
+      const head = spawnSync(
+        'git',
+        ['--no-replace-objects', 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'],
+        {
+          cwd: source,
+        },
+      );
       if (head.error) throw head.error;
       if (head.status !== 0 && head.status !== 1) throw new Error(head.stderr.toString());
       const base =
@@ -385,7 +427,7 @@ function checkSnapshot(
         .split('\0')
         .filter(Boolean);
     } else {
-      tree = selection.commit;
+      tree = selection.tree;
       changed = selection.changed;
     }
     const files = snapshot(tree, root);
@@ -394,29 +436,46 @@ function checkSnapshot(
     if (changed.some((file) => !file.endsWith('.md'))) qualityChecks(root, source, staged);
     if (stagedTree && stagedTree() !== tree)
       throw new Error('Index changed during staged checks; retry the commit');
-    process.stderr.write(`Verified ${staged ? 'staged tree ' : ''}${tree}\n`);
+    process.stderr.write(
+      `Verified ${selection.mode === 'staged' ? `staged tree ${tree}` : selection.commit}\n`,
+    );
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
 }
 
-try {
-  if (process.argv.includes('--docs')) {
-    if (process.argv[2] !== '--docs') throw new Error('Usage: --docs FILE.md ...');
+const command = process.argv[2];
+const installed = command === '--installed-pre-commit' || command === '--installed-pre-push';
+const docsCommand = !installed && process.argv.includes('--docs');
+const stagedCommand = command === '--staged' || command === '--installed-pre-commit';
+
+function main() {
+  if (docsCommand) {
+    if (command !== '--docs') throw new Error('Usage: --docs FILE.md ...');
     const root = git(['rev-parse', '--show-toplevel']).toString().trim();
     checkDocuments(realpathSync(root), process.argv.slice(3));
-    process.exit(0);
+    return;
   }
-  if (process.argv.includes('--install') || process.argv.includes('--install-pre-commit')) {
-    installHook(process.argv.includes('--install-pre-commit'));
-    process.exit(0);
+  if (command === '--print-hook') {
+    const name = process.argv[3];
+    if (process.argv.length !== 4 || (name !== 'pre-commit' && name !== 'pre-push'))
+      throw new Error('Usage: --print-hook pre-commit|pre-push');
+    process.stdout.write(hookWrapper(name));
+    return;
   }
+  if (command === '--install' || command === '--install-pre-commit') {
+    installHook(command === '--install-pre-commit' ? 'pre-commit' : 'pre-push');
+    return;
+  }
+
   const source = git(['rev-parse', '--show-toplevel']).toString().trim();
-  if (process.argv.includes('--staged')) {
-    checkSnapshot(source, { mode: 'staged' });
-    process.exit(0);
+  const checker = installed ? readFileSync(fileURLToPath(import.meta.url)) : undefined;
+  if (stagedCommand) {
+    checkSnapshot(source, { mode: 'staged' }, checker);
+    return;
   }
   const input = readFileSync(0, 'utf8');
+  const selections: PushSelection[] = [];
   for (const line of input.trim().split('\n').filter(Boolean)) {
     const fields = line.split(/\s+/);
     const [, commit, , base] = fields;
@@ -428,20 +487,32 @@ try {
       throw new Error('Invalid pre-push input');
     }
     if (/^0+$/.test(commit)) continue;
-    git(['rev-parse', '--verify', `${commit}^{commit}`]);
+    const tree = git(['rev-parse', '--verify', `${commit}^{commit}^{tree}`])
+      .toString()
+      .trim();
+    requirePinnedChecker(tree, checker);
     const comparison = /^0+$/.test(base)
       ? git(['hash-object', '-t', 'tree', '--stdin'], undefined, '').toString().trim()
       : base;
-    git(['diff', '--check', comparison, commit]);
-    const changed = git(['diff', '--no-renames', '--name-only', '-z', comparison, commit])
+    git(['diff', '--check', comparison, tree]);
+    const changed = git(['diff', '--no-renames', '--name-only', '-z', comparison, tree])
       .toString()
       .split('\0')
       .filter(Boolean);
-    checkSnapshot(source, { mode: 'push', commit, changed });
+    selections.push({ mode: 'push', tree, commit, changed });
   }
+  for (const selection of selections) checkSnapshot(source, selection);
+}
+
+try {
+  main();
 } catch (error) {
-  process.stderr.write(
-    `${process.argv[2] === '--docs' ? 'Documentation' : process.argv.includes('--staged') || process.argv.includes('--install-pre-commit') ? 'Commit' : 'Push'} check failed: ${(error as Error).message}\n`,
-  );
+  const label =
+    command === '--docs'
+      ? 'Documentation'
+      : stagedCommand || command === '--install-pre-commit'
+        ? 'Commit'
+        : 'Push';
+  process.stderr.write(`${label} check failed: ${(error as Error).message}\n`);
   process.exitCode = 1;
 }

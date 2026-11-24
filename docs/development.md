@@ -118,7 +118,25 @@ staged·push의 변경 분류는 Git의 이름 변경 탐지를 끄고 삭제 �
 
 Git을 실행하는 환경의 `PATH`에서 고정된 Node.js와 pnpm을 찾을 수 있어야 합니다. 셸에서 mise 활성화를 사용하거나 `mise exec -- git commit ...`, `mise exec -- git push ...`처럼 Git을 실행하세요.
 
-설치기는 기존 훅을 덮어쓰지 않습니다. 기존 gstack-redact pre-push는 보존하고 지원하는 로컬 훅 위치에 연결합니다. 기존 pre-commit이 있거나 `core.hooksPath`를 사용하면 설치를 중단하므로 기존 훅에 수동으로 통합해야 합니다.
+설치 훅에는 설치 시점의 `scripts/pre-push.ts` 내용이 들어갑니다. pre-commit은 현재 인덱스에서 고정한 트리를, pre-push는 푸시 입력에 지정된 각 커밋의 트리를 확인합니다. 대상에 같은 내용의 일반 파일이 있어야 하며, 검사에는 설치본을 사용합니다. 검사기가 없거나 내용이 다르면 커밋 또는 푸시 전체를 차단합니다. 검사기 내용이 다른 ref는 각 버전에 맞는 훅으로 따로 푸시하세요. ref 삭제에는 비교할 커밋이 없습니다. 수동 `--staged`와 `--docs`는 실행한 작업 복사본의 검사기를 사용합니다.
+
+### 기존 훅 이전과 검사기 갱신
+
+설치기는 기존 훅을 덮어쓰지 않습니다. 설치하거나 갱신할 검사기 내용을 먼저 검토하고, 커밋할 때는 그 내용을 스테이징하세요. 푸시할 때는 각 대상 커밋에 그 내용이 들어 있어야 합니다. 기본 훅 디렉터리는 연결된 Git worktree 사이에 공유되므로 한 곳에서 설치본을 바꾸면 같은 훅을 쓰는 다른 worktree에도 적용됩니다.
+
+1. `git config --get core.hooksPath`와 `git rev-parse --git-path hooks`로 설정과 기본 훅 경로를 확인합니다. 기존 파일과 권한을 확인하고 훅 디렉터리 밖에 권한을 유지한 복사본을 백업합니다.
+2. 독립된 Stock Scout 훅만 교체합니다. 이전 버전은 작업 트리의 `scripts/pre-push.ts`를 실행하는 짧은 래퍼이고, 새 버전에는 `# Stock Scout snapshot checker (pinned at installation)` 표식이 있습니다. gstack-redact가 상위 `pre-push`를 관리하는 경우에는 Stock Scout의 `pre-push.local`만 교체합니다. 교체할 파일 경로를 `hook`, Git이 실행할 훅 종류(`pre-commit` 또는 `pre-push`)를 `hook_kind`에 지정하세요. 훅과 같은 디렉터리에 새 파일을 생성하고, 생성과 실행 권한 설정이 모두 성공하면 이름을 바꿔 교체합니다.
+
+```sh
+draft=$(mktemp "$hook.stock-scout.XXXXXXXX") &&
+  mise exec -- node scripts/pre-push.ts --print-hook "$hook_kind" > "$draft" &&
+  chmod 700 "$draft" &&
+  mv "$draft" "$hook"
+```
+
+생성이나 권한 설정에 실패하면 원래 훅이 그대로 남습니다. 교체 후 이전 버전으로 되돌릴 때는 백업을 같은 디렉터리에 복사한 뒤 같은 방식으로 이름을 바꿉니다.
+
+3. 사용자 훅이나 `core.hooksPath`가 있으면 기존 파일을 보존합니다. `--print-hook`으로 새 Stock Scout 훅을 별도 파일에 생성하고, 생성에 성공한 파일에 실행 권한을 준 뒤 기존 훅에서 호출하도록 통합합니다. pre-push가 여러 검사기를 호출한다면 Git이 전달한 인수와 stdin을 각각 그대로 전달하고, 어느 검사든 실패하면 그 종료 상태로 푸시를 중단합니다. 이전에 작업 트리의 검사기를 직접 호출하던 줄은 고정한 훅 호출로 바꿉니다.
 
 ### 단일 전체 검사 실험 (2026-11-14)
 

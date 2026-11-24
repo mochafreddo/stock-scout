@@ -53,6 +53,8 @@ function fixture(t, initial = true) {
   git(root, 'init', '-b', 'main');
   git(root, 'config', 'user.email', 'test@example.invalid');
   git(root, 'config', 'user.name', 'Test');
+  mkdirSync(join(root, 'scripts'));
+  copyFileSync(cli, join(root, 'scripts/pre-push.ts'));
   writeFileSync(join(root, 'README.md'), '# Start\n');
   writeFileSync(
     join(root, 'package.json'),
@@ -122,8 +124,6 @@ for (const mode of ['docs', 'staged', 'push']) {
 }
 
 function installCommitHook(root) {
-  mkdirSync(join(root, 'scripts'), { recursive: true });
-  copyFileSync(cli, join(root, 'scripts/pre-push.ts'));
   const result = fixtureProcess(process.execPath, [cli, '--install-pre-commit'], {
     cwd: root,
   });
@@ -195,8 +195,6 @@ for (const renames of ['true', 'false']) {
     git(root, 'add', 'module.ts', 'module.md');
     git(root, 'commit', '-m', 'broken module rename');
     writeFileSync(join(root, 'module.ts'), 'export const value = 1;\n');
-    mkdirSync(join(root, 'scripts'));
-    copyFileSync(cli, join(root, 'scripts/pre-push.ts'));
     const installed = fixtureProcess(process.execPath, [cli, '--install'], {
       cwd: root,
     });
@@ -397,6 +395,54 @@ process.exit(${failure ? 23 : 0});
   }
 }
 
+test('installed pre-commit requires the pinned checker in the active staged tree', (t) => {
+  const { root, base } = fixture(t);
+  const checker = 'scripts/pre-push.ts';
+  installCommitHook(root);
+  const different = 'process.exit(0);\n';
+  writeFileSync(join(root, checker), different);
+  git(root, 'add', checker);
+  copyFileSync(cli, join(root, checker));
+  const commit = () => fixtureProcess('git', ['commit', '-m', 'staged update'], { cwd: root });
+  const mismatch = commit();
+  assert.notEqual(mismatch.status, 0, mismatch.stderr);
+  assert.match(mismatch.stderr, /Checker differs/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+  git(root, 'rm', '--cached', '-f', checker);
+  const missing = commit();
+  assert.notEqual(missing.status, 0, missing.stderr);
+  assert.match(missing.stderr, /Checker missing/);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), base);
+  rmSync(join(root, checker));
+  symlinkSync('../README.md', join(root, checker));
+  git(root, 'add', checker);
+  const linked = commit();
+  assert.notEqual(linked.status, 0, linked.stderr);
+  assert.match(linked.stderr, /not a regular file/);
+  rmSync(join(root, checker));
+  copyFileSync(cli, join(root, checker));
+  git(root, 'add', checker);
+  writeFileSync(join(root, checker), 'process.exit(29);\n');
+  writeFileSync(join(root, 'README.md'), '# Valid staged update\n');
+  git(root, 'add', 'README.md');
+  const matching = commit();
+  assert.equal(matching.status, 0, matching.stderr);
+  assert.match(matching.stderr, /Verified staged tree/);
+});
+
+test('installed hook preserves the checker source bytes', (t) => {
+  const { root } = fixture(t);
+  const checker = join(root, 'scripts/pre-push.ts');
+  const exactBytes = Buffer.concat([readFileSync(cli), Buffer.from([47, 47, 32, 255, 10])]);
+  writeFileSync(checker, exactBytes);
+  const installed = fixtureProcess(process.execPath, [checker, '--install-pre-commit'], {
+    cwd: root,
+  });
+  assert.equal(installed.status, 0, installed.stderr);
+  git(root, 'add', 'scripts/pre-push.ts');
+  assert.match(git(root, 'commit', '-m', 'exact checker bytes'), /exact checker bytes/);
+});
+
 test('pre-commit checks the staged document and preserves an unstaged repair', (t) => {
   const { root, base } = fixture(t);
   installCommitHook(root);
@@ -449,7 +495,7 @@ const initialCommitTest =
 
 test(initialCommitTest, (t) => {
   const { root } = fixture(t, false);
-  git(root, 'add', 'README.md', 'package.json');
+  git(root, 'add', 'README.md', 'package.json', 'scripts/pre-push.ts');
   installCommitHook(root);
   const result = fixtureProcess('git', ['commit', '-m', 'initial commit'], {
     cwd: root,
@@ -658,6 +704,47 @@ test('pre-commit installation is idempotent and preserves occupied and custom ho
   assert.match(configured.stderr, /core\.hooksPath/);
   assert.equal(existsSync(custom), false);
   assert.equal(readFileSync(hook, 'utf8'), scanner);
+
+  const printed = run(root, '', '', ['--print-hook', 'pre-commit']);
+  assert.equal(printed.status, 0, printed.stderr);
+  mkdirSync(custom);
+  writeFileSync(join(custom, 'stock-scout'), printed.stdout, { mode: 0o700 });
+  writeFileSync(
+    join(custom, 'pre-commit'),
+    '#!/bin/sh\necho "user hook ran" >&2\nexec ./custom-hooks/stock-scout "$@"\n',
+    { mode: 0o700 },
+  );
+  writeFileSync(join(root, 'README.md'), '# Custom hook integration\n');
+  const commit = fixtureProcess('git', ['commit', '-am', 'custom hook'], { cwd: root });
+  assert.equal(commit.status, 0, commit.stderr);
+  assert.match(commit.stderr, /user hook ran/);
+  assert.match(commit.stderr, /Verified staged tree/);
+});
+
+test('failed hook installation leaves no executable at the destination and can be retried', (t) => {
+  const { root } = fixture(t);
+  const incompleteWrite = join(root, 'incomplete-write.cjs');
+  writeFileSync(
+    incompleteWrite,
+    `const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const write = fs.writeFileSync;
+fs.writeFileSync = (path, data, options) => {
+  if (options?.mode !== 0o700) return write(path, data, options);
+  write(path, '#!/bin/sh\\n', options);
+  throw new Error('fixture disk write failed');
+};
+syncBuiltinESMExports();
+`,
+  );
+  const result = fixtureProcess(process.execPath, [cli, '--install-pre-commit'], {
+    cwd: root,
+    env: { NODE_OPTIONS: `--require="${incompleteWrite}"` },
+  });
+  assert.notEqual(result.status, 0, result.stderr);
+  assert.match(result.stderr, /fixture disk write failed/);
+  assert.equal(existsSync(join(root, '.git/hooks/pre-commit')), false);
+  installCommitHook(root);
 });
 
 test('pre-commit installs locked dependencies from the store before running checks', (t) => {
@@ -850,12 +937,57 @@ for (const mode of ['staged', 'push'])
     }
   });
 
+test('installed pre-push requires one pinned checker across every non-deletion ref', (t) => {
+  const { root, base } = fixture(t);
+  const checker = 'scripts/pre-push.ts';
+  const remote = join(root, 'remote.git');
+  git(root, 'init', '--bare', remote);
+  assert.equal(run(root, '', '', ['--install']).status, 0);
+  const push = (...refs) => fixtureProcess('git', ['push', remote, ...refs], { cwd: root });
+  const main = 'refs/heads/main';
+  const peer = 'refs/heads/peer';
+  const refs = () =>
+    git(root, '--git-dir', remote, 'for-each-ref', '--format=%(refname) %(objectname)');
+
+  writeFileSync(join(root, checker), 'process.exit(0);\n');
+  git(root, 'commit', '-am', 'checker differs');
+  git(root, 'branch', 'different');
+  copyFileSync(cli, join(root, checker));
+  git(
+    root,
+    'replace',
+    git(root, 'rev-parse', `different:${checker}`),
+    git(root, 'rev-parse', `${base}:${checker}`),
+  );
+  const mismatch = push(`${base}:${main}`, `different:${peer}`);
+  assert.notEqual(mismatch.status, 0, mismatch.stderr);
+  assert.match(mismatch.stderr, /Checker differs/);
+  assert.doesNotMatch(mismatch.stderr, /fixture check|Verified /);
+  assert.equal(refs(), '');
+  git(root, 'replace', '-d', git(root, 'rev-parse', `different:${checker}`));
+
+  git(root, 'rm', '--cached', '-f', checker);
+  git(root, 'commit', '-m', 'checker missing');
+  const missing = push(`HEAD:${main}`);
+  assert.notEqual(missing.status, 0, missing.stderr);
+  assert.match(missing.stderr, /Checker missing/);
+  assert.equal(refs(), '');
+
+  rmSync(join(root, checker));
+  const matching = push(`${base}:${main}`, `${base}:${peer}`);
+  assert.equal(matching.status, 0, matching.stderr);
+  assert.equal(refs(), `${main} ${base}\n${peer} ${base}`);
+  const mixed = push(`:${peer}`, 'HEAD:refs/heads/missing');
+  assert.notEqual(mixed.status, 0, mixed.stderr);
+  assert.match(mixed.stderr, /Checker missing/);
+  assert.equal(refs(), `${main} ${base}\n${peer} ${base}`);
+  const deletion = push(`:${peer}`);
+  assert.equal(deletion.status, 0, deletion.stderr);
+  assert.equal(refs(), `${main} ${base}`);
+});
+
 test('installed hook preserves the existing scanner and blocks an actual local push', (t) => {
   const { root } = fixture(t);
-  mkdirSync(join(root, 'scripts'));
-  copyFileSync(cli, join(root, 'scripts/pre-push.ts'));
-  git(root, 'add', '.');
-  git(root, 'commit', '-m', 'add runner');
   const hook = join(root, '.git/hooks/pre-push');
   const scanner = `#!/bin/sh
 # gstack-redact pre-push (managed)
@@ -867,10 +999,26 @@ fi
 echo 'fixture scanner ran' >&2
 `;
   writeFileSync(hook, scanner, { mode: 0o700 });
+  const local = join(root, '.git/hooks/pre-push.local');
+  const legacy =
+    '#!/bin/sh\nexec node "$(git rev-parse --show-toplevel)/scripts/pre-push.ts" "$@"\n';
+  writeFileSync(local, legacy, { mode: 0o700 });
+  const refused = run(root, '', '', ['--install']);
+  assert.notEqual(refused.status, 0, refused.stderr);
+  assert.match(refused.stderr, /preserved/);
+  assert.equal(readFileSync(local, 'utf8'), legacy);
+  const backup = join(root, 'legacy-push-backup');
+  copyFileSync(local, backup);
+  const printed = run(root, '', '', ['--print-hook', 'pre-push']);
+  assert.equal(printed.status, 0, printed.stderr);
+  const draft = join(dirname(local), 'stock-scout-draft');
+  writeFileSync(draft, printed.stdout, { mode: 0o700 });
+  renameSync(draft, local);
+
   const installed = run(root, '', '', ['--install']);
   assert.equal(installed.status, 0, installed.stderr);
   assert.equal(readFileSync(hook, 'utf8'), scanner);
-  assert.ok(readFileSync(join(root, '.git/hooks/pre-push.local'), 'utf8').includes('pre-push.ts'));
+  assert.equal(readFileSync(backup, 'utf8'), legacy);
   const remote = join(root, 'remote.git');
   git(root, 'init', '--bare', remote);
   const first = fixtureProcess('git', ['push', remote, 'HEAD:refs/heads/main'], {
@@ -1142,7 +1290,6 @@ test('push CLI honors the pnpm test loopback preflight', (t) => {
   mkdirSync(join(root, 'tests'));
   writeFileSync(join(root, 'tests/fixture.test.mjs'), "console.error('fixture test');\n");
   writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
-  mkdirSync(join(root, 'scripts'));
   copyFileSync(
     new URL('../scripts/test-preflight.ts', import.meta.url),
     join(root, 'scripts/test-preflight.ts'),
