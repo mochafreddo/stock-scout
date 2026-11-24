@@ -3,11 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>Label</key><string>local.stock-scout.dot</string>
-  <!-- The local wrapper must exec Node with scripts/run-dot-mcp.ts followed by
-       the absolute approved CLI launcher, absolute foreground tunnel wrapper,
-       absolute persistent owner-only claim directory, and loopback port.
-       The tunnel wrapper receives the local MCP URL as its sole argument.
-       Keep tunnel configuration and credentials on the Mac. -->
   <key>ProgramArguments</key>
   <array><string>/absolute/machine-local/path/to/run-stock-scout-dot</string></array>
   <!-- launchd interprets this in the Mac's local timezone. This example assumes Asia/Seoul. -->

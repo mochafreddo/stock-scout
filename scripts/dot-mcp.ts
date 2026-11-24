@@ -5,11 +5,23 @@ import type { DotWindow } from './dot-mcp-window.ts';
 import { record } from './toss-values.ts';
 
 const protocol = '2025-11-25';
+type CliResponse = Record<string, unknown> & { data: unknown[] };
+
+function isCliResponse(response: unknown, status: string | undefined): response is CliResponse {
+  return (
+    status !== undefined &&
+    record(response) &&
+    response.version === 1 &&
+    Array.isArray(response.data) &&
+    response.status === status
+  );
+}
+
 async function execute(
   launcher: string,
   args: string[],
   onStart?: () => void,
-): Promise<{ exitCode: number; response: Record<string, unknown> }> {
+): Promise<{ exitCode: number; response: CliResponse }> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       launcher,
@@ -21,11 +33,7 @@ async function execute(
           const response: unknown = JSON.parse(stdout);
           if (
             typeof exitCode !== 'number' ||
-            !record(response) ||
-            response.version !== 1 ||
-            !Array.isArray(response.data) ||
-            !['success', 'error', 'partial'][exitCode] ||
-            response.status !== ['success', 'error', 'partial'][exitCode]
+            !isCliResponse(response, ['success', 'error', 'partial'][exitCode])
           )
             throw new Error();
           resolve({ exitCode, response });
@@ -58,16 +66,15 @@ async function query(launcher: string, args: string[], window: DotWindow) {
     if (beforeReadiness) return rejected(window, beforeReadiness);
     const ready = await execute(launcher, ['readiness']);
     const rows = ready.response.data;
+    const readiness = record(rows[0]) ? rows[0].readiness : undefined;
     if (ready.exitCode !== 0) {
-      const readiness = Array.isArray(rows) && rows[0]?.readiness;
       window.report(
         'ready_blocked',
         readiness === 'unavailable' ? 'READINESS_UNAVAILABLE' : 'READINESS_BLOCKED',
       );
       return toolResult({ stage, ...ready }, true);
     }
-    if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.readiness !== 'ready')
-      throw new Error('Invalid readiness result');
+    if (rows.length !== 1 || readiness !== 'ready') throw new Error('Invalid readiness result');
     stage = 'query';
     const beforeStart = window.rejection();
     if (beforeStart) return rejected(window, beforeStart);

@@ -68,19 +68,17 @@ export async function runScheduledDot(options: Options) {
   const finished = Promise.withResolvers<void>();
   let stopping = false;
   const stop = async (code?: string) => {
-    if (!stopping) {
-      stopping = true;
-      const pending = window.close();
-      clearInterval(timer);
-      await Promise.all([pending, new Promise<void>((resolve) => server.close(() => resolve()))]);
-      tunnel.kill();
-      const force = setTimeout(() => tunnel.kill('SIGKILL'), 5000);
-      await exited;
-      clearTimeout(force);
-      report('closed', code);
-      finished.resolve();
-    }
-    return finished.promise;
+    if (stopping) return finished.promise;
+    stopping = true;
+    const pending = window.close();
+    clearInterval(timer);
+    await Promise.all([pending, new Promise<void>((resolve) => server.close(() => resolve()))]);
+    tunnel.kill();
+    const force = setTimeout(() => tunnel.kill('SIGKILL'), 5000);
+    await exited;
+    clearTimeout(force);
+    report('closed', code);
+    finished.resolve();
   };
   const timer = setInterval(() => {
     if (!isOpen()) void stop('WINDOW_CLOSED');
