@@ -113,10 +113,10 @@ export function runCli(f, steps = [], args = ['prices', 'AAPL'], extra = {}) {
     let failure;
     let stdout = '',
       stderr = '';
-    child.stdout.on('data', (data) => {
+    child.stdout.setEncoding('utf8').on('data', (data) => {
       stdout += data;
     });
-    child.stderr.on('data', (data) => {
+    child.stderr.setEncoding('utf8').on('data', (data) => {
       stderr += data;
     });
     const timer = setTimeout(() => {

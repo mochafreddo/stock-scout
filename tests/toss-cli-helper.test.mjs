@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import fs, {
   existsSync,
   mkdtempSync,
@@ -208,6 +209,42 @@ test('readiness waiting reports the original spawn failure and permits immediate
   } finally {
     await Promise.allSettled([pending]);
     f.close();
+  }
+});
+
+test('helper preserves split UTF-8 characters in stdout and stderr', async () => {
+  const f = fixture();
+  const gate = join(f.directory, 'output.gate');
+  const writer = `
+    import { existsSync, writeSync } from 'node:fs';
+    import { setTimeout } from 'node:timers/promises';
+    writeSync(1, Buffer.from([0x3e, 0xed]));
+    writeSync(2, Buffer.from([0x3e, 0xea]));
+    while (!existsSync(process.env.OUTPUT_GATE)) await setTimeout(5);
+    writeSync(1, Buffer.from([0x95, 0x9c, 0x0a]));
+    writeSync(2, Buffer.from([0xb8, 0x80, 0x0a]));
+    process.exit(1);
+  `;
+  const run = runCli(f, [], [], {
+    NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(writer)}`,
+    OUTPUT_GATE: gate,
+  });
+  try {
+    // Release the remaining bytes only after the parent reads the prefix from both pipes.
+    await Promise.race([
+      Promise.all([once(run.child.stdout, 'data'), once(run.child.stderr, 'data')]),
+      run.then(({ stderr }) => assert.fail(`Child closed before writing prefixes: ${stderr}`)),
+    ]);
+    writeFileSync(gate, '', { mode: 0o600 });
+    assert.deepEqual(await run, {
+      status: 1,
+      signal: null,
+      stdout: '>한\n',
+      stderr: '>글\n',
+      requests: [],
+    });
+  } finally {
+    await closeRuns(f, [run], []);
   }
 });
 
