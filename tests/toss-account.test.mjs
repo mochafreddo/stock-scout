@@ -741,8 +741,40 @@ test('KRW buying power rejects fractional won and selection cannot expose cached
   }
 });
 
-test('unsafe selection input files are rejected before HTTP and preserve the default account', async () => {
-  for (const boundary of ['permissions', 'symlink']) {
+test('malformed shared state fails consistently without HTTP or replacing the account', async (t) => {
+  const f = fixture();
+  try {
+    const original = await selection(f);
+    assert.equal(original.status, 0, original.stdout + original.stderr);
+    const account = join(f.directory, 'account.json');
+    const preserved = readFileSync(account);
+    const input = join(f.directory, 'replacement.json');
+    writeFileSync(
+      input,
+      JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['holdings'] }),
+      {
+        mode: 0o600,
+      },
+    );
+    writeFileSync(join(f.directory, 'state.json'), '{', { mode: 0o600 });
+
+    for (const args of [['account-select', input], ['readiness'], ['prices', 'AAPL']]) {
+      await t.test(args[0], async () => {
+        const result = await runCli(f, [], args);
+        assert.equal(result.status, 1, result.stdout + result.stderr);
+        assert.equal(result.requests.length, 0);
+        assert.deepEqual(readFileSync(account), preserved);
+        assert.equal(JSON.parse(result.stdout).error.code, 'AUTH_STORAGE');
+        assert.equal(result.stderr, 'AUTH_STORAGE\n');
+      });
+    }
+  } finally {
+    f.close();
+  }
+});
+
+test('invalid selection input files are rejected before HTTP and preserve the default account', async () => {
+  for (const boundary of ['permissions', 'symlink', 'syntax']) {
     const f = fixture();
     try {
       const selected = await selection(f);
@@ -756,6 +788,7 @@ test('unsafe selection input files are rejected before HTTP and preserve the def
       );
       let unsafe = input;
       if (boundary === 'permissions') chmodSync(input, 0o644);
+      else if (boundary === 'syntax') writeFileSync(input, '{');
       else {
         unsafe = join(f.directory, 'selection-link.json');
         symlinkSync(input, unsafe);

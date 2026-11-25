@@ -190,6 +190,9 @@ function read(path: string) {
     )
       throw new TossError('AUTH_STORAGE');
     return parseJson(readFileSync(fd, 'utf8'));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new TossError('AUTH_STORAGE');
+    throw error;
   } finally {
     closeSync(fd);
   }
