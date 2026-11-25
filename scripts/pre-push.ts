@@ -82,14 +82,12 @@ function markdownText(path: string) {
         containers.length = depth;
         fence = '';
       }
-      if (!fence) {
-        for (;;) {
-          const quote = quotePrefix.exec(content)?.[0];
-          const prefix = quote ?? listPrefix.exec(content)?.[0];
-          if (!prefix) break;
-          containers.push(quote ? 'quote' : prefix.length);
-          content = content.slice(prefix.length);
-        }
+      while (!fence) {
+        const quote = quotePrefix.exec(content)?.[0];
+        const prefix = quote ?? listPrefix.exec(content)?.[0];
+        if (!prefix) break;
+        containers.push(quote ? 'quote' : prefix.length);
+        content = content.slice(prefix.length);
       }
       if (!content.trim()) return '';
       const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content);
