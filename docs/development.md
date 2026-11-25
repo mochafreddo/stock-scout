@@ -13,6 +13,15 @@ mise exec -- pnpm install --frozen-lockfile
 
 pnpm은 [lockfile](../pnpm-lock.yaml)에 따라 개발 의존성을 설치합니다. 이 단계에서 뒤의 Git 훅에 필요한 로컬 pnpm 저장소도 준비합니다. 인증 없는 CLI와 합성 예제는 Node.js만으로 실행할 수 있습니다.
 
+### 오프라인 워크트리 준비
+
+새 워크트리에서 작업을 시작할 때는 사용이 승인된 기존 pnpm 저장소의 절대 경로를 지정하고, 아래 설치가 성공하는지 확인하세요. 예시 경로를 사용할 저장소의 실제 경로로 바꾸세요.
+
+```sh
+export npm_config_store_dir=/absolute/path/to/prepared-pnpm-store
+mise exec -- pnpm install --offline --frozen-lockfile --ignore-scripts
+```
+
 [TypeScript 설정](../tsconfig.json)은 `scripts/*.ts`를 검사합니다. JavaScript 테스트·소비 예제는 [형식·린트 설정](../biome.json)과 실제 실행 검사로 확인하세요. 형식 검사가 이 파일들의 타입까지 검사한다고 해석하지 마세요.
 
 ## 로컬 검사
@@ -117,6 +126,8 @@ pre-commit은 staged 스냅샷의 공백·로컬 Markdown 링크·프로젝트 �
 staged·push의 변경 분류는 Git의 이름 변경 탐지를 끄고 삭제 경로와 추가 경로를 모두 확인합니다. 코드 파일을 `.md`로 이름 변경해도 삭제된 코드 경로를 기준으로 코드 검사를 실행합니다. 문서끼리 이름 변경하면 문서 검사를 유지하며, 코드끼리 또는 문서에서 코드로 이름 변경하면 코드 검사를 실행합니다. push는 코드 변경이 있으면 `pnpm run check`, `pnpm run typecheck`, `pnpm test`를 모두 실행합니다. 모듈 이름 변경 뒤 남은 호출자의 실제 타입 오류는 작업 디렉터리에서 고쳤더라도 staged·push 스냅샷에 남아 있으면 차단합니다.
 
 코드 검사는 작업 트리에서 확인한 로컬 pnpm 저장소를 사용합니다. 훅은 staged·push 스냅샷의 manifest와 lockfile에 맞는 의존성을 그 스냅샷에 오프라인으로 설치합니다. 설치 스크립트 실행을 끄고 패키지 파일을 임시 스냅샷에 복사합니다. 저장소에 필요한 패키지가 없으면 위의 개발 의존성 설치를 먼저 실행하세요. manifest와 lockfile이 불일치하면 두 파일을 함께 갱신한 뒤 다시 검사하세요. [스냅샷 의존성 결정](adr/0021-pnpm-snapshot-dependencies.md)에서 이 방식의 근거를 확인할 수 있습니다.
+
+오프라인 준비에 성공한 셸에서 로컬 검사와 Git 명령을 실행하세요. 다른 셸이나 위임 작업에서 실행한다면 같은 `npm_config_store_dir`를 넘기세요. `ERR_PNPM_NO_OFFLINE_TARBALL`이 나오면 검증을 시작하기 전에 현재 lockfile을 충족하는 저장소를 지정하고 준비 명령을 다시 실행하세요.
 
 Git을 실행하는 환경의 `PATH`에서 고정된 Node.js와 pnpm을 찾을 수 있어야 합니다. 셸에서 mise 활성화를 사용하거나 `mise exec -- git commit ...`, `mise exec -- git push ...`처럼 Git을 실행하세요.
 
