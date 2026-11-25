@@ -124,14 +124,20 @@ async function price(url) {
   return (await res.json()).result.structuredContent;
 }
 
-async function openedTunnel(trace) {
+async function openedTunnel(trace, exited) {
   const file = `${trace}-tunnel`;
   const changed = Promise.withResolvers();
   const watcher = watch(dirname(file), () => {
     if (existsSync(file)) changed.resolve();
   });
   try {
-    if (!existsSync(file)) await changed.promise;
+    if (!existsSync(file))
+      await Promise.race([
+        changed.promise,
+        exited.then(() => {
+          throw new Error('Tunnel exited before publishing its marker');
+        }),
+      ]);
     const [pid, url] = readFileSync(file, 'utf8').trim().split(' ');
     return { pid: Number(pid), url };
   } finally {
@@ -255,7 +261,7 @@ test('at close the tunnel drains a started price response and turns away the wai
   let time = Date.parse('2026-11-24T12:19:59Z');
   options.now = () => time;
   const run = await start();
-  const tunnel = await openedTunnel(trace);
+  const tunnel = await openedTunnel(trace, run.done);
   assert.equal(tunnel.url, run.url);
   const active = price(tunnel.url);
   await entered.promise;
@@ -299,7 +305,7 @@ test('a silent connection closes the foreground tunnel at the deadline after sle
   let time = Date.parse('2026-11-24T12:00:00Z');
   options.now = () => time;
   const run = await start();
-  const tunnel = await openedTunnel(trace);
+  const tunnel = await openedTunnel(trace, run.done);
   assert.equal(tunnel.url, run.url);
   process.kill(tunnel.pid, 0);
   time = Date.parse('2026-11-25T12:00:00Z');
@@ -338,7 +344,7 @@ test('killing the serving process leaves the session claimed before any replacem
       throw Error('worker exited before serving');
     }),
   ]);
-  assert.equal((await openedTunnel(trace)).url, url);
+  assert.equal((await openedTunnel(trace, exited)).url, url);
   assert.equal((await price(url)).exitCode, 0);
   worker.kill('SIGKILL');
   assert.equal((await exited)[1], 'SIGKILL');
