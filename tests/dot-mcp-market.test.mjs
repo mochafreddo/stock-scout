@@ -32,8 +32,8 @@ async function marketServer(t) {
     TEST_STEP_FILE: steps,
     TEST_CLOCK_FILE: clock,
   });
-  const call = async (name, args, mocks = []) => {
-    now += 5000;
+  const call = async (name, args, mocks = [], elapsedMs = 5000) => {
+    now += elapsedMs;
     writeFileSync(clock, String(now), { mode: 0o600 });
     writeFileSync(steps, JSON.stringify(mocks), { mode: 0o600 });
     const reply = await fetch(url, {
@@ -50,6 +50,50 @@ async function marketServer(t) {
   };
   return { call, f };
 }
+
+test('an immediate follow-up stops at readiness until a later call after the wait', async (t) => {
+  const { call, f } = await marketServer(t);
+  const prices = (symbol, elapsedMs) =>
+    call(
+      'prices',
+      { symbols: [symbol] },
+      [
+        {
+          path: '/api/v1/prices',
+          body: { result: [{ symbol, currency: 'USD', lastPrice: '12' }] },
+        },
+      ],
+      elapsedMs,
+    );
+  const first = (await prices('FIRST', 0)).result.structuredContent;
+  assert.deepEqual(
+    [first.stage, first.exitCode, first.response.data[0].symbol],
+    ['query', 0, 'FIRST'],
+  );
+  const firstRequests = readRequests(f.trace);
+  assert.deepEqual(
+    firstRequests.map(({ path }) => path),
+    ['/api/v1/prices'],
+  );
+
+  const blocked = (await prices('NEXT', 0)).result.structuredContent;
+  assert.deepEqual(
+    [blocked.stage, blocked.exitCode, blocked.response.error.code],
+    ['readiness', 1, 'WAIT_REQUIRED'],
+  );
+  assert.deepEqual(readRequests(f.cliTrace), [['readiness'], ['prices', 'FIRST'], ['readiness']]);
+  assert.deepEqual(readRequests(f.trace), firstRequests);
+
+  const later = (await prices('NEXT', 5000)).result.structuredContent;
+  assert.deepEqual(
+    [later.stage, later.exitCode, later.response.data[0].symbol],
+    ['query', 0, 'NEXT'],
+  );
+  assert.deepEqual(
+    readRequests(f.trace).map(({ path }) => path),
+    ['/api/v1/prices', '/api/v1/prices'],
+  );
+});
 
 test('a ranked symbol leads to a stock lookup and two daily candle pages', async (t) => {
   const { call, f } = await marketServer(t);
