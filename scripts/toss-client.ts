@@ -292,7 +292,7 @@ class SharedRequestCoordinator {
     this.load();
   }
   inspect(): ReadinessObservation {
-    const { state } = this.loadReservation();
+    const { state } = this.loadReservation('inspect');
     const reasons: string[] = [];
     if (state.pending) reasons.push('AUTH_ISSUANCE_UNKNOWN');
     if (BigInt(state.clock.nextNs) > process.hrtime.bigint()) reasons.push('WAIT_REQUIRED');
@@ -380,12 +380,12 @@ class SharedRequestCoordinator {
       `cooldown-${randomUUID()}.json`,
     );
   }
-  private load(): State {
+  private load(requireStoredState = false): State {
     const path = join(this.directory, 'state.json');
     try {
       secure(path);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      if (!requireStoredState && (error as NodeJS.ErrnoException).code === 'ENOENT')
         return {
           fingerprint: this.fingerprint,
           version: 2,
@@ -421,13 +421,21 @@ class SharedRequestCoordinator {
     if (state.token) this.observeToken(state.token.value);
     return state;
   }
-  private loadReservation() {
-    const state = this.load();
+  private loadReservation(mode: 'inspect' | 'locked') {
     const records = readdirSync(this.directory).filter((name) =>
       /^cooldown-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/.test(name),
     );
+    let disappeared = false;
+    let latest = '0'.repeat(30);
     for (const name of records) {
-      const record = read(join(this.directory, name));
+      let record: ReturnType<typeof read>;
+      try {
+        record = read(join(this.directory, name));
+      } catch (error) {
+        if (mode !== 'inspect' || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        disappeared = true;
+        continue;
+      }
       if (
         record?.fingerprint !== this.fingerprint ||
         typeof record.clock?.id !== 'string' ||
@@ -437,14 +445,15 @@ class SharedRequestCoordinator {
         throw new TossError('AUTH_STORAGE');
       if (record.clock.id !== this.clockId)
         throw new TossError('CLOCK_UNCERTAIN', undefined, undefined, 'mismatch');
-      if (BigInt(record.clock.nextNs) > BigInt(state.clock.nextNs))
-        state.clock.nextNs = record.clock.nextNs;
+      if (record.clock.nextNs > latest) latest = record.clock.nextNs;
     }
+    const state = this.load(disappeared);
+    if (latest > state.clock.nextNs) state.clock.nextNs = latest;
     return { state, records };
   }
   private locked<T>(operation: (state: State) => Promise<T>) {
     return withLock(this.directory, 'client.lock', this.check, this.wait, () => {
-      const { state, records } = this.loadReservation();
+      const { state, records } = this.loadReservation('locked');
       if (records.length) {
         save(this.directory, state);
         for (const name of records) unlinkSync(join(this.directory, name));

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { deserialize } from 'node:v8';
 import { authState, fixture, runCli, snapshot } from './toss-cli-helper.mjs';
 
 function writeState(f, changes = {}) {
@@ -376,3 +377,41 @@ test('readiness reports pending issuance, waits and locks together without mergi
     f.close();
   }
 });
+
+for (const phase of ['before-list', 'after-list', 'missing-state']) {
+  test(`readiness checks the shared state when a cooldown disappears (${phase})`, async () => {
+    const f = fixture();
+    try {
+      if (phase !== 'missing-state') writeState(f);
+      const { fingerprint, clock } = authState();
+      writeFileSync(
+        join(f.directory, 'cooldown-11111111-1111-4111-8111-111111111111.json'),
+        JSON.stringify({
+          fingerprint,
+          clock: { ...clock, nextNs: '000000000001793977260000000000' },
+        }),
+        { mode: 0o600 },
+      );
+      const result = await runCli(f, [], ['readiness'], {
+        TEST_PLATFORM: 'darwin',
+        NODE_OPTIONS: `--import=${new URL('./toss-readiness-merge-mock.mjs', import.meta.url).href}`,
+        TEST_MERGE_PHASE: phase,
+        TEST_MERGE_SNAPSHOT: `${f.cliTrace}.snapshot`,
+      });
+      const code = phase === 'missing-state' ? 'AUTH_STORAGE' : 'WAIT_REQUIRED';
+      assert.deepEqual(result.requests, []);
+      assert.deepEqual(snapshot(f.directory), deserialize(readFileSync(`${f.cliTrace}.snapshot`)));
+      assert.equal(result.status, 1);
+      assert.equal(result.stderr.trim(), code);
+      assert.deepEqual(JSON.parse(result.stdout).data, [
+        {
+          readiness: phase === 'missing-state' ? 'unavailable' : 'blocked',
+          token: phase === 'missing-state' ? 'unknown' : 'valid',
+          reasons: [code],
+        },
+      ]);
+    } finally {
+      f.close();
+    }
+  });
+}
