@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 const checkerPath = 'scripts/pre-push.ts';
 
@@ -51,8 +51,25 @@ function snapshot(commit: string, destination: string) {
     offset = end + 2 + size;
     const target = join(destination, entry.path);
     mkdirSync(dirname(target), { recursive: true });
-    if (entry.mode === '120000') symlinkSync(bytes.toString(), target);
-    else writeFileSync(target, bytes, { mode: entry.mode === '100755' ? 0o700 : 0o600 });
+    if (entry.mode === '120000') {
+      try {
+        symlinkSync(bytes, target);
+      } catch {
+        throw new Error('Could not create snapshot symlink');
+      }
+    } else writeFileSync(target, bytes, { mode: entry.mode === '100755' ? 0o700 : 0o600 });
+  }
+  for (const entry of entries) {
+    if (entry.mode !== '120000') continue;
+    let resolved: string;
+    try {
+      resolved = realpathSync.native(join(destination, entry.path));
+    } catch {
+      throw new Error('Unresolved snapshot symlink');
+    }
+    const inside = relative(destination, resolved);
+    if (inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside))
+      throw new Error('Symlink outside snapshot');
   }
   return entries.map((entry) => entry.path);
 }

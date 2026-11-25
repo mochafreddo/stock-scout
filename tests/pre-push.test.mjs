@@ -102,16 +102,21 @@ for (const mode of ['docs', 'staged', 'push']) {
     const outside = mkdtempSync(join(tmpdir(), 'stock-scout-link-outside-'));
     t.after(() => rmSync(outside, { recursive: true, force: true }));
     writeFileSync(join(outside, 'outside.md'), '# Outside\n');
-    symlinkSync(join(outside, 'outside.md'), join(root, 'escape.txt'));
     const valid =
       '[normal](#start)\n[parentheses](guide(v1).md#details)\n[angle](<guide(v1).md#details>)\n[title](guide(v1).md#details "Guide")\n';
     for (const [link, diagnostic] of [
       ['', null],
       ['[missing](missing(v1).md)', /missing local target/],
       ['[heading](guide(v1).md#absent)', /missing heading/],
-      ['[outside](escape.txt)', /local target leaves snapshot/],
+      [
+        '[outside](escape.txt)',
+        mode === 'docs' ? /local target leaves snapshot/ : /Symlink outside snapshot/,
+      ],
       [`[unfinished](${'a'.repeat(32_768)}\n[missing](missing.md)`, /missing local target/],
     ]) {
+      if (link === '[outside](escape.txt)')
+        symlinkSync(join(outside, 'outside.md'), join(root, 'escape.txt'));
+      else rmSync(join(root, 'escape.txt'), { force: true });
       writeFileSync(join(root, 'README.md'), `# Start\n\n${valid}${link ? `\n${link}\n` : ''}`);
       if (mode !== 'docs') git(root, 'add', '.');
       if (mode === 'push') git(root, 'commit', '-m', 'link destination');
@@ -1222,6 +1227,40 @@ disable-model-invocation: true
   return { root, base, directory, link: join(root, '.claude/skills', name) };
 }
 
+for (const mode of ['staged', 'push']) {
+  test(`${mode} snapshot validates tracked symlinks before quality checks`, async (t) => {
+    const { root, base } = skillFixture(t);
+    const staged = mode === 'staged';
+    const installed = run(root, '', '', [staged ? '--install-pre-commit' : '--install']);
+    assert.equal(installed.status, 0, installed.stderr);
+    const link = join(root, 'alias');
+    for (const [name, target, error] of [
+      ['internal', '.claude/skills/sample', null],
+      ['missing', 'missing', /Unresolved snapshot symlink/],
+      ['loop', 'alias', /Unresolved snapshot symlink/],
+      ['external', join(root, 'README.md'), /Symlink outside snapshot/],
+    ]) {
+      await t.test(name, () => {
+        rmSync(link, { force: true });
+        symlinkSync(target, link);
+        git(root, 'add', '.');
+        if (!staged) git(root, 'commit', '-m', 'snapshot link');
+        const hook = join(root, '.git/hooks', staged ? 'pre-commit' : 'pre-push');
+        const result = fixtureProcess(hook, [], {
+          cwd: root,
+          input: `refs/heads/main ${git(root, 'rev-parse', 'HEAD')} refs/heads/main ${base}\n`,
+        });
+        assert.equal(result.status, error ? 1 : 0, result.stderr);
+        if (error) {
+          assert.match(result.stderr, error);
+          assert.doesNotMatch(result.stderr, /fixture check|fixture typecheck|fixture test/);
+          assert.ok(!result.stderr.includes(root));
+        } else assert.match(result.stderr, /fixture check/);
+      });
+    }
+  });
+}
+
 test('pre-push rejects a committed skill link even when the working copy repairs it', (t) => {
   const { root, base, link } = skillFixture(t);
   rmSync(link);
@@ -1234,7 +1273,7 @@ test('pre-push rejects a committed skill link even when the working copy repairs
   const before = git(root, 'status', '--porcelain');
   const broken = run(root, tip, base);
   assert.equal(broken.status, 1, broken.stderr);
-  assert.match(broken.stderr, /sample.*relative symlink/);
+  assert.match(broken.stderr, /Unresolved snapshot symlink/);
   assert.equal(git(root, 'status', '--porcelain'), before);
   git(root, 'add', '.');
   git(root, 'commit', '-m', 'repair skill link');
@@ -1248,7 +1287,10 @@ test('pre-push rejects a committed skill link even when the working copy repairs
     git(root, 'commit', '-m', 'invalid skill link kind');
     const invalid = run(root, git(root, 'rev-parse', 'HEAD'), base);
     assert.equal(invalid.status, 1, invalid.stderr);
-    assert.match(invalid.stderr, /sample.*relative symlink/);
+    assert.match(
+      invalid.stderr,
+      target && target !== 'regular' ? /Symlink outside snapshot/ : /sample.*relative symlink/,
+    );
   }
 });
 
