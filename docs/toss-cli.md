@@ -50,7 +50,7 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 ## 오프라인 주문 초안
 
-`node scripts/toss.ts order-draft INPUT_JSON_FILE`은 JSON 파일 하나를 읽습니다. 기존 `stock` 조회에서 선택한 `symbol`, `market` 값을 각각 초안의 `symbol`, `listingMarket`에 전달하고 확인 가능한 `isinCode`도 그대로 전달하세요. 초안의 `market=US`는 유지합니다. 이 명령은 종목을 다시 조회하거나 확정하지 않습니다. 지원 조합은 `orderType=MARKET`, `currency=USD`에서 `side=BUY`의 USD 금액 `amount` 또는 `side=SELL`의 주 수량 `quantity`입니다. 금액과 수량은 양수 소수 문자열입니다. 수량 매수·금액 매도·지정가는 미지원입니다.
+`node scripts/toss.ts order-draft INPUT_JSON_FILE`은 최대 1 MiB(1,048,576바이트)의 일반 JSON 파일 하나를 읽습니다. 크기가 상한을 넘으면 `INPUT_INVALID`와 종료 코드 `1`을 반환합니다. 기존 `stock` 조회에서 선택한 `symbol`, `market` 값을 각각 초안의 `symbol`, `listingMarket`에 전달하고 확인 가능한 `isinCode`도 그대로 전달하세요. 초안의 `market=US`는 유지합니다. 이 명령은 종목을 다시 조회하거나 확정하지 않습니다. 지원 조합은 `orderType=MARKET`, `currency=USD`에서 `side=BUY`의 USD 금액 `amount` 또는 `side=SELL`의 주 수량 `quantity`입니다. 금액과 수량은 양수 소수 문자열입니다. 수량 매수·금액 매도·지정가는 미지원입니다.
 
 `listingMarket`은 `NYSE`, `NASDAQ`, `AMEX`, `US_ETC` 중 하나이며 `isinCode`는 `stock`과 같은 ISIN 형식을 받습니다. 두 필드는 생략하거나 `null`로 전달할 수 있고, 출력에서는 누락 값을 `null`로 표시합니다. 상장 시장이 빠진 기존 입력도 `draftVersion=1`, `partial`·종료 코드 `2`로 읽지만 `omissions`에 `{"field":"listingMarket","reason":"not_verified"}`가 추가됩니다. 이때 선택한 종목을 확인할 때까지 카드를 보류하세요. ISIN이 `null`이면 심볼과 상장 시장으로 대상을 구별할 수 있는지 확인한 뒤 카드를 표시할 수 있습니다. CLI는 전달된 식별자의 형식만 검사하므로 모호한 종목을 임의로 선택하거나 식별자를 만들어 넣지 마세요.
 

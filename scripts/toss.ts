@@ -163,7 +163,7 @@ try {
               name: 'order-draft',
               usage: 'node scripts/toss.ts order-draft INPUT_JSON_FILE',
               semantics:
-                'Offline MARKET draft for USD amount BUY or share quantity SELL using supplied sessions evidence. Submit manually in the Toss app after checking unknown app conditions.',
+                'Offline MARKET draft for USD amount BUY or share quantity SELL using supplied sessions evidence (JSON file up to 1 MiB). Submit manually in the Toss app after checking unknown app conditions.',
             },
             { name: 'constraints', usage: 'node scripts/toss.ts constraints SYMBOL DATE' },
             {

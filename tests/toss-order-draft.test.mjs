@@ -34,7 +34,7 @@ function input(side = 'BUY') {
     },
   };
 }
-async function draft(value, now = '2026-11-06T14:00:00Z', args) {
+async function draft(value, now = '2026-11-06T14:00:00Z', args, extra = {}) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'stock-scout-draft-')));
   const f = {
     directory,
@@ -48,6 +48,7 @@ async function draft(value, now = '2026-11-06T14:00:00Z', args) {
     const result = await runCli(f, [], args ?? ['order-draft', path], {
       TEST_CLOCK_START: String(Date.parse(now)),
       TOSS_STATE_DIR: undefined,
+      ...extra,
     });
     assert.deepEqual(result.requests, [], 'draft must never transmit HTTP');
     assert.ok(!(result.stdout + result.stderr).includes(directory));
@@ -59,6 +60,13 @@ async function draft(value, now = '2026-11-06T14:00:00Z', args) {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+function assertInvalidDraft(result) {
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr.trim(), 'INPUT_INVALID');
+  assert.equal(result.out.error.code, 'INPUT_INVALID');
+  assert.deepEqual(result.out.data, []);
 }
 
 test('selected listings with the same symbol retain their market and known ISIN offline', async () => {
@@ -363,13 +371,50 @@ test('order draft rejects a FIFO without waiting for a writer', async () => {
     const fifo = join(directory, 'input.json');
     assert.equal(spawnSync('mkfifo', ['-m', '600', fifo]).status, 0);
     const result = await draft(input(), undefined, ['order-draft', fifo]);
-    assert.equal(result.status, 1);
-    assert.equal(result.stderr.trim(), 'INPUT_INVALID');
-    assert.equal(result.out.error.code, 'INPUT_INVALID');
-    assert.deepEqual(result.out.data, []);
+    assertInvalidDraft(result);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+const oneMiB = 1_048_576;
+
+function draftAtSizeLimit() {
+  const value = input();
+  value.sessions.data[0].label = '정규장';
+  const json = JSON.stringify(value);
+  return json + ' '.repeat(oneMiB - Buffer.byteLength(json));
+}
+
+test('order draft accepts exactly 1 MiB and rejects one additional byte', async () => {
+  const json = draftAtSizeLimit();
+  const atLimit = await draft(json);
+  assert.equal(atLimit.status, 2);
+  assert.equal(atLimit.stderr, '');
+  assert.equal(atLimit.out.status, 'partial');
+  assert.equal(atLimit.out.data[0].symbol, 'DEMO');
+
+  const oversized = await draft(json + ' ');
+  assertInvalidDraft(oversized);
+});
+
+test('order draft rejects a file that grows past 1 MiB after its metadata is read', async () => {
+  const preload = `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+
+    const statFile = fs.fstatSync;
+    fs.fstatSync = (...args) => {
+      const stat = statFile(...args);
+      if (stat.isFile() && stat.size === ${oneMiB}) fs.appendFileSync(process.argv[3], ' ');
+      return stat;
+    };
+    syncBuiltinESMExports();
+  `;
+  const result = await draft(draftAtSizeLimit(), undefined, undefined, {
+    NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(preload)}`,
+  });
+  assertInvalidDraft(result);
 });
 
 test('help discovers the offline command and malformed input stays a safe JSON error', async () => {

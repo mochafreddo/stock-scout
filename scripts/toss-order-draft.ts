@@ -1,8 +1,10 @@
-import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
 import { isinPattern, usMarkets } from './toss-stock.ts';
 import { decimal, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
+
+const maxDraftBytes = 1024 * 1024;
 
 const fields = [
   'symbol',
@@ -31,7 +33,16 @@ export function orderDraft(path: string | undefined, args: string[]) {
   try {
     const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
-      if (fstatSync(fd).isFile()) input = JSON.parse(readFileSync(fd, 'utf8'));
+      if (!fstatSync(fd).isFile()) throw new TossError('INPUT_INVALID');
+      const buffer = Buffer.allocUnsafe(maxDraftBytes + 1);
+      let bytesRead = 0;
+      while (bytesRead < buffer.length) {
+        const count = readSync(fd, buffer, bytesRead, buffer.length - bytesRead, null);
+        if (count === 0) break;
+        bytesRead += count;
+      }
+      if (bytesRead > maxDraftBytes) throw new TossError('INPUT_INVALID');
+      input = JSON.parse(buffer.toString('utf8', 0, bytesRead));
     } finally {
       closeSync(fd);
     }
