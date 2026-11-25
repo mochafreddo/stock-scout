@@ -44,6 +44,7 @@ function snapshot(commit: string, destination: string) {
     });
   const blobs = git(['cat-file', '--batch'], undefined, entries.map((e) => e.oid).join('\n'));
   let offset = 0;
+  const links: { target: string; bytes: Buffer }[] = [];
   for (const entry of entries) {
     const end = blobs.indexOf('\n', offset);
     const size = Number(blobs.subarray(offset, end).toString().split(' ')[2]);
@@ -51,19 +52,21 @@ function snapshot(commit: string, destination: string) {
     offset = end + 2 + size;
     const target = join(destination, entry.path);
     mkdirSync(dirname(target), { recursive: true });
-    if (entry.mode === '120000') {
-      try {
-        symlinkSync(bytes, target);
-      } catch {
-        throw new Error('Could not create snapshot symlink');
-      }
-    } else writeFileSync(target, bytes, { mode: entry.mode === '100755' ? 0o700 : 0o600 });
+    if (entry.mode === '120000') links.push({ target, bytes });
+    else
+      writeFileSync(target, bytes, { flag: 'wx', mode: entry.mode === '100755' ? 0o700 : 0o600 });
   }
-  for (const entry of entries) {
-    if (entry.mode !== '120000') continue;
+  for (const { target, bytes } of links) {
+    try {
+      symlinkSync(bytes, target);
+    } catch {
+      throw new Error('Could not create snapshot symlink');
+    }
+  }
+  for (const { target } of links) {
     let resolved: string;
     try {
-      resolved = realpathSync.native(join(destination, entry.path));
+      resolved = realpathSync.native(target);
     } catch {
       throw new Error('Unresolved snapshot symlink');
     }

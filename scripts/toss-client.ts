@@ -430,6 +430,7 @@ class SharedRequestCoordinator {
     return state;
   }
   private loadReservation(mode: 'inspect' | 'locked') {
+    const lockedState = mode === 'locked' ? this.load() : undefined;
     const records = readdirSync(this.directory).filter((name) =>
       /^cooldown-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/.test(name),
     );
@@ -455,7 +456,7 @@ class SharedRequestCoordinator {
         throw new TossError('CLOCK_UNCERTAIN', undefined, undefined, 'mismatch');
       if (record.clock.nextNs > latest) latest = record.clock.nextNs;
     }
-    const state = this.load(disappeared);
+    const state = lockedState ?? this.load(disappeared);
     if (latest > state.clock.nextNs) state.clock.nextNs = latest;
     return { state, records };
   }

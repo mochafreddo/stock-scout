@@ -40,13 +40,30 @@ let stateDescriptor;
 if (process.env.TEST_WAIT_GATE) {
   const openSync = fs.openSync;
   const closeSync = fs.closeSync;
+  const readSync = fs.readSync;
+  let stateBytes = [];
   mock.method(fs, 'openSync', (file, ...args) => {
     const descriptor = openSync(file, ...args);
-    if (file === `${process.env.TOSS_STATE_DIR}/state.json`) stateDescriptor = descriptor;
+    if (file === `${process.env.TOSS_STATE_DIR}/state.json`) {
+      stateDescriptor = descriptor;
+      stateBytes = [];
+    }
     return descriptor;
   });
+  mock.method(fs, 'readSync', (descriptor, buffer, offset, ...args) => {
+    const count = readSync(descriptor, buffer, offset, ...args);
+    if (descriptor === stateDescriptor && count)
+      stateBytes.push(buffer.subarray(offset, offset + count));
+    return count;
+  });
   mock.method(fs, 'closeSync', (descriptor) => {
-    if (descriptor === stateDescriptor) stateDescriptor = undefined;
+    if (descriptor === stateDescriptor) {
+      stateDescriptor = undefined;
+      observedDeadline = {
+        nextNs: JSON.parse(Buffer.concat(stateBytes)).clock.nextNs,
+        readNs: process.hrtime.bigint().toString(),
+      };
+    }
     return closeSync(descriptor);
   });
 }
@@ -59,13 +76,7 @@ mock.method(fs, 'readFileSync', (file, ...args) => {
     if (process.env.TEST_TIME_OFFSET_UNAVAILABLE) throw new Error('synthetic-secret');
     return process.env.TEST_TIME_OFFSET || 'monotonic 0 0\nboottime 0 0\n';
   }
-  const value = readFileSync(file, ...args);
-  if (process.env.TEST_WAIT_GATE && file === stateDescriptor)
-    observedDeadline = {
-      nextNs: JSON.parse(value).clock.nextNs,
-      readNs: process.hrtime.bigint().toString(),
-    };
-  return value;
+  return readFileSync(file, ...args);
 });
 if (process.env.TEST_WAIT_GATE) {
   const setTimeout = globalThis.setTimeout;

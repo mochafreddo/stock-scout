@@ -347,7 +347,7 @@ test('a silent connection closes the foreground tunnel at the deadline after sle
   process.kill(tunnel.pid, 0);
   time = Date.parse('2026-11-25T12:00:00Z');
   t.mock.timers.tick(1000);
-  await run.done;
+  await observe('wake cutoff', run.done);
   assert.throws(() => process.kill(tunnel.pid, 0), { code: 'ESRCH' });
   assert.equal(logs.at(-1).code, 'WINDOW_CLOSED');
   assert.equal(existsSync(trace), false);

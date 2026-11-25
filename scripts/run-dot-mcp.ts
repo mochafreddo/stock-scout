@@ -47,7 +47,8 @@ export async function runScheduledDot(options: Options) {
     report('skipped', 'SESSION_CLAIMED');
     return;
   }
-  const window = new DotWindow(options.launcher, isOpen, report);
+  let tunnelSpawned = false;
+  const window = new DotWindow(options.launcher, () => tunnelSpawned && isOpen(), report);
   let stopping = false;
   const server = createDotServer(window);
   server.on('request', (_request, response) => {
@@ -64,6 +65,7 @@ export async function runScheduledDot(options: Options) {
   if (!address || typeof address === 'string') throw Error('LISTEN_FAILED');
   if (!isOpen()) {
     server.close();
+    server.closeAllConnections();
     report('skipped', 'WINDOW_CLOSED');
     return;
   }
@@ -72,8 +74,10 @@ export async function runScheduledDot(options: Options) {
   const exited = new Promise<void>((resolve) => tunnel.once('close', () => resolve()));
   try {
     await once(tunnel, 'spawn');
+    tunnelSpawned = true;
   } catch {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    server.close();
+    server.closeAllConnections();
     await exited;
     report('error', 'TUNNEL_START_FAILED');
     return;

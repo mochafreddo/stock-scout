@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,7 +16,7 @@ async function until(predicate, description) {
   }
 }
 
-test('shutdown terminates an unresponsive query and tunnel at the absolute deadlines', async (t) => {
+test('shutdown terminates an unresponsive query and tunnel at the absolute deadlines', async () => {
   const state = mkdtempSync(join(tmpdir(), 'dot-shutdown-'));
   const logs = [];
   const executable = (name, body) => {
@@ -53,46 +55,86 @@ test('shutdown terminates an unresponsive query and tunnel at the absolute deadl
     ),
     log: (entry) => logs.push(entry),
   };
-  const run = await runScheduledDot(options);
-  const request = fetch(run.url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: { name: 'prices', arguments: { symbols: ['DEMO'] } },
-    }),
-  }).then(
-    (response) => response.text(),
-    () => 'disconnected',
+  const worker = spawn(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+      import { mock } from 'node:test';
+      import { runScheduledDot } from './scripts/run-dot-mcp.ts';
+      const options = JSON.parse(process.argv[1]);
+      const run = await runScheduledDot({
+        ...options,
+        now: () => Date.parse('2026-11-24T12:00:00Z'),
+        log: (entry) => {
+          if (process.connected) process.send({ entry });
+        },
+      });
+      process.send({ url: run.url });
+      process.on('message', (stage) => {
+        if (stage === 'stop') {
+          mock.timers.enable({ apis: ['setTimeout'] });
+          void run.stop();
+          mock.timers.tick(74999);
+          process.send({ draining: true });
+        } else if (stage === 'grace') {
+          mock.timers.tick(1);
+        } else if (stage === 'force') {
+          mock.timers.tick(5000);
+          process.disconnect();
+        }
+      });
+      `,
+      JSON.stringify(options),
+    ],
+    { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
   );
+  const exited = once(worker, 'close');
+  let url;
+  let draining = false;
+  worker.on('message', (message) => {
+    if (message.url) url = message.url;
+    if (message.draining) draining = true;
+    if (message.entry) logs.push(message.entry);
+  });
   const processes = ['query', 'tunnel'];
   const marker = (name, suffix) => join(state, name + suffix);
   const pid = (name) => Number(readFileSync(marker(name, '.pid'), 'utf8'));
   try {
+    await until(() => url, 'runner announces the server URL');
+    const request = fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'prices', arguments: { symbols: ['DEMO'] } },
+      }),
+    }).then(
+      (response) => response.text(),
+      () => 'disconnected',
+    );
     await until(
       () => processes.every((name) => existsSync(marker(name, '.pid'))),
       'process startup',
     );
     await until(() => existsSync(marker('pipe', '.pid')), 'inherited pipe startup');
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    let closed = false;
-    void run.stop().then(() => {
-      closed = true;
-    });
-    t.mock.timers.tick(74999);
+    worker.send('stop');
+    await until(() => draining, '74.999s drain');
     assert.ok(processes.every((name) => !existsSync(marker(name, '.term'))));
-    t.mock.timers.tick(1);
+    worker.send('grace');
     await until(() => processes.every((name) => existsSync(marker(name, '.term'))), '75s TERM');
     await until(
       () => logs.some((entry) => entry.code === 'RESPONSE_DELIVERY_UNCONFIRMED'),
       'delivery status',
     );
     assert.equal(await request, 'disconnected');
-    assert.equal(closed, false);
-    t.mock.timers.tick(5000);
-    await until(() => closed, '80s runner exit despite inherited pipes');
+    assert.equal(worker.exitCode, null);
+    worker.send('force');
+    await until(() => worker.exitCode !== null, '80s runner exit despite inherited pipes');
+    assert.deepEqual(await exited, [0, null]);
     process.kill(pid('pipe'), 0);
     for (const name of processes) {
       await until(() => {
@@ -117,7 +159,8 @@ test('shutdown terminates an unresponsive query and tunnel at the absolute deadl
         assert.equal(error.code, 'ESRCH');
       }
     }
-    await run.stop();
+    worker.kill('SIGKILL');
+    await exited;
     rmSync(state, { recursive: true, force: true });
   }
 });
