@@ -30,7 +30,11 @@ export async function runScheduledDot(options: Options) {
     report('skipped', 'WINDOW_CLOSED');
     return;
   }
-  mkdirSync(options.state, { recursive: true, mode: 0o700 });
+  try {
+    mkdirSync(options.state, { recursive: true, mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
   const state = lstatSync(options.state);
   if (!state.isDirectory() || state.uid !== process.getuid?.() || (state.mode & 0o077) !== 0) {
     report('error', 'SESSION_STORAGE_UNSAFE');
@@ -99,7 +103,16 @@ if (import.meta.main) {
     process.exitCode = 1;
   } else {
     try {
-      const run = await runScheduledDot({ launcher, tunnel, state, port: Number(port) });
+      const run = await runScheduledDot({
+        launcher,
+        tunnel,
+        state,
+        port: Number(port),
+        log(entry) {
+          console.log(JSON.stringify(entry));
+          if (entry.status === 'error') process.exitCode = 1;
+        },
+      });
       if (run) {
         process.once('SIGTERM', () => void run.stop());
         process.once('SIGINT', () => void run.stop());
