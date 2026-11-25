@@ -48,7 +48,16 @@ export async function runScheduledDot(options: Options) {
     return;
   }
   const window = new DotWindow(options.launcher, isOpen, report);
+  let stopping = false;
   const server = createDotServer(window);
+  server.on('request', (_request, response) => {
+    response.once('finish', () => {
+      if (stopping) server.closeIdleConnections();
+    });
+    response.once('close', () => {
+      if (!response.writableFinished) report('result_unavailable', 'RESPONSE_DELIVERY_UNCONFIRMED');
+    });
+  });
   server.listen(options.port, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -70,16 +79,31 @@ export async function runScheduledDot(options: Options) {
     return;
   }
   const finished = Promise.withResolvers<void>();
-  let stopping = false;
   const stop = async (code?: string) => {
     if (stopping) return finished.promise;
     stopping = true;
     const pending = window.close();
     clearInterval(timer);
-    await Promise.all([pending, new Promise<void>((resolve) => server.close(() => resolve()))]);
-    tunnel.kill();
-    const force = setTimeout(() => tunnel.kill('SIGKILL'), 5000);
-    await exited;
+    const drained = new Promise<void>((resolve) => server.close(() => resolve()));
+    const grace = setTimeout(() => {
+      server.closeAllConnections();
+      window.terminate('SIGTERM');
+      tunnel.kill();
+    }, 75000);
+    const deadline = Promise.withResolvers<void>();
+    const force = setTimeout(() => {
+      window.terminate('SIGKILL');
+      tunnel.kill('SIGKILL');
+      tunnel.stdin.destroy();
+      tunnel.unref();
+      deadline.resolve();
+    }, 80000);
+    const graceful = Promise.all([pending, drained]).then(() => {
+      tunnel.kill();
+      return exited;
+    });
+    await Promise.race([graceful, deadline.promise]);
+    clearTimeout(grace);
     clearTimeout(force);
     report('closed', code);
     finished.resolve();
@@ -87,7 +111,7 @@ export async function runScheduledDot(options: Options) {
   const timer = setInterval(() => {
     if (!isOpen()) void stop('WINDOW_CLOSED');
   }, 1000);
-  void exited.then(() => stop('TUNNEL_EXIT'));
+  tunnel.once('exit', () => void stop('TUNNEL_EXIT'));
   report('started');
   return { url, done: finished.promise, stop };
 }

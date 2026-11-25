@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { type ChildProcess, execFile } from 'node:child_process';
 import { record } from './toss-values.ts';
 
 type CliResponse = Record<string, unknown> & { data: unknown[] };
@@ -13,41 +13,13 @@ function isCliResponse(response: unknown, status: string | undefined): response 
   );
 }
 
-async function execute(
-  launcher: string,
-  args: string[],
-  onStart?: () => void,
-): Promise<{ exitCode: number; response: CliResponse }> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      launcher,
-      args,
-      { encoding: 'utf8', timeout: 70000, maxBuffer: 4 * 1024 * 1024 },
-      (error, stdout) => {
-        const exitCode = error ? error.code : 0;
-        try {
-          const response: unknown = JSON.parse(stdout);
-          if (
-            typeof exitCode !== 'number' ||
-            !isCliResponse(response, ['success', 'error', 'partial'][exitCode])
-          )
-            throw new Error();
-          resolve({ exitCode, response });
-        } catch {
-          reject(new Error('CLI_RESULT_UNAVAILABLE'));
-        }
-      },
-    );
-    if (onStart) child.once('spawn', onStart);
-  });
-}
-
 function queryResult(payload: object, isError: boolean) {
   return { payload, isError, text: JSON.stringify(payload) };
 }
 
 export class DotWindow {
   private tail?: Promise<void>;
+  private child?: ChildProcess;
   private starts = 0;
   private closed = false;
   private readonly launcher: string;
@@ -77,6 +49,46 @@ export class DotWindow {
       slot.resolve();
     }
   }
+  private execute(
+    args: string[],
+    onStart?: () => void,
+  ): Promise<{ exitCode: number; response: CliResponse }> {
+    return new Promise((resolve, reject) => {
+      const child = execFile(
+        this.launcher,
+        args,
+        { encoding: 'utf8', timeout: 70000, maxBuffer: 4 * 1024 * 1024 },
+        (error, stdout) => {
+          this.child = undefined;
+          const exitCode = error ? error.code : 0;
+          try {
+            const response: unknown = JSON.parse(stdout);
+            if (
+              typeof exitCode !== 'number' ||
+              !isCliResponse(response, ['success', 'error', 'partial'][exitCode])
+            )
+              throw new Error();
+            resolve({ exitCode, response });
+          } catch {
+            reject(new Error('CLI_RESULT_UNAVAILABLE'));
+          }
+        },
+      );
+      this.child = child;
+      if (onStart) child.once('spawn', onStart);
+    });
+  }
+  terminate(signal: NodeJS.Signals) {
+    const child = this.child;
+    if (!child) return;
+    child.kill(signal);
+    if (signal === 'SIGKILL') {
+      child.stdin?.destroy();
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+    }
+  }
   close() {
     this.closed = true;
     return this.tail;
@@ -94,7 +106,7 @@ export class DotWindow {
     try {
       const beforeReadiness = this.rejection();
       if (beforeReadiness) return this.rejected(beforeReadiness);
-      const ready = await execute(this.launcher, ['readiness']);
+      const ready = await this.execute(['readiness']);
       const rows = ready.response.data;
       const readiness = record(rows[0]) ? rows[0].readiness : undefined;
       if (ready.exitCode !== 0) {
@@ -108,7 +120,7 @@ export class DotWindow {
       stage = 'query';
       const beforeStart = this.rejection();
       if (beforeStart) return this.rejected(beforeStart);
-      const output = await execute(this.launcher, args, () => {
+      const output = await this.execute(args, () => {
         this.starts++;
       });
       this.report(
