@@ -146,7 +146,9 @@ test('partial and provider error results keep their original CLI exits and safe 
   const partial = await start(t, {
     steps: [{ body: { result: [{ symbol: 'DEMO', currency: 'USD', lastPrice: '12.000' }] } }],
   });
-  const p = (await partial.call({ symbols: ['DEMO', 'NEXT'] })).result.structuredContent;
+  const partialResult = (await partial.call({ symbols: ['DEMO', 'NEXT'] })).result;
+  assert.equal(partialResult.isError, false);
+  const p = partialResult.structuredContent;
   assert.deepEqual([p.stage, p.exitCode, p.response.status], ['query', 2, 'partial']);
   assert.deepEqual(p.response.omissions, [{ symbol: 'NEXT', reason: 'missing_item' }]);
   assert.equal(p.response.data[0].lastPrice, '12.000');

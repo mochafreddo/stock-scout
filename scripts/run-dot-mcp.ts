@@ -43,8 +43,8 @@ export async function runScheduledDot(options: Options) {
     report('skipped', 'SESSION_CLAIMED');
     return;
   }
-  const window = new DotWindow(isOpen, report);
-  const server = createDotServer(options.launcher, window);
+  const window = new DotWindow(options.launcher, isOpen, report);
+  const server = createDotServer(window);
   server.listen(options.port, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();

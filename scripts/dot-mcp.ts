@@ -1,100 +1,11 @@
-import { execFile } from 'node:child_process';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { marketArgs, marketTools } from './dot-mcp-tools.ts';
 import type { DotWindow } from './dot-mcp-window.ts';
 import { record } from './toss-values.ts';
 
 const protocol = '2025-11-25';
-type CliResponse = Record<string, unknown> & { data: unknown[] };
 
-function isCliResponse(response: unknown, status: string | undefined): response is CliResponse {
-  return (
-    status !== undefined &&
-    record(response) &&
-    response.version === 1 &&
-    Array.isArray(response.data) &&
-    response.status === status
-  );
-}
-
-async function execute(
-  launcher: string,
-  args: string[],
-  onStart?: () => void,
-): Promise<{ exitCode: number; response: CliResponse }> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      launcher,
-      args,
-      { encoding: 'utf8', timeout: 70000, maxBuffer: 4 * 1024 * 1024 },
-      (error, stdout) => {
-        const exitCode = error ? error.code : 0;
-        try {
-          const response: unknown = JSON.parse(stdout);
-          if (
-            typeof exitCode !== 'number' ||
-            !isCliResponse(response, ['success', 'error', 'partial'][exitCode])
-          )
-            throw new Error();
-          resolve({ exitCode, response });
-        } catch {
-          reject(new Error('CLI_RESULT_UNAVAILABLE'));
-        }
-      },
-    );
-    if (onStart) child.once('spawn', onStart);
-  });
-}
-
-function toolResult(payload: object, isError: boolean) {
-  return {
-    isError,
-    structuredContent: payload,
-    content: [{ type: 'text', text: JSON.stringify(payload) }],
-  };
-}
-
-function rejected(window: DotWindow, code: string) {
-  window.report('rejected', code);
-  return toolResult({ stage: 'admission', error: { code } }, true);
-}
-
-async function query(launcher: string, args: string[], window: DotWindow) {
-  let stage = 'readiness';
-  try {
-    const beforeReadiness = window.rejection();
-    if (beforeReadiness) return rejected(window, beforeReadiness);
-    const ready = await execute(launcher, ['readiness']);
-    const rows = ready.response.data;
-    const readiness = record(rows[0]) ? rows[0].readiness : undefined;
-    if (ready.exitCode !== 0) {
-      window.report(
-        'ready_blocked',
-        readiness === 'unavailable' ? 'READINESS_UNAVAILABLE' : 'READINESS_BLOCKED',
-      );
-      return toolResult({ stage, ...ready }, true);
-    }
-    if (rows.length !== 1 || readiness !== 'ready') throw new Error('Invalid readiness result');
-    stage = 'query';
-    const beforeStart = window.rejection();
-    if (beforeStart) return rejected(window, beforeStart);
-    const output = await execute(launcher, args, window.started);
-    window.report(
-      ['success', 'query_error', 'partial'][output.exitCode],
-      output.exitCode === 1 ? 'QUERY_ERROR' : undefined,
-    );
-    return toolResult({ stage, ...output }, output.exitCode === 1);
-  } catch {
-    window.report('result_unavailable', 'CLI_RESULT_UNAVAILABLE');
-    return toolResult({ stage, error: { code: 'CLI_RESULT_UNAVAILABLE' } }, true);
-  }
-}
-
-async function handle(
-  req: IncomingMessage,
-  res: ServerResponse,
-  call: (args: string[]) => ReturnType<typeof query>,
-) {
+async function handle(req: IncomingMessage, res: ServerResponse, window: DotWindow) {
   const host = `127.0.0.1:${req.socket.localPort}`;
   if (
     req.headers.host !== host ||
@@ -156,15 +67,16 @@ async function handle(
     case 'tools/call': {
       const args = marketArgs(rpc.params);
       if (!args) return fail(-32602, 'Unknown tool or invalid arguments');
-      return reply({ result: await call(args) });
+      const { payload, isError, text } = await window.query(args);
+      return reply({
+        result: { isError, structuredContent: payload, content: [{ type: 'text', text }] },
+      });
     }
     default:
       return fail(-32601, 'Method not found');
   }
 }
 
-export function createDotServer(launcher: string, window: DotWindow) {
-  return createServer({ requestTimeout: 10000 }, (req, res) =>
-    handle(req, res, (args) => window.run(() => query(launcher, args, window))),
-  );
+export function createDotServer(window: DotWindow) {
+  return createServer({ requestTimeout: 10000 }, (req, res) => handle(req, res, window));
 }

@@ -72,9 +72,13 @@ function fixture(t) {
   writeFileSync(
     tunnel,
     `#!/bin/sh
-echo "$$ $1" > "${trace}-opening"
-mv "${trace}-opening" "${trace}-tunnel"
-read hold
+exec "${process.execPath}" --input-type=module -e '
+  import { renameSync, writeFileSync } from "node:fs";
+  const [trace, url] = process.argv.slice(1);
+  writeFileSync(trace + "-opening", process.pid + " " + url);
+  renameSync(trace + "-opening", trace + "-tunnel");
+  process.stdin.resume();
+' "${trace}" "$1"
 `,
     { mode: 0o700 },
   );
@@ -179,8 +183,16 @@ test('the session charges every started lookup including partial and failed resu
     );
     assert.equal((await price(run.url)).exitCode, exit);
   }
+  writeFileSync(
+    options.launcher,
+    program.replace(/\*\) echo [^\n]+/, '*) echo non-json-private-output;;'),
+  );
+  assert.deepEqual(await price(run.url), {
+    stage: 'query',
+    error: { code: 'CLI_RESULT_UNAVAILABLE' },
+  });
   writeFileSync(options.launcher, program);
-  for (let n = 2; n < 16; n++) assert.equal((await price(run.url)).exitCode, 0);
+  for (let n = 3; n < 16; n++) assert.equal((await price(run.url)).exitCode, 0);
   assert.equal((await price(run.url)).error?.code, 'SESSION_BUDGET');
   assert.equal(
     readFileSync(trace, 'utf8')
@@ -326,6 +338,7 @@ test('killing the serving process leaves the session claimed before any replacem
       throw Error('worker exited before serving');
     }),
   ]);
+  assert.equal((await openedTunnel(trace)).url, url);
   assert.equal((await price(url)).exitCode, 0);
   worker.kill('SIGKILL');
   assert.equal((await exited)[1], 'SIGKILL');
