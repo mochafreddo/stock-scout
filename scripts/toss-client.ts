@@ -12,6 +12,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  readSync,
   realpathSync,
   renameSync,
   rmdirSync,
@@ -189,7 +190,14 @@ function read(path: string) {
       stat.size > STORAGE_BYTES
     )
       throw new TossError('AUTH_STORAGE');
-    return parseJson(readFileSync(fd, 'utf8'));
+    const buffer = Buffer.allocUnsafe(STORAGE_BYTES + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const count = readSync(fd, buffer, size, buffer.length - size, null);
+      if (count === 0) return parseJson(buffer.toString('utf8', 0, size));
+      size += count;
+    }
+    throw new TossError('AUTH_STORAGE');
   } catch (error) {
     if (error instanceof SyntaxError) throw new TossError('AUTH_STORAGE');
     throw error;

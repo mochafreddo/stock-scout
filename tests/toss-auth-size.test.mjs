@@ -192,3 +192,42 @@ for (const operation of ['reuse', 'cooldown'])
       f.close();
     }
   });
+
+for (const source of ['credentials', 'selection'])
+  for (const size of [16384, 16385, 'growth'])
+    test(`protected ${source} input at ${size} preserves the CLI size and error contract`, async () => {
+      const f = fixture();
+      try {
+        const path = join(f.directory, source + '.json');
+        const selection = { alias: 'primary', accountSeq: '741', scopes: ['holdings'] };
+        const json =
+          source === 'credentials' ? readFileSync(path, 'utf8') : JSON.stringify(selection);
+        writeFileSync(path, json.padEnd(size === 'growth' ? 16384 : size), { mode: 0o600 });
+        const growth = size === 'growth';
+        const result = await runCli(
+          f,
+          [],
+          source === 'selection' ? ['account-select', path] : undefined,
+          growth
+            ? {
+                NODE_OPTIONS:
+                  '--import=' + new URL('./toss-protected-file-growth.mjs', import.meta.url).href,
+                TEST_GROW_FILE: path,
+              }
+            : {},
+        );
+        if (growth) assert.equal(Number(readFileSync(path + '.bytes', 'utf8')), 16385);
+        if (size === 16384) {
+          assert.equal(result.status, 0, result.stdout + result.stderr);
+          assert.equal(result.stderr, '');
+        } else {
+          const code = source === 'selection' ? 'ACCOUNT_SELECTION_REQUIRED' : 'AUTH_STORAGE';
+          assert.equal(result.status, 1);
+          assert.equal(result.stderr, code + '\n');
+          assert.equal(JSON.parse(result.stdout).error.code, code);
+          assert.equal(result.requests.length, 0);
+        }
+      } finally {
+        f.close();
+      }
+    });
