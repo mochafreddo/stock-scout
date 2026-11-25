@@ -121,6 +121,67 @@ for (const mode of ['docs', 'staged', 'push']) {
       if (diagnostic) assert.match(result.stderr, diagnostic);
     }
   });
+
+  test(`${mode} checks links around quoted code blocks`, async (t) => {
+    const { root, base } = fixture(t);
+    git(root, 'config', 'core.whitespace', 'cr-at-eol');
+    const hook = mode === 'staged' ? 'pre-commit' : 'pre-push';
+    if (mode !== 'docs') {
+      const installed = run(root, '', '', [
+        mode === 'staged' ? '--install-pre-commit' : '--install',
+      ]);
+      assert.equal(installed.status, 0, installed.stderr);
+    }
+    for (const [name, body, missing] of [
+      ['closed quoted fence', '> ```md\n> [Example](example.md)\n> ```\n> [Valid](#start)\n'],
+      ['quoted fence with CRLF line endings', '> ~~~\r\n> [Example](example.md)\r\n> ~~~\r\n'],
+      [
+        'broken inline link after a quoted fence',
+        '> ```\n> [Example](example.md)\n> ```\n> [Broken](quoted.md)\n',
+        'quoted.md',
+      ],
+      ['broken reference in a quote', '> [Broken]: reference.md\n', 'reference.md'],
+      [
+        'unclosed quoted fence ends with its quote',
+        '> ```\n> [Example](example.md)\n\n[Broken](paragraph.md)\n',
+        'paragraph.md',
+      ],
+      [
+        'unclosed nested fence ends when the quote depth drops',
+        '> > ~~~~md\n> > [Example](example.md)\n> [Broken](outer.md)\n',
+        'outer.md',
+      ],
+      [
+        'quoted code inside a list and list code inside a quote',
+        '- > - ~~~md\n  >   [Example](example.md)\n  >   ~~~~\n  > [Valid](#start)\n',
+      ],
+      [
+        'quoted list item starts with indented code',
+        '> -     [Example](example.md)\n>       [Example](continued.md)\n',
+      ],
+      [
+        'existing plain fenced and indented code',
+        '```md\n> ```\n[Example](example.md)\n```\n\n    [Example](indented.md)\n',
+      ],
+    ]) {
+      await t.test(name, () => {
+        writeFileSync(join(root, 'README.md'), `# Start\n\n${body}`);
+        if (mode !== 'docs') git(root, 'add', 'README.md');
+        if (mode === 'push') git(root, 'commit', '-m', name);
+        const result =
+          mode === 'docs'
+            ? run(root, '', '', args)
+            : fixtureProcess(join(root, '.git/hooks', hook), [], {
+                cwd: root,
+                input: `refs/heads/main ${git(root, 'rev-parse', 'HEAD')} refs/heads/main ${base}\n`,
+              });
+        assert.ifError(result.error);
+        assert.equal(result.status, missing ? 1 : 0, result.stderr);
+        if (missing)
+          assert.ok(result.stderr.includes(`missing local target ${missing}`), result.stderr);
+      });
+    }
+  });
 }
 
 function installCommitHook(root) {

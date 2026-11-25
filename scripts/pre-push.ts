@@ -59,21 +59,39 @@ function snapshot(commit: string, destination: string) {
 
 function markdownText(path: string) {
   let fence = '';
-  const listIndents: number[] = [];
+  const quotePrefix = /^ {0,3}> ?/;
+  const listPrefix = /^ {0,3}(?:[-+*]|\d+[.)])(?: {1,4}(?! )| )/;
+  const containers: (number | 'quote')[] = [];
   return readFileSync(path, 'utf8')
-    .split('\n')
+    .split(/\r?\n/)
     .map((line) => {
-      line = line.replace(/\t/g, '    ');
-      if (!line.trim()) return '';
-      const indent = line.search(/\S/);
-      while (indent < (listIndents.at(-1) ?? 0)) listIndents.pop();
-      const container = listIndents.at(-1) ?? 0;
-      let content = line.slice(container);
-      const item = /^ {0,3}(?:[-+*]|\d+[.)]) +/.exec(content);
-      if (!fence && item) {
-        listIndents.push(container + item[0].length);
-        content = content.slice(item[0].length);
+      let content = line.replace(/\t/g, '    ');
+      let depth = 0;
+      for (const container of containers) {
+        if (container === 'quote') {
+          const quote = quotePrefix.exec(content);
+          if (!quote) break;
+          content = content.slice(quote[0].length);
+        } else {
+          if (content.slice(0, container).trim()) break;
+          content = content.slice(container);
+        }
+        depth++;
       }
+      if (depth < containers.length) {
+        containers.length = depth;
+        fence = '';
+      }
+      if (!fence) {
+        for (;;) {
+          const quote = quotePrefix.exec(content)?.[0];
+          const prefix = quote ?? listPrefix.exec(content)?.[0];
+          if (!prefix) break;
+          containers.push(quote ? 'quote' : prefix.length);
+          content = content.slice(prefix.length);
+        }
+      }
+      if (!content.trim()) return '';
       const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content);
       if (fence) {
         if (
