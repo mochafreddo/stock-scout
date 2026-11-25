@@ -230,7 +230,6 @@ test('helper preserves split UTF-8 characters in stdout and stderr', async () =>
     OUTPUT_GATE: gate,
   });
   try {
-    // Release the remaining bytes only after the parent reads the prefix from both pipes.
     await Promise.race([
       Promise.all([once(run.child.stdout, 'data'), once(run.child.stderr, 'data')]),
       run.then(({ stderr }) => assert.fail(`Child closed before writing prefixes: ${stderr}`)),
