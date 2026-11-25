@@ -124,6 +124,20 @@ async function price(url) {
   return (await res.json()).result.structuredContent;
 }
 
+async function observe(label, ...events) {
+  let timer;
+  try {
+    return await Promise.race([
+      ...events,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 5000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function openedTunnel(trace, exited) {
   const file = `${trace}-tunnel`;
   const changed = Promise.withResolvers();
@@ -132,12 +146,13 @@ async function openedTunnel(trace, exited) {
   });
   try {
     if (!existsSync(file))
-      await Promise.race([
+      await observe(
+        'tunnel marker',
         changed.promise,
         exited.then(() => {
           throw new Error('Tunnel exited before publishing its marker');
         }),
-      ]);
+      );
     const [pid, url] = readFileSync(file, 'utf8').trim().split(' ');
     return { pid: Number(pid), url };
   } finally {
@@ -232,18 +247,28 @@ test('a readiness check crossing the deadline cannot start prices', async (t) =>
 });
 
 test('at close the tunnel drains a started price response and turns away the waiting request', async (t) => {
+  await checkClose(t, fixture(t));
+});
+
+test('the close regression reports an early lookup error and shuts down its tunnel', async (t) => {
+  const setup = fixture(t);
+  writeFileSync(setup.options.launcher, '#!/bin/sh\nexit 1\n');
+  await assert.rejects(checkClose(t, setup), /First price ended early: CLI_RESULT_UNAVAILABLE/);
+  const [pid] = readFileSync(`${setup.trace}-tunnel`, 'utf8').split(' ');
+  assert.throws(() => process.kill(Number(pid), 0), { code: 'ESRCH' });
+});
+
+async function checkClose(t, { options, trace, start }) {
   t.mock.timers.enable({ apis: ['setInterval'] });
-  const { options, trace, start } = fixture(t);
   const entered = Promise.withResolvers();
   const release = Promise.withResolvers();
-  const control = createServer(async (_req, res) => {
+  await using control = createServer(async (_req, res) => {
     entered.resolve();
     await release.promise;
     res.end();
   });
   control.listen(0, '127.0.0.1');
-  await once(control, 'listening');
-  t.after(() => control.close());
+  await observe('control server', once(control, 'listening'));
   const program = readFileSync(options.launcher, 'utf8');
   writeFileSync(
     options.launcher,
@@ -261,30 +286,42 @@ test('at close the tunnel drains a started price response and turns away the wai
   let time = Date.parse('2026-11-24T12:19:59Z');
   options.now = () => time;
   const run = await start();
-  const tunnel = await openedTunnel(trace, run.done);
-  assert.equal(tunnel.url, run.url);
-  const active = price(tunnel.url);
-  await entered.promise;
-  const second = price(run.url);
-  const doubleStart = new Promise((resolve) =>
-    control.once('request', () => resolve('second started')),
-  );
   try {
-    assert.equal(await Promise.race([queued.promise, doubleStart]), 'queued');
+    const tunnel = await openedTunnel(trace, run.done);
+    assert.equal(tunnel.url, run.url);
+    const active = price(tunnel.url);
+    const firstEnded = active.then((result) => {
+      throw new Error(`First price ended early: ${result.error?.code ?? result.stage}`);
+    });
+    await observe('first control request', entered.promise, firstEnded);
+    const doubleStart = once(control, 'request').then(() => 'second started');
+    const second = price(run.url);
+    assert.equal(
+      await observe(
+        'queued price',
+        queued.promise,
+        doubleStart,
+        firstEnded,
+        second.then(() => 'second ended'),
+      ),
+      'queued',
+    );
     time += 1000;
     t.mock.timers.tick(1000);
     assert.equal(closed, false);
     process.kill(tunnel.pid, 0);
+    release.resolve();
+    assert.equal((await observe('first price response', active)).response.data[0].symbol, 'DEMO');
+    assert.equal((await observe('queued price response', second)).error.code, 'WINDOW_CLOSED');
+    await observe('scheduled shutdown', run.done);
+    assert.equal(closed, true);
+    assert.throws(() => process.kill(tunnel.pid, 0), { code: 'ESRCH' });
+    assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), ['readiness', 'prices DEMO']);
   } finally {
     release.resolve();
+    await run.stop();
   }
-  assert.equal((await active).response.data[0].symbol, 'DEMO');
-  assert.equal((await second).error.code, 'WINDOW_CLOSED');
-  await run.done;
-  assert.equal(closed, true);
-  assert.throws(() => process.kill(tunnel.pid, 0), { code: 'ESRCH' });
-  assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), ['readiness', 'prices DEMO']);
-});
+}
 
 test('failure to spawn the tunnel keeps the claim and records only a startup failure', async (t) => {
   const { options, logs } = fixture(t);
@@ -338,12 +375,13 @@ test('killing the serving process leaves the session claimed before any replacem
     worker.kill('SIGKILL');
     await exited;
   });
-  const [url] = await Promise.race([
+  const [url] = await observe(
+    'serving worker',
     once(worker, 'message'),
     exited.then(() => {
       throw Error('worker exited before serving');
     }),
-  ]);
+  );
   assert.equal((await openedTunnel(trace, exited)).url, url);
   assert.equal((await price(url)).exitCode, 0);
   worker.kill('SIGKILL');
