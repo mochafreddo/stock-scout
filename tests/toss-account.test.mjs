@@ -741,6 +741,16 @@ test('KRW buying power rejects fractional won and selection cannot expose cached
   }
 });
 
+function replacementSelectionInput(f) {
+  const input = join(f.directory, 'replacement.json');
+  writeFileSync(
+    input,
+    JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['holdings'] }),
+    { mode: 0o600 },
+  );
+  return input;
+}
+
 test('malformed shared state fails consistently without HTTP or replacing the account', async (t) => {
   const f = fixture();
   try {
@@ -748,14 +758,7 @@ test('malformed shared state fails consistently without HTTP or replacing the ac
     assert.equal(original.status, 0, original.stdout + original.stderr);
     const account = join(f.directory, 'account.json');
     const preserved = readFileSync(account);
-    const input = join(f.directory, 'replacement.json');
-    writeFileSync(
-      input,
-      JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['holdings'] }),
-      {
-        mode: 0o600,
-      },
-    );
+    const input = replacementSelectionInput(f);
     writeFileSync(join(f.directory, 'state.json'), '{', { mode: 0o600 });
 
     for (const args of [['account-select', input], ['readiness'], ['prices', 'AAPL']]) {
@@ -780,12 +783,7 @@ test('invalid selection input files are rejected before HTTP and preserve the de
       const selected = await selection(f);
       assert.equal(selected.status, 0, selected.stdout + selected.stderr);
       const preserved = readFileSync(join(f.directory, 'account.json'));
-      const input = join(f.directory, 'replacement.json');
-      writeFileSync(
-        input,
-        JSON.stringify({ accountSeq: 852, alias: 'secondary', scopes: ['holdings'] }),
-        { mode: 0o600 },
-      );
+      const input = replacementSelectionInput(f);
       let unsafe = input;
       if (boundary === 'permissions') chmodSync(input, 0o644);
       else if (boundary === 'syntax') writeFileSync(input, '{');
