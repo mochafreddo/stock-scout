@@ -1,6 +1,6 @@
 import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { TossError } from './toss-client.ts';
-import { validDate } from './toss-sessions.ts';
+import { parseSessionInterval, validDate } from './toss-sessions.ts';
 import { isinPattern, usMarkets } from './toss-stock.ts';
 import { decimal, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
 
@@ -25,7 +25,6 @@ const fields = [
 function positiveDecimal(value: unknown): value is string {
   return decimal(value) && !value.startsWith('-') && /[1-9]/.test(value);
 }
-const usDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
 
 export function orderDraft(path: string | undefined, args: string[]) {
   if (!path || args.length) throw new TossError('INPUT_INVALID');
@@ -110,24 +109,11 @@ export function orderDraft(path: string | undefined, args: string[]) {
     throw new TossError('DRAFT_SCHEDULE_MISSING');
   const day = evidence.data[0].today;
   if (day.date !== tradeDate) throw new TossError('DRAFT_DATE_MISMATCH');
-  const regular = day.regularMarket;
-  if (regular === null) throw new TossError('DRAFT_MARKET_CLOSED');
-  if (
-    !record(regular) ||
-    typeof regular.startTime !== 'string' ||
-    typeof regular.endTime !== 'string' ||
-    !validTime(regular.startTime) ||
-    !validTime(regular.endTime)
-  )
-    throw new TossError('DRAFT_SCHEDULE_MISSING');
-  const { startTime, endTime } = regular;
-  if (
-    !laterThan(endTime, startTime) ||
-    usDate.format(new Date(startTime)) !== tradeDate ||
-    usDate.format(new Date(endTime)) !== tradeDate
-  )
-    throw new TossError('DRAFT_SESSION_MISMATCH');
-  if (laterThan(expiresAt, startTime)) throw new TossError('DRAFT_EXPIRY_AFTER_OPEN');
+  if (day.regularMarket === null) throw new TossError('DRAFT_MARKET_CLOSED');
+  const regularMarket = parseSessionInterval(day.regularMarket, tradeDate, session);
+  if (regularMarket === 'invalid_time') throw new TossError('DRAFT_SCHEDULE_MISSING');
+  if (regularMarket === 'invalid_interval') throw new TossError('DRAFT_SESSION_MISMATCH');
+  if (laterThan(expiresAt, regularMarket.startTime)) throw new TossError('DRAFT_EXPIRY_AFTER_OPEN');
   const now = new Date().toISOString();
   if (!laterThan(expiresAt, now)) throw new TossError('DRAFT_EXPIRED');
   let referencePrice:
@@ -167,7 +153,7 @@ export function orderDraft(path: string | undefined, args: string[]) {
         currency,
         tradeDate,
         session,
-        regularMarket: { startTime, endTime },
+        regularMarket,
         expiresAt,
         ...(referencePrice ? { referencePrice } : {}),
         submission: {

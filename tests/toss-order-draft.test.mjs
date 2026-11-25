@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { runCli } from './toss-cli-helper.mjs';
+import { runCli, runFreshCli } from './toss-cli-helper.mjs';
 
 const regularMarket = {
   startTime: '2026-11-06T23:30:00+09:00',
@@ -267,6 +267,30 @@ test('schedule evidence and expiry boundaries distinguish safe failure reasons',
     [
       'DRAFT_SCHEDULE_MISSING',
       (v) => {
+        v.sessions.data[0].today.regularMarket.endTime = '2026-11-06T16:00:00';
+      },
+    ],
+    [
+      'DRAFT_SESSION_MISMATCH',
+      (v) => {
+        v.sessions.data[0].today.regularMarket.endTime = '2026-11-06T14:30:00Z';
+      },
+    ],
+    [
+      'DRAFT_SESSION_MISMATCH',
+      (v) => {
+        v.sessions.data[0].today.regularMarket.endTime = '2026-11-06T14:29:59.9999Z';
+      },
+    ],
+    [
+      'DRAFT_SESSION_MISMATCH',
+      (v) => {
+        v.sessions.data[0].today.regularMarket.startTime = '2026-11-06T04:59:59.9999Z';
+      },
+    ],
+    [
+      'DRAFT_SCHEDULE_MISSING',
+      (v) => {
         delete v.sessions.data[0].today.regularMarket;
       },
     ],
@@ -361,6 +385,38 @@ test('partial calendar evidence and submillisecond expiry remain usable before e
     assert.equal(result.status, 2);
     assert.equal(result.out.data[0].expiresAt, value.expiresAt);
   }
+});
+
+test('an offline draft preserves the regular interval from a partial sessions result', async () => {
+  const interval = {
+    startTime: '2026-11-06T23:30:00.1234+09:00',
+    endTime: '2026-11-06T14:30:00.1235Z',
+  };
+  const sessions = await runFreshCli(
+    [
+      {
+        path: '/api/v1/market-calendar/US',
+        body: { result: { today: { date: '2026-11-06', regularMarket: interval } } },
+      },
+    ],
+    ['sessions', '2026-11-06'],
+  );
+  assert.equal(sessions.status, 2, sessions.stdout + sessions.stderr);
+  assert.equal(sessions.out.status, 'partial');
+  assert.equal(sessions.stderr, '');
+  assert.deepEqual(sessions.out.data[0].today.regularMarket, interval);
+  assert.deepEqual(
+    sessions.requests.map(({ method, path, query }) => [method, path, query]),
+    [
+      ['POST', '/oauth2/token', ''],
+      ['GET', '/api/v1/market-calendar/US', '?date=2026-11-06'],
+    ],
+  );
+  const result = await draft({ ...input(), sessions: sessions.out });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.equal(result.out.status, 'partial');
+  assert.equal(result.stderr, '');
+  assert.deepEqual(result.out.data[0].regularMarket, interval);
 });
 
 // Regression: ISSUE-001 order draft blocks on a FIFO input

@@ -2,12 +2,42 @@ import { TossError } from './toss-client.ts';
 import { laterThan, record, symbolPattern, validTime, wholeSecondMillis } from './toss-values.ts';
 
 const sessions = ['dayMarket', 'preMarket', 'regularMarket', 'afterMarket'] as const;
-type MarketDay = { date: string } & Partial<
-  Record<(typeof sessions)[number], { startTime: string; endTime: string } | null>
->;
+type SessionName = (typeof sessions)[number];
+type SessionInterval = { startTime: string; endTime: string };
+type MarketDay = { date: string } & Partial<Record<SessionName, SessionInterval | null>>;
 const usDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
 export function validDate(value: unknown): value is string {
   return typeof value === 'string' && validTime(`${value}T00:00:00Z`);
+}
+
+export function parseSessionInterval(
+  value: unknown,
+  date: string,
+  name: SessionName,
+): SessionInterval | 'invalid_time' | 'invalid_interval' {
+  if (!record(value)) return 'invalid_time';
+  const { startTime, endTime } = value;
+  if (
+    typeof startTime !== 'string' ||
+    typeof endTime !== 'string' ||
+    !validTime(startTime) ||
+    !validTime(endTime)
+  )
+    return 'invalid_time';
+
+  const earliestOpeningDate =
+    name === 'dayMarket'
+      ? new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)
+      : date;
+  const openingDate = usDate.format(new Date(startTime));
+  if (
+    !laterThan(endTime, startTime) ||
+    openingDate < earliestOpeningDate ||
+    openingDate > date ||
+    usDate.format(new Date(endTime)) !== date
+  )
+    return 'invalid_interval';
+  return { startTime, endTime };
 }
 
 export function sessionQuery(
@@ -65,30 +95,19 @@ function sessionResult(value: unknown, date: string) {
       continue;
     }
     const parsed: MarketDay = { date: day.date };
-    const previousDate = new Date(Date.parse(`${day.date}T00:00:00Z`) - 86_400_000)
-      .toISOString()
-      .slice(0, 10);
     for (const name of sessions) {
       const session = day[name];
-      if (session === null) parsed[name] = null;
-      else if (
-        record(session) &&
-        typeof session.startTime === 'string' &&
-        typeof session.endTime === 'string' &&
-        validTime(session.startTime) &&
-        validTime(session.endTime) &&
-        laterThan(session.endTime, session.startTime) &&
-        usDate.format(new Date(session.startTime)) >=
-          (name === 'dayMarket' ? previousDate : day.date) &&
-        usDate.format(new Date(session.startTime)) <= day.date &&
-        usDate.format(new Date(session.endTime)) === day.date
-      )
-        parsed[name] = { startTime: session.startTime, endTime: session.endTime };
-      else
+      if (session === null) {
+        parsed[name] = null;
+        continue;
+      }
+      const interval = parseSessionInterval(session, day.date, name);
+      if (typeof interval === 'string')
         omissions.push({
           field: `${role}.${name}`,
           reason: name in day ? 'invalid_session' : 'session_unknown',
         });
+      else parsed[name] = interval;
     }
     if (role === 'today' && Object.keys(parsed).length === 1)
       throw new TossError('RESPONSE_INVALID');
