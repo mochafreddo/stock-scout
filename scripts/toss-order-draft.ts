@@ -2,7 +2,14 @@ import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { TossError } from './toss-client.ts';
 import { parseSessionInterval, validDate } from './toss-sessions.ts';
 import { isinPattern, usMarkets } from './toss-stock.ts';
-import { decimal, laterThan, record, symbolPattern, validTime } from './toss-values.ts';
+import {
+  decimal,
+  laterThan,
+  nonnegativeDecimal,
+  record,
+  symbolPattern,
+  validTime,
+} from './toss-values.ts';
 
 const maxDraftBytes = 1024 * 1024;
 
@@ -124,8 +131,7 @@ export function orderDraft(path: string | undefined, args: string[]) {
     if (
       !record(reference) ||
       Object.keys(reference).some((key) => !['price', 'currency', 'timestamp'].includes(key)) ||
-      !decimal(reference.price) ||
-      reference.price.startsWith('-') ||
+      !nonnegativeDecimal(reference.price) ||
       reference.currency !== 'USD' ||
       typeof reference.timestamp !== 'string' ||
       !validTime(reference.timestamp) ||

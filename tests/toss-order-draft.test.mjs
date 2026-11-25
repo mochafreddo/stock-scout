@@ -352,17 +352,15 @@ test('schedule evidence and expiry boundaries distinguish safe failure reasons',
 
 test('observed reference price is retained separately from execution and rejects incomplete pairs', async () => {
   const value = input();
-  value.referencePrice = {
-    price: '12.7500',
-    currency: 'USD',
-    timestamp: '2026-11-06T08:00:00-05:00',
-  };
-  const result = await draft(value);
-  assert.equal(result.status, 2);
-  assert.deepEqual(result.out.data[0].referencePrice, {
-    ...value.referencePrice,
-    meaning: 'observed_not_execution',
-  });
+  for (const price of ['12.7500', '0.0000', '-0.0000']) {
+    const referencePrice = { price, currency: 'USD', timestamp: '2026-11-06T08:00:00-05:00' };
+    const result = await draft({ ...value, referencePrice });
+    assert.equal(result.status, 2, price);
+    assert.deepEqual(result.out.data[0].referencePrice, {
+      ...referencePrice,
+      meaning: 'observed_not_execution',
+    });
+  }
   for (const referencePrice of [
     { price: '12.75', currency: 'USD' },
     { price: '-1', currency: 'USD', timestamp: '2026-11-06T13:00:00Z' },
