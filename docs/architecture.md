@@ -38,12 +38,14 @@ flowchart TD
 | [toss-account-pagination.ts](../scripts/toss-account-pagination.ts) | 계좌 페이지 입력·커서와 문맥의 결합·서명 대상 구성 | [거래내역](../tests/toss-transactions.test.mjs), [주문](../tests/toss-orders.test.mjs) |
 | [toss-transactions.ts](../scripts/toss-transactions.ts) | 결제 기준 거래내역과 페이지 | [거래내역](../tests/toss-transactions.test.mjs) |
 | [toss-orders.ts](../scripts/toss-orders.ts) | 일반·조건 주문의 조회 조건·상태·페이지 | [주문](../tests/toss-orders.test.mjs) |
+| [toss-order-draft.ts](../scripts/toss-order-draft.ts) | 호출자가 제공한 주문 조건·상장 종목·정규장 일정을 오프라인에서 검증해 앱에서 직접 검토할 주문 초안을 반환한다. [초안 검증](adr/0022-offline-order-draft-validation.md) · [상장 종목 식별](adr/0023-order-draft-listing-identity.md) | [주문 초안 CLI](../tests/toss-order-draft.test.mjs) |
+| [dot-mcp.ts](../scripts/dot-mcp.ts) · [run-dot-mcp.ts](../scripts/run-dot-mcp.ts) | 예약 Dot의 시장 조회를 기존 CLI에 전달하고 회차 동안 루프백 서버와 터널을 운영한다. | [MCP 요청과 응답](../tests/dot-mcp.test.mjs), [시장 조회](../tests/dot-mcp-market.test.mjs), [회차 제어](../tests/dot-mcp-window.test.mjs) |
 
 모듈은 조회 조건과 결과의 의미를 담당하고, 인증이나 공유 파일 쓰기는 `TossClient`를 통한다. 모듈별 함수 배치는 내부 구현이며 외부 소비자의 계약은 CLI 입출력이다. 런타임은 Node.js 표준 모듈과 저장소의 TypeScript 모듈을 사용한다. 개발 의존성과 검사 범위는 [package.json](../package.json)과 [tsconfig.json](../tsconfig.json)에 있다.
 
 ## 공유 상태의 소유권
 
-각 CLI 프로세스는 자신의 `TossClient`와 실행 예산을 가진다. 같은 보호 디렉터리를 쓰는 프로세스들은 디스크의 인증·호출 간격 상태를 공유한다. 상주 서버나 별도 요청 큐는 없다.
+각 CLI 프로세스는 자신의 `TossClient`와 실행 예산을 가진다. 같은 보호 디렉터리를 쓰는 프로세스들은 디스크의 인증·호출 간격 상태를 공유한다. 직접 CLI 호출에는 상주 서버나 요청 대기열이 없다. 예약 Dot의 [회차 대기열](../scripts/dot-mcp-window.ts)은 한 회차의 시장 조회를 한 건씩 실행하며, 승인된 CLI 실행기가 시작한 HTTP 요청에는 같은 공유 호출 간격이 적용된다. 연결 설계는 [ADR 0024](adr/0024-private-mcp-for-scheduled-dot.md), Mac 설정과 회차 종료 절차는 [예약 운영 안내](scheduled-dot-market.md)에 있다.
 
 `toss-client.ts` 내부의 공유 요청 조정 모듈은 인증·호출 간격 상태의 읽기·쓰기, 발급 잠금, 전송 시작과 예약, 공급자 대기 기록의 게시·병합을 소유한다. `TossClient`는 인증·호출 간격의 원시 공유 상태나 해당 잠금 이름을 다루지 않고, 토큰 발급 필요 여부·응답 검증·재시도와 실행 예산을 판단한다. 계좌 선택과 계좌 잠금은 기존 클라이언트 책임이다.
 
