@@ -31,7 +31,7 @@ function tool(
 export const marketTools = [
   tool(
     'prices',
-    'Query symbol prices. Listing selectors do not apply. Provider timestamps can be absent or null. retrievedAt is the CLI retrieval time.',
+    'Query prices by symbol only. A market or ISIN selected with stock does not carry over. For a shared symbol, leave the price unattributed unless other evidence identifies the listing. Provider timestamps can be absent or null. retrievedAt is the CLI retrieval time.',
     {
       symbols: { type: 'array', minItems: 1, maxItems: 200, items: symbol },
       staleAfterSeconds: integer(0, Number.MAX_SAFE_INTEGER),
@@ -58,7 +58,7 @@ export const marketTools = [
   ),
   tool(
     'stock',
-    'Identify a stock by symbol. Select an ambiguous listing by market and optional ISIN. Use "-" for a missing ISIN.',
+    'Identify a stock by symbol. Select an ambiguous listing by market and optional ISIN for this lookup only. Use "-" for a missing ISIN.',
     {
       symbol,
       market: { type: 'string', pattern: marketPattern.source },
@@ -69,7 +69,7 @@ export const marketTools = [
   ),
   tool(
     'candles',
-    'Query one daily candle page. Use the returned page.nextBefore as before for a follow-up page.',
+    'Query one daily candle page by symbol. No page inherits the market or ISIN selected with stock. With date, the CLI independently confirms a US listing market and rejects ambiguous symbols. For a follow-up, pass page.nextBefore as before and omit date. For a shared symbol, leave candles unattributed unless other evidence identifies the listing.',
     {
       symbol,
       interval: { type: 'string', const: '1d' },

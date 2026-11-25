@@ -14,7 +14,9 @@ Actual Toss data, account access, credential setup and transmission to external 
 
 ### Choose queries for the requested task
 
-Use the following starting points, then choose only the queries needed to answer the request. A request does not require every command in its row. Use a verified provider symbol and resolve ambiguous identity with `stock` before combining data for a security. Selecting a market/ISIN with `stock` does not pass that selection to `prices`; when multiple securities share a symbol, do not attribute a symbol-only price to the selected security without evidence linking them.
+Use the following starting points, then choose only the queries needed to answer the request. A request does not require every command in its row. Use a verified provider symbol and resolve ambiguous identity with `stock` before combining data for a security.
+
+For example, if NYSE and NASDAQ listings share the synthetic symbol `DEMO`, `stock DEMO NYSE US0000000010` selects the NYSE row for that lookup. `prices`, `orderbook`, `trades`, `candles` and each item in `candles-batch` identify the security by symbol alone. They receive neither the selected market nor the ISIN. The same limit applies to follow-up candle pages requested with `before`. When a symbol is shared, leave the result unattributed unless other evidence links it to the selected listing.
 
 | User task | Query choices | Interpretation and stopping point |
 | --- | --- | --- |
@@ -89,7 +91,7 @@ Invoke `node tests/toss-agent-cli.mjs SCENARIO` followed by the CLI arguments fo
 | `success` | `tradable NASDAQ` | Read a complete synthetic list for the requested market. |
 | `partial` | `candles DEMO 1m count=1` | Receive an empty page with a next boundary. |
 | `partial` | `candles DEMO 1m count=1 before=VALUE` | Copy the previous `page.nextBefore` exactly to obtain the last page. |
-| `success` | `candles DEMO 1d date=2026-11-05 count=3` | Read two daily bars with a verified synthetic US identity. |
+| `success` | `candles DEMO 1d date=2026-11-05 count=3` | Read two daily bars with a verified synthetic US listing market. |
 | `partial` | `candles DEMO 1d date=2026-11-05 count=3` | Analyze two bars while preserving the remaining-page omission and exit 2. |
 | `success` | `candles-batch DEMO,EMPTY count=3` | Distinguish two returned bars with unconfirmed trade dates from a successful empty page. |
 | `partial` | `candles-batch DEMO,PARTIAL,EMPTY,INVALID,DENIED,LATER date=2026-11-05 count=3` | Read success, usable partial pages, invalid-item/pagination omissions, a permission error and an unqueried symbol with the actual CLI summaries. |
@@ -217,7 +219,7 @@ Synthetic example with alternative outcomes for one holding. `DEMO` is absent fr
 
 ## Choose daily queries and follow-up pages
 
-Use [the candle reference](toss-cli.md#일봉과-분봉) to select an inclusive US trade-date upper bound or a provider page boundary. Date selection verifies the market; it does not establish candle completion or finality. Do not infer a market from ticker spelling or a US trade date by slicing a timestamp's displayed date.
+Use [the candle reference](toss-cli.md#일봉과-분봉) to select an inclusive US trade-date upper bound or a provider page boundary. For a date-based query, the CLI independently looks up each symbol and confirms a US listing market before requesting its candles. If that lookup finds multiple listings, it returns `IDENTITY_AMBIGUOUS` for the symbol even after a successful `stock` selection. A follow-up using `before` omits `date` and does not repeat the market check. Date selection does not establish candle completion or finality. Do not infer a market from ticker spelling or a US trade date by slicing a timestamp's displayed date.
 
 For several requested symbols, use [the sequential daily batch](toss-cli.md#순차-일봉-묶음). Keep its shared execution budget; do not split it into parallel processes to bypass limits. Inspect every item's status, data, omissions, page and error/reason, including usable empty pages and unqueried symbols. The reference owns the input limits, aggregate status, summary fields and stop policy.
 
