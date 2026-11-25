@@ -463,6 +463,10 @@ function accessFailureCode(status: number) {
   if (status === 403) return 'PERMISSION_DENIED';
 }
 
+function retryableStatus(status: number) {
+  return status === 429 || status >= 500;
+}
+
 function failure(response: Response, body: unknown) {
   const envelope = body && typeof body === 'object' && 'error' in body ? body.error : undefined;
   const raw =
@@ -780,6 +784,10 @@ export class TossClient {
                 if (part.done) break;
                 bytes += part.value.length;
                 if (bytes > 1048576) {
+                  if (token && retryableStatus(response.status)) {
+                    void reader.cancel().catch(() => {});
+                    return { response, body: undefined };
+                  }
                   throw new TossError('RESPONSE_INVALID');
                 }
                 chunks.push(part.value);
@@ -905,7 +913,7 @@ export class TossClient {
         if (response.status === 401 && error.providerCode === 'expired-token' && !recovered) {
           recovered = true;
           token = await this.token(token);
-        } else if ((response.status === 429 || response.status >= 500) && !retried) {
+        } else if (retryableStatus(response.status) && !retried) {
           retried = true;
         } else throw error;
       }

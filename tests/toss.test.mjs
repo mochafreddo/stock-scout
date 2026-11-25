@@ -848,6 +848,28 @@ for (const [bytes, expectedStatus] of [
     }
   });
 
+for (const [status, errorCode] of [
+  [429, 'RATE_LIMIT'],
+  [503, 'UPSTREAM_ERROR'],
+])
+  test(`Toss CLI retries an oversized HTTP ${status} read once`, async () => {
+    const error = { status, responseChunks: ['synthetic-response-body', 1048576] };
+    for (const repeated of [false, true]) {
+      const f = fixture();
+      try {
+        const r = await runCli(f, [error, repeated ? error : { body: { result: [price] } }]);
+        assert.equal(r.requests.filter((request) => request.method === 'GET').length, 2);
+        assert.equal(r.status, repeated ? 1 : 0, r.stdout + r.stderr);
+        const out = JSON.parse(r.stdout);
+        if (repeated) assert.equal(out.error.code, errorCode);
+        else assert.equal(out.status, 'success');
+        assert.doesNotMatch(r.stdout + r.stderr, /synthetic-response-body/);
+      } finally {
+        f.close();
+      }
+    }
+  });
+
 test('Toss CLI rejects late or oversized responses without exposing response content', async () => {
   for (const [step, expected] of [
     [{ monotonicAdvance: 16000, body: { result: [price] } }, 'TIMEOUT'],
