@@ -1067,7 +1067,7 @@ test('batch consumer requires each usable item to match its daily candle source'
   }
 });
 
-test('successful empty daily CLI pages require a valid source symbol in the consumer', async (t) => {
+test('consumer requires a symbol and daily interval for empty single CLI pages', async (t) => {
   const f = fixture();
   t.after(f.close);
   const result = await runCli(
@@ -1083,6 +1083,16 @@ test('successful empty daily CLI pages require a valid source symbol in the cons
   assert.equal(empty.status, 'success');
   assert.deepEqual(empty.bars, []);
   assert.equal(empty.analysis, null);
+  for (const status of ['success', 'partial']) {
+    await t.test(`empty ${status} page without an interval`, () => {
+      const query = JSON.parse(result.stdout);
+      query.status = status;
+      delete query.source.interval;
+      const invalid = consume({ stdout: JSON.stringify(query) });
+      assert.equal(invalid.status, 1, invalid.stderr);
+      assert.equal(invalid.stdout, '');
+    });
+  }
   for (const symbol of [undefined, 'DEMO/']) {
     await t.test(String(symbol), () => {
       const query = JSON.parse(result.stdout);

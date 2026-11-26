@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -79,9 +80,9 @@ function snapshot(commit: string, destination: string) {
 
 const thematicBreak = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/;
 const inlineLink =
-  /\]\(\s*(<[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))?\s*\)/g;
+  /\]\(\s*(?<inlineTarget><[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))?\s*\)/g;
 const referenceDefinition =
-  /^ {0,3}\[([^\]\n]+)\]:[ \t]*(<[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\([^)\n]*\)))?[ \t]*$/gm;
+  /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\([^)\n]*\)))?[ \t]*$/gm;
 
 function markdownText(path: string) {
   let fence = '';
@@ -136,30 +137,34 @@ function markdownText(path: string) {
     .join('\n');
 }
 
+const htmlAndCode =
+  /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)|<!--[\s\S]*?(?:-->|(?![\s\S]))|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
+const markdownInline = new RegExp(
+  [htmlAndCode.source, inlineLink.source, referenceDefinition.source].join('|'),
+  'gim',
+);
+
 function headingIds(text: string) {
   const anchors = new Set<string>();
   const referenceLabels = new Set<string>();
-  const htmlAndCode =
-    /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)|<!--[\s\S]*?(?:-->|(?![\s\S]))|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
-  const inline = new RegExp(
-    [htmlAndCode.source, inlineLink.source, referenceDefinition.source].join('|'),
-    'gim',
-  );
-  const visible = text.replace(inline, (token, ticks, tag, attributes, destination, label) => {
-    if (destination) return ']';
-    if (label) referenceLabels.add(label.toLowerCase());
-    if (ticks || token.startsWith('\\')) return token;
-    if (tag && !token.startsWith('</')) {
-      const attribute = /\s+([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
-      for (const [, key, double, single, bare] of attributes.matchAll(attribute)) {
-        const value = double ?? single ?? bare;
-        const name = key.toLowerCase();
-        if (value && (name === 'id' || (tag.toLowerCase() === 'a' && name === 'name')))
-          anchors.add(value);
+  const visible = text.replace(
+    markdownInline,
+    (token, ticks, tag, attributes, destination, label) => {
+      if (destination) return ']';
+      if (label) referenceLabels.add(label.toLowerCase());
+      if (ticks || token.startsWith('\\')) return token;
+      if (tag && !token.startsWith('</')) {
+        const attribute = /\s+([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
+        for (const [, key, double, single, bare] of attributes.matchAll(attribute)) {
+          const value = double ?? single ?? bare;
+          const name = key.toLowerCase();
+          if (value && (name === 'id' || (tag.toLowerCase() === 'a' && name === 'name')))
+            anchors.add(value);
+        }
       }
-    }
-    return token.replace(/[^\n]/g, '');
-  });
+      return token.replace(/[^\n]/g, '');
+    },
+  );
   const ids = new Set<string>();
   const paragraph: string[] = [];
   for (const line of visible.split('\n')) {
@@ -189,12 +194,9 @@ function checkLinks(root: string, files: string[], headingCache?: Map<string, Se
     const source = join(root, file);
     if (!realpathSync(source).startsWith(`${root}/`))
       throw new Error(`${file}: document leaves snapshot`);
-    const text = markdownText(source).replace(/(`+)[^\n]*?\1/g, '');
-    const links = [
-      ...Array.from(text.matchAll(inlineLink), (match) => match[1]),
-      ...Array.from(text.matchAll(/^ {0,3}\[[^\]\n]+\]:\s*(<[^>\n]*>|\S+)/gm), (match) => match[1]),
-    ];
-    for (const destination of links) {
+    for (const match of markdownText(source).matchAll(markdownInline)) {
+      const destination = match.groups?.inlineTarget ?? match.groups?.referenceTarget;
+      if (!destination) continue;
       const link = destination.replace(/^<|>$/g, '');
       if (/^[a-z][a-z\d+.-]*:/i.test(link) || link.startsWith('//')) continue;
       const [path, fragment] = link.split('#');
@@ -209,6 +211,12 @@ function checkLinks(root: string, files: string[], headingCache?: Map<string, Se
       const inside = relative(root, realTarget);
       if (inside === '..' || inside.startsWith('../') || isAbsolute(inside)) {
         throw new Error(`${file}: local target leaves snapshot: ${link}`);
+      }
+      let directory = root;
+      for (const part of relative(root, target).split(sep).filter(Boolean)) {
+        if (!readdirSync(directory).some((name) => name.normalize() === part.normalize()))
+          throw new Error(`${file}: missing local target ${link}`);
+        directory = join(directory, part);
       }
       if (!fragment || !target.endsWith('.md')) continue;
       const ids = headingCache?.get(realTarget) ?? headingIds(markdownText(target));
@@ -276,13 +284,13 @@ function checkSkills(root: string, files: string[]) {
       .slice(fields.indexOf(manual[0]) + 1)
       .find((line) => line.trim() && !line.trimStart().startsWith('#'));
     const disabled = manual[0]?.match(
-      /^disable-model-invocation:[ \t]*(true|false)[ \t]*(?:#.*)?$/,
+      /^disable-model-invocation:[ \t]+(true|false)(?:[ \t]+(?:#.*)?)?$/,
     )?.[1];
     const policy = skillFile(join(directory, 'agents/openai.yaml'))
       .split(/\r?\n/)
       .filter((line) => !/^\s*(?:#.*)?$/.test(line));
     const implicit = policy[1]?.match(
-      /^ +allow_implicit_invocation:[ \t]*(true|false)[ \t]*(?:#.*)?$/,
+      /^ +allow_implicit_invocation:[ \t]+(true|false)(?:[ \t]+(?:#.*)?)?$/,
     )?.[1];
     if (
       !fields.every((line) => /^(?:\s|#|[A-Za-z][\w-]*:|$)/.test(line)) ||
@@ -290,7 +298,7 @@ function checkSkills(root: string, files: string[]) {
       (nextField !== undefined && /^\s/.test(nextField)) ||
       disabled === undefined ||
       policy.length !== 2 ||
-      !/^policy:[ \t]*(?:#.*)?$/.test(policy[0]) ||
+      !/^policy:(?:[ \t]+(?:#.*)?)?$/.test(policy[0]) ||
       implicit === undefined
     ) {
       throw new Error(

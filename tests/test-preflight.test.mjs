@@ -60,7 +60,7 @@ net.Server.prototype.close = function (...args) {
 };
 `,
   );
-  const env = { ...process.env, NODE_OPTIONS: `--require=${join(root, 'network.cjs')}` };
+  const env = { ...process.env, NODE_OPTIONS: `--require="${join(root, 'network.cjs')}"` };
   delete env.NODE_TEST_CONTEXT;
   const run = () => spawnSync('pnpm', ['test'], { cwd: root, encoding: 'utf8', env });
   return { run, trace };

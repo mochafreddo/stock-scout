@@ -1,10 +1,12 @@
 import { type ChildProcess, execFile } from 'node:child_process';
 import { candleQuery } from './toss-candles.ts';
+import { priceQuery } from './toss-prices.ts';
 import { isinPattern, marketPattern } from './toss-stock.ts';
 import { record, symbolPattern, validTime } from './toss-values.ts';
 
 type CliResponse = Record<string, unknown> & {
   data: Record<string, unknown>[];
+  omissions?: Record<string, unknown>[];
   source: Record<string, unknown>;
 };
 
@@ -106,17 +108,49 @@ function readinessState({ source, data, error }: CliResponse, exitCode: number) 
     return readiness;
 }
 
-function matchesMarketQuery({ source, data, status }: CliResponse, args: string[]) {
+function matchesMarketQuery(response: CliResponse, args: string[]) {
+  const { source, data, status, omissions = [], error } = response;
   const [command, target, option, count] = args;
   if (status === 'error') {
     if (data.length) return false;
-    if (Object.keys(source).length === 1) return true;
+    if (command !== 'stock' && Object.keys(source).length === 1) return true;
   }
   switch (command) {
-    case 'prices':
-      return source.endpoint === '/api/v1/prices';
-    case 'stock':
-      return source.endpoint === '/api/v1/stocks';
+    case 'prices': {
+      if (source.endpoint !== '/api/v1/prices') return false;
+      if (!data.length && !omissions.length) return true;
+      const { symbols, staleAfterSeconds } = priceQuery(target, args.slice(2));
+      const remaining = new Set(symbols.split(','));
+      for (const { symbol, priceAge } of data) {
+        if (
+          typeof symbol !== 'string' ||
+          !remaining.delete(symbol) ||
+          !record(priceAge) ||
+          priceAge.thresholdSeconds !== staleAfterSeconds
+        )
+          return false;
+      }
+      for (const { reason, symbol } of omissions) {
+        if (reason === 'missing_item' && (typeof symbol !== 'string' || !remaining.delete(symbol)))
+          return false;
+      }
+      return remaining.size === 0;
+    }
+    case 'stock': {
+      const [, , market, isin] = args;
+      const matchesListing = (row: Record<string, unknown>) =>
+        row.symbol === target &&
+        (market === undefined || row.market === market) &&
+        (isin === undefined || row.isinCode === (isin === '-' ? null : isin));
+      if (status === 'error') {
+        return (
+          (Object.keys(source).length === 1 || source.endpoint === '/api/v1/stocks') &&
+          record(error) &&
+          (!Array.isArray(error.choices) || error.choices.every(matchesListing))
+        );
+      }
+      return source.endpoint === '/api/v1/stocks' && data.length === 1 && matchesListing(data[0]);
+    }
     case 'rankings':
       return (
         source.endpoint === '/api/v1/rankings' &&
@@ -168,7 +202,7 @@ export class DotWindow {
     this.report = report;
     this.onCleanupDeadline = onCleanupDeadline;
   }
-  async query(args: string[]) {
+  async query(args: string[], isConnected: () => boolean) {
     const previous = this.tail;
     const slot = Promise.withResolvers<void>();
     this.tail = slot.promise;
@@ -177,7 +211,7 @@ export class DotWindow {
         this.report('queued');
         await previous;
       }
-      return await this.executeQuery(args);
+      return await this.executeQuery(args, isConnected);
     } finally {
       if (this.tail === slot.promise) this.tail = undefined;
       slot.resolve();
@@ -239,7 +273,8 @@ export class DotWindow {
     this.closed = true;
     return this.tail;
   }
-  private rejection() {
+  private rejection(isConnected: () => boolean) {
+    if (!isConnected()) return 'CONNECTION_CLOSED';
     if (this.closed || !this.isOpen()) return 'WINDOW_CLOSED';
     if (this.starts >= 16) return 'SESSION_BUDGET';
   }
@@ -247,10 +282,10 @@ export class DotWindow {
     this.report('rejected', code);
     return queryResult({ stage: 'admission', error: { code } }, true);
   }
-  private async executeQuery(args: string[]) {
+  private async executeQuery(args: string[], isConnected: () => boolean) {
     let stage = 'readiness';
     try {
-      const beforeReadiness = this.rejection();
+      const beforeReadiness = this.rejection(isConnected);
       if (beforeReadiness) return this.rejected(beforeReadiness);
       const ready = await this.execute(['readiness']);
       const readiness = readinessState(ready.response, ready.exitCode);
@@ -263,7 +298,7 @@ export class DotWindow {
         return queryResult({ stage, ...ready }, true);
       }
       stage = 'query';
-      const beforeStart = this.rejection();
+      const beforeStart = this.rejection(isConnected);
       if (beforeStart) return this.rejected(beforeStart);
       const output = await this.execute(args, () => {
         this.starts++;

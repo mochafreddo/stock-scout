@@ -93,6 +93,7 @@ assert.ok(
 );
 const batch = !Object.hasOwn(output.source, 'interval');
 const rows = batch ? output.data : [{ ...output, symbol: output.source.symbol }];
+assert.ok(emptyError || rows.length > 0, 'daily candle batch requires at least one symbol row');
 const data = rows.map((row) => {
   const usable = row.status === 'success' || row.status === 'partial';
   if (usable)

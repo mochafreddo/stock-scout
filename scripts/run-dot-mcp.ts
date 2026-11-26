@@ -132,6 +132,10 @@ export async function runScheduledDot(options: Options) {
 }
 
 if (import.meta.main) {
+  const reportStartError = (code: string) => {
+    console.error(JSON.stringify({ time: new Date().toISOString(), status: 'error', code }));
+    process.exitCode = 1;
+  };
   const [launcher, tunnel, state, port] = process.argv.slice(2);
   if (
     process.argv.length !== 6 ||
@@ -139,7 +143,7 @@ if (import.meta.main) {
     !/^\d+$/.test(port) ||
     Number(port) > 65535
   ) {
-    process.exitCode = 1;
+    reportStartError('INVALID_START_ARGUMENTS');
   } else {
     try {
       const run = await runScheduledDot({
@@ -158,10 +162,7 @@ if (import.meta.main) {
         await run.done;
       }
     } catch {
-      console.error(
-        JSON.stringify({ time: new Date().toISOString(), status: 'error', code: 'START_FAILED' }),
-      );
-      process.exitCode = 1;
+      reportStartError('START_FAILED');
     }
   }
 }

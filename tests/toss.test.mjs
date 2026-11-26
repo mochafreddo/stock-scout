@@ -488,6 +488,30 @@ test('Toss CLI reuses unexpired tokens and refreshes locally expired tokens acro
   }
 });
 
+test('Toss CLI reuses a sixty-second token issued after a shared forty-five-second cooldown', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const limited = await runCli(f, [], undefined, {
+    TEST_AUTH_STEPS: JSON.stringify([{ status: 429, headers: { 'Retry-After': '45' }, body: {} }]),
+  });
+  assert.equal(JSON.parse(limited.stdout).error.code, 'RATE_LIMIT');
+  const issued = await runCli(f, [], undefined, {
+    TEST_AUTH_STEPS: JSON.stringify([
+      { body: { access_token: 'synthetic-token', token_type: 'Bearer', expires_in: 60 } },
+    ]),
+  });
+  assert.equal(issued.status, 0, issued.stdout);
+  assert.ok(issued.requests[1].at - limited.requests[0].at >= 45000);
+  const again = await runCli(f, [], undefined, {
+    TEST_CLOCK_START: String(issued.requests.at(-1).at),
+  });
+  assert.equal(again.status, 0, again.stdout);
+  assert.deepEqual(
+    again.requests.map(({ method }) => method),
+    ['POST', 'POST', 'GET', 'GET'],
+  );
+});
+
 test('Toss CLI refreshes at the strict fifteen-second cached-token safety boundary', async () => {
   for (const [wallTime, expectedToken, expectedIssuances] of [
     ['2026-11-06T15:00:44.999Z', 'synthetic-token-A', 1],

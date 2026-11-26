@@ -824,7 +824,7 @@ export class TossClient {
         })(),
       ]);
       checkRequest();
-      return result;
+      return { ...result, requestWall };
     } catch (error) {
       if (
         receivedResponse &&
@@ -833,7 +833,7 @@ export class TossClient {
         !(error instanceof TossError && error.code === 'AUTH_STORAGE')
       ) {
         controller.abort();
-        return { response: receivedResponse, body: undefined };
+        return { response: receivedResponse, body: undefined, requestWall };
       }
       if (error instanceof TossError && TERMINAL_ERRORS.includes(error.code)) this.stopped = error;
       try {
@@ -858,8 +858,7 @@ export class TossClient {
           return undefined;
         });
         if (cached) return cached;
-        const issuedAt = Date.now();
-        const { response, body } = await this.transmit('/oauth2/token');
+        const { response, body, requestWall: issuedAt } = await this.transmit('/oauth2/token');
         if (!response.ok) {
           if (response.status >= 400 && response.status < 500)
             await this.coordination.recordRejectedIssuance().catch((error) => {

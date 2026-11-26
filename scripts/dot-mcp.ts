@@ -67,7 +67,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, window: DotWind
     case 'tools/call': {
       const args = marketArgs(rpc.params);
       if (!args) return fail(-32602, 'Unknown tool or invalid arguments');
-      const { payload, isError, text } = await window.query(args);
+      const { payload, isError, text } = await window.query(args, () => !res.destroyed);
+      if (res.destroyed) return;
       return reply({
         result: { isError, structuredContent: payload, content: [{ type: 'text', text }] },
       });

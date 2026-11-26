@@ -69,7 +69,8 @@ function envelope(endpoint, data, fields = {}) {
   };
 }
 const readyResponse = envelope('local:readiness', [readyRow]);
-const pricesResponse = envelope('/api/v1/prices', [{ symbol: 'DEMO' }]);
+const priceRow = { symbol: 'DEMO', priceAge: { thresholdSeconds: 900 } };
+const pricesResponse = envelope('/api/v1/prices', [priceRow]);
 const redactedError = {
   version: 1,
   retrievedAt: '2026-11-24T11:55:00.000Z',
@@ -349,6 +350,96 @@ test('a market query rejects a mismatched CLI envelope or command source', async
   }
 });
 
+function checkQueryResults(name, cases) {
+  test(name, async (t) => {
+    const { options, start } = fixture(t);
+    const run = await start();
+    const program = readFileSync(options.launcher, 'utf8');
+    for (const [label, args, response, valid] of cases) {
+      await t.test(label, async () => {
+        const exit = { success: 0, error: 1, partial: 2 }[response.status];
+        writeFileSync(
+          options.launcher,
+          program.replace(
+            /\*\) echo [^\n]+/,
+            `*) echo '${JSON.stringify(response)}'; exit ${exit};;`,
+          ),
+        );
+        assert.deepEqual(
+          await query(run.url, { name, arguments: args }),
+          valid
+            ? { stage: 'query', response, exitCode: exit }
+            : { stage: 'query', error: { code: 'CLI_RESULT_UNAVAILABLE' } },
+        );
+      });
+    }
+  });
+}
+
+const pair = { symbols: ['DEMO', 'NEXT', 'DEMO'] };
+const missingPrice = (symbol) => ({
+  ...pricesResponse,
+  status: 'partial',
+  omissions: [{ symbol, reason: 'missing_item' }],
+});
+checkQueryResults('prices', [
+  ['genuine empty list', pair, { ...pricesResponse, data: [] }, true],
+  ['partial covers distinct symbols', pair, missingPrice('NEXT'), true],
+  ['row outside request', { symbols: ['OTHER'] }, pricesResponse, false],
+  ['unexplained symbol', pair, pricesResponse, false],
+  ['missing item outside request', pair, missingPrice('OTHER'), false],
+  ['overlapping missing item', pair, missingPrice('DEMO'), false],
+  ['wrong explicit threshold', { symbols: ['DEMO'], staleAfterSeconds: 0 }, pricesResponse, false],
+  [
+    'missing default threshold',
+    { symbols: ['DEMO'] },
+    { ...pricesResponse, data: [{ symbol: 'DEMO' }] },
+    false,
+  ],
+]);
+
+const listing = { symbol: 'DEMO', market: 'NYSE', isinCode: null, name: null };
+const listedStock = { symbol: 'DEMO', market: 'NYSE', isin: '-' };
+const stockRows = (...rows) => envelope('/api/v1/stocks', rows);
+const ambiguous = (other, redacted) => ({
+  ...(redacted ? redactedError : stockRows()),
+  status: 'error',
+  error: { code: 'IDENTITY_AMBIGUOUS', choices: [listing, { ...listing, ...other }] },
+});
+checkQueryResults('stock', [
+  ['matching explicit null ISIN', listedStock, stockRows(listing), true],
+  ['empty success', listedStock, stockRows(), false],
+  ['multiple listings', listedStock, stockRows(listing, listing), false],
+  ['other symbol', listedStock, stockRows({ ...listing, symbol: 'OTHER' }), false],
+  ['other market', listedStock, stockRows({ ...listing, market: 'NASDAQ' }), false],
+  ['absent ISIN', listedStock, stockRows({ symbol: 'DEMO', market: 'NYSE' }), false],
+  ['other ISIN', { ...listedStock, isin: 'US0000000001' }, stockRows(listing), false],
+  [
+    'matching partial',
+    listedStock,
+    {
+      ...stockRows(listing),
+      status: 'partial',
+      omissions: [{ reason: 'type_unknown' }],
+    },
+    true,
+  ],
+  [
+    'choices within market',
+    { symbol: 'DEMO', market: 'NYSE' },
+    ambiguous({ isinCode: 'US0000000001' }, false),
+    true,
+  ],
+  ['other candidate symbol', { symbol: 'DEMO' }, ambiguous({ symbol: 'OTHER' }, false), false],
+  ['other redacted candidate market', listedStock, ambiguous({ market: 'NASDAQ' }, true), false],
+  [
+    'other redacted candidate ISIN',
+    listedStock,
+    ambiguous({ isinCode: 'US0000000001' }, true),
+    false,
+  ],
+]);
+
 test('market errors expose only CLI error fields and candle results identify the requested page', async (t) => {
   const { options, start } = fixture(t);
   const run = await start();
@@ -429,6 +520,60 @@ test('market errors expose only CLI error fields and candle results identify the
     });
   }
 });
+
+for (const phase of ['readiness', 'prices']) {
+  test(`disconnect during ${phase} drains the active command and skips the disconnected queue entry`, async (t) => {
+    const { options, logs, trace, start } = fixture(t);
+    const program = readFileSync(options.launcher, 'utf8');
+    const release = join(options.state, 'release');
+    writeFileSync(
+      options.launcher,
+      program.replace(
+        'case "$1" in',
+        `if [ "$1" = "${phase}" ]; then
+  while [ ! -f "${release}" ]; do sleep 0.02; done
+fi
+case "$1" in`,
+      ),
+    );
+    const run = await start();
+    const active = new AbortController();
+    const waiting = new AbortController();
+    try {
+      const first = price(run.url, active.signal);
+      const command = phase === 'prices' ? 'prices DEMO' : 'readiness';
+      await waitFor(
+        () => existsSync(trace) && readFileSync(trace, 'utf8').trim().endsWith(command),
+        'active CLI command',
+      );
+      const second = price(run.url, waiting.signal);
+      await waitFor(() => logs.some((e) => e.status === 'queued'), 'queued request');
+      active.abort();
+      waiting.abort();
+      await Promise.all(
+        [first, second].map((request) => assert.rejects(request, { name: 'AbortError' })),
+      );
+      const next = price(run.url);
+      await waitFor(() => logs.filter((e) => e.status === 'queued').length === 2, 'next request');
+      writeFileSync(release, '');
+      assert.equal((await next).exitCode, 0);
+      const charged = phase === 'prices' ? 1 : 0;
+      const commands = ['readiness', 'prices DEMO'];
+      assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), [
+        ...commands.slice(0, 1 + charged),
+        ...commands,
+      ]);
+      assert.equal(logs.filter((e) => e.status === 'success').length, 1 + charged);
+      for (let i = 0; i < 15 - charged; i++) {
+        assert.equal((await price(run.url)).exitCode, 0);
+      }
+      assert.equal((await price(run.url)).error?.code, 'SESSION_BUDGET');
+    } finally {
+      writeFileSync(release, '');
+      await run.stop();
+    }
+  });
+}
 
 test('a readiness check crossing the deadline cannot start prices', async (t) => {
   const { options, trace, start } = fixture(t);

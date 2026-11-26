@@ -16,7 +16,7 @@ function stateDirectory(t) {
   return state;
 }
 
-function args(state, time, tunnel, launcher = '/unused') {
+function args(state, time, tunnel, launcher = '/unused', port = '0') {
   return [
     '--import',
     `data:text/javascript,Date.now=()=>${Date.parse(time)}`,
@@ -24,7 +24,7 @@ function args(state, time, tunnel, launcher = '/unused') {
     launcher,
     tunnel,
     state,
-    '0',
+    port,
   ];
 }
 
@@ -49,6 +49,24 @@ function invoke(state, time, status, code, exitCode) {
   const result = run(state, time);
   assert.deepEqual(result.entries, [{ session: '2026-11-24', time, status, code }]);
   assert.equal(result.status, exitCode);
+}
+
+for (const [label, launcher, port] of [
+  ['relative path', 'private-launcher', '0'],
+  ['out-of-range port', '/unused', '65536'],
+]) {
+  test(`direct startup rejects invalid arguments without echoing them (${label})`, (t) => {
+    const argv = args(stateDirectory(t), closed, '/unused', launcher, port);
+    const result = spawnSync(process.execPath, argv, { encoding: 'utf8', timeout: 10000 });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    const [line, ...rest] = result.stderr.split('\n');
+    assert.deepEqual(rest, ['']);
+    const entry = JSON.parse(line);
+    assert.equal(new Date(entry.time).toISOString(), entry.time);
+    assert.deepEqual(entry, { time: entry.time, status: 'error', code: 'INVALID_START_ARGUMENTS' });
+  });
 }
 
 for (const [exitCode, tunnel] of [

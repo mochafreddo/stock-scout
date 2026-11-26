@@ -86,6 +86,45 @@ function run(root, tip, base, args = [], extraEnv = {}, timeout) {
 
 for (const mode of ['docs', 'staged', 'push']) {
   const args = mode === 'docs' ? ['--docs', 'README.md'] : mode === 'staged' ? ['--staged'] : [];
+  function checkReadme(root, base, body) {
+    writeFileSync(join(root, 'README.md'), body);
+    if (mode !== 'docs') git(root, 'add', '.');
+    if (mode === 'push') git(root, 'commit', '-m', 'link targets');
+    return run(root, git(root, 'rev-parse', 'HEAD'), base, args);
+  }
+
+  for (const [kind, hidden] of [
+    ['comment', '<!--\n[example](hidden.md)\n[example]: hidden.md\n-->'],
+    ['code span', '``sample `\n[example](hidden.md)\n[example]: hidden.md\nend``'],
+  ]) {
+    test(`${mode} checks links immediately after a multiline ${kind}`, (t) => {
+      const { root, base } = fixture(t);
+      const body = `# Use \`Tag\`\n\n[ref]: #use-tag\n\n${hidden}`;
+      for (const destination of ['#use-tag', 'missing.md']) {
+        const result = checkReadme(root, base, `${body}[visible](${destination})\n`);
+        assert.equal(result.status, destination === 'missing.md' ? 1 : 0, result.stderr);
+        if (destination === 'missing.md')
+          assert.match(result.stderr, /missing local target missing\.md/);
+      }
+    });
+  }
+
+  for (const target of ['guides/Intro.md', 'Guides/intro.md']) {
+    test(`${mode} rejects the misspelled local path ${target}`, (t) => {
+      const { root, base } = fixture(t);
+      mkdirSync(join(root, 'Guides'));
+      writeFileSync(join(root, 'Guides/Intro.md'), '# Intro\n');
+      symlinkSync('Guides', join(root, 'Alias'));
+      const valid =
+        '[relative](Guides/Intro.md) [root](/Guides/Intro.md) [alias](Alias/Intro.md#intro)\n';
+      const accepted = checkReadme(root, base, valid);
+      assert.equal(accepted.status, 0, accepted.stderr);
+      const rejected = checkReadme(root, base, `${valid}[wrong](${target})\n`);
+      assert.equal(rejected.status, 1, rejected.stderr);
+      assert.ok(rejected.stderr.includes(`missing local target ${target}`), rejected.stderr);
+    });
+  }
+
   const anchorDocument = [
     'Use `<Tag>`',
     '===',
@@ -1411,6 +1450,34 @@ test('pre-push rejects a committed skill link even when the working copy repairs
   }
 });
 
+for (const mode of ['staged', 'push']) {
+  test(`${mode} skill invocation settings require YAML separators`, async (t) => {
+    const { root, base, directory } = skillFixture(t);
+    for (const [manual, policy, implicit, valid] of [
+      [' true', 'policy:', ' false', true],
+      [' false # automatic', 'policy: # settings', ' true # allowed', true],
+      ['true', 'policy:', ' false', false],
+      [' true#disabled', 'policy:', ' false', false],
+      [' true', 'policy:', 'false', false],
+      [' true', 'policy:', ' false#disabled', false],
+      [' true', 'policy:#settings', ' false', false],
+    ]) {
+      const frontmatter = `disable-model-invocation:${manual}`;
+      const setting = `allow_implicit_invocation:${implicit}`;
+      await t.test(`${frontmatter}, ${policy}, ${setting}`, () => {
+        writeFileSync(join(directory, 'SKILL.md'), `---\nname: sample\n${frontmatter}\n---\n`);
+        writeFileSync(join(directory, 'agents/openai.yaml'), `${policy}\n  ${setting}\n`);
+        git(root, 'add', '.');
+        if (mode === 'push') git(root, 'commit', '-m', 'skill invocation settings');
+        const args = mode === 'staged' ? ['--staged'] : [];
+        const result = run(root, git(root, 'rev-parse', 'HEAD'), base, args);
+        assert.equal(result.status, valid ? 0 : 1, result.stderr);
+        if (!valid) assert.match(result.stderr, /sample: invocation metadata/);
+      });
+    }
+  });
+}
+
 test('pre-push rejects inconsistent or ambiguous skill invocation settings', (t) => {
   const { root, base, directory } = skillFixture(t);
   for (const yaml of [
@@ -1528,7 +1595,7 @@ net.Server.prototype.listen = function () {
   const nodeWrapper = join(root, 'bin/node');
   writeFileSync(
     nodeWrapper,
-    `#!/bin/sh\nNODE_OPTIONS="--require=${join(root, 'network.cjs')}" exec "${process.execPath}" "$@"\n`,
+    `#!/bin/sh\nNODE_OPTIONS="--require=\\"\${0%/*}/../network.cjs\\"" exec "${process.execPath}" "$@"\n`,
   );
   chmodSync(nodeWrapper, 0o755);
   git(root, 'add', '.');
