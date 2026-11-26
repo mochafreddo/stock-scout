@@ -133,7 +133,7 @@ function markdownText(path: string) {
 function headingIds(text: string) {
   const anchors = new Set<string>();
   const inline =
-    /\\[\\<`]|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)|<!--[\s\S]*?(?:-->|$)|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
+    /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)|<!--[\s\S]*?(?:-->|$)|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
   const visible = text.replace(inline, (token, ticks, tag, attributes) => {
     if (ticks || token.startsWith('\\')) return token;
     if (tag && !token.startsWith('</')) {
@@ -148,12 +148,13 @@ function headingIds(text: string) {
     return token.replace(/[^\n]/g, '');
   });
   const ids = new Set<string>();
-  let previous = '';
+  const paragraph: string[] = [];
   for (const line of visible.split('\n')) {
     const atx = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
     const underline = /^ {0,3}(?:=+|-+)[ \t]*$/.test(line);
-    const title = atx?.[1] ?? (underline ? previous : '');
-    previous = atx || underline ? '' : line.trim();
+    const title = atx?.[1] ?? (underline ? paragraph.join(' ') : '');
+    if (atx || underline || !line.trim()) paragraph.length = 0;
+    else paragraph.push(line.trim());
     if (!title) continue;
     const slug = title
       .toLowerCase()

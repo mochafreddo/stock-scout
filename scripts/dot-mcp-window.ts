@@ -2,7 +2,7 @@ import { type ChildProcess, execFile } from 'node:child_process';
 import { record, validTime } from './toss-values.ts';
 
 type CliResponse = Record<string, unknown> & {
-  data: unknown[];
+  data: Record<string, unknown>[];
   source: Record<string, unknown>;
 };
 
@@ -46,7 +46,6 @@ function readinessState({ source, data, error }: CliResponse, exitCode: number) 
       (exitCode === 1 && Object.keys(source).length === 1)
     ) ||
     data.length !== 1 ||
-    !record(row) ||
     !Array.isArray(row.reasons) ||
     !row.reasons.every(nonempty)
   )
@@ -58,10 +57,14 @@ function readinessState({ source, data, error }: CliResponse, exitCode: number) 
   if (exitCode === 0 && readiness === 'ready' && observedToken && !reasons.length) return readiness;
   if (exitCode !== 1 || !reasons.length || !record(error) || reasons[0] !== error.code) return;
   const observedReasons = ['AUTH_ISSUANCE_UNKNOWN', 'WAIT_REQUIRED', 'LOCK_PRESENT'];
-  if (row.token === 'unknown' && reasons.length === 1 && !observedReasons.includes(reasons[0])) {
-    if (readiness === (error.code === 'AUTH_STATE_TRANSITION_REQUIRED' ? 'blocked' : 'unavailable'))
-      return readiness;
-  } else if (
+  if (
+    row.token === 'unknown' &&
+    reasons.length === 1 &&
+    !observedReasons.includes(reasons[0]) &&
+    readiness === (error.code === 'AUTH_STATE_TRANSITION_REQUIRED' ? 'blocked' : 'unavailable')
+  )
+    return readiness;
+  if (
     observedToken &&
     readiness === 'blocked' &&
     reasons.every((reason) => observedReasons.includes(reason))
