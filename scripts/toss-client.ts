@@ -12,7 +12,6 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
-  readSync,
   realpathSync,
   renameSync,
   rmdirSync,
@@ -20,6 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { readBoundedUtf8 } from './read-bounded.ts';
 import { accountCursorPayload } from './toss-account-pagination.ts';
 
 const STORAGE_BYTES = 16384;
@@ -190,14 +190,9 @@ function read(path: string) {
       stat.size > STORAGE_BYTES
     )
       throw new TossError('AUTH_STORAGE');
-    const buffer = Buffer.allocUnsafe(STORAGE_BYTES + 1);
-    let size = 0;
-    while (size < buffer.length) {
-      const count = readSync(fd, buffer, size, buffer.length - size, null);
-      if (count === 0) return parseJson(buffer.toString('utf8', 0, size));
-      size += count;
-    }
-    throw new TossError('AUTH_STORAGE');
+    const text = readBoundedUtf8(fd, STORAGE_BYTES);
+    if (text === undefined) throw new TossError('AUTH_STORAGE');
+    return parseJson(text);
   } catch (error) {
     if (error instanceof SyntaxError) throw new TossError('AUTH_STORAGE');
     throw error;
@@ -802,11 +797,10 @@ export class TossClient {
                 if (part.done) break;
                 bytes += part.value.length;
                 if (bytes > 1048576) {
-                  if (token && retryableStatus(response.status)) {
-                    void reader.cancel().catch(() => {});
-                    return { response, body: undefined };
-                  }
-                  throw new TossError('RESPONSE_INVALID');
+                  if (!token || !retryableStatus(response.status))
+                    throw new TossError('RESPONSE_INVALID');
+                  void reader.cancel().catch(() => {});
+                  return { response, body: undefined };
                 }
                 chunks.push(part.value);
               }

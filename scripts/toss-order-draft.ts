@@ -1,4 +1,5 @@
-import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync } from 'node:fs';
+import { readBoundedUtf8 } from './read-bounded.ts';
 import { TossError } from './toss-client.ts';
 import { parseSessionInterval, validDate } from './toss-sessions.ts';
 import { isinPattern, usMarkets } from './toss-stock.ts';
@@ -40,15 +41,9 @@ export function orderDraft(path: string | undefined, args: string[]) {
     const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
       if (!fstatSync(fd).isFile()) throw new TossError('INPUT_INVALID');
-      const buffer = Buffer.allocUnsafe(maxDraftBytes + 1);
-      let bytesRead = 0;
-      while (bytesRead < buffer.length) {
-        const count = readSync(fd, buffer, bytesRead, buffer.length - bytesRead, null);
-        if (count === 0) break;
-        bytesRead += count;
-      }
-      if (bytesRead > maxDraftBytes) throw new TossError('INPUT_INVALID');
-      input = JSON.parse(buffer.toString('utf8', 0, bytesRead));
+      const text = readBoundedUtf8(fd, maxDraftBytes);
+      if (text === undefined) throw new TossError('INPUT_INVALID');
+      input = JSON.parse(text);
     } finally {
       closeSync(fd);
     }
