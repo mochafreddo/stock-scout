@@ -84,8 +84,8 @@ const inlineLink =
 const referenceDefinition =
   /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n]|\n(?![ \t]*\n))*"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'|\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)))?[ \t]*$/gm;
 
-const rawHtml =
-  /<!--[\s\S]*?(?:-->|(?![\s\S]))|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
+const htmlTag = /<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/;
+const rawHtml = new RegExp([/<!--[\s\S]*?(?:-->|$)/.source, htmlTag.source].join('|'), 'gi');
 
 function markdownText(path: string) {
   let blockEnd = '';
@@ -156,7 +156,8 @@ const markdownInline = new RegExp(
   [
     /^ {4}.*$/.source,
     inlineCodeOrEscape.source,
-    rawHtml.source,
+    /<!--(?:[^\n]|\n(?![ \t]*\n))*?-->/.source,
+    htmlTag.source,
     inlineLink.source,
     referenceDefinition.source,
   ].join('|'),

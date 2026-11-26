@@ -93,7 +93,7 @@ for (const mode of ['docs', 'staged', 'push']) {
     return run(root, git(root, 'rev-parse', 'HEAD'), base, args);
   }
 
-  for (const [kind, hidden] of [
+  for (const [kind, hidden, suffix = ''] of [
     ['block comment with a fence', '<!--\n```\n[example](hidden.md)\n-->\n'],
     ['block comment with an indented end', '<!--\n[example]: hidden.md\n    -->\n'],
     [
@@ -103,6 +103,11 @@ for (const mode of ['docs', 'staged', 'push']) {
     ['unclosed quoted block comment', '> <!--\n> [example](hidden.md)\n'],
     ['unclosed list item block comment', '- <!--\n  [example](hidden.md)\n'],
     ['inline comment', 'Text <!--\n[example](hidden.md)\n[example]: hidden.md\n-->'],
+    [
+      'paragraph with an unclosed inline comment before a block comment',
+      'Intro <!--\n\n<!-- note -->\n',
+    ],
+    ['paragraph with an inline comment opener', 'Intro <!--\n\n', ' -->'],
     ['fence containing a comment opener', '```md\n<!--\n```\n'],
     ['code span', '``sample `\n[example](hidden.md)\n[example]: hidden.md\nend``'],
   ]) {
@@ -110,7 +115,7 @@ for (const mode of ['docs', 'staged', 'push']) {
       const { root, base } = fixture(t);
       const body = `# Use \`Tag\`\n\n[ref]: #use-tag\n\n${hidden}`;
       for (const destination of ['#use-tag', 'missing.md']) {
-        const result = checkReadme(root, base, `${body}[visible](${destination})\n`);
+        const result = checkReadme(root, base, `${body}[visible](${destination})${suffix}\n`);
         assert.equal(result.status, destination === 'missing.md' ? 1 : 0, result.stderr);
         if (destination === 'missing.md')
           assert.match(result.stderr, /missing local target missing\.md/);
@@ -182,7 +187,7 @@ for (const mode of ['docs', 'staged', 'push']) {
     '',
     '<!--',
     '<span id="hidden"></span>',
-    '--> [hidden](missing.md) <!-- <a id="hidden"> --> <a id="details"></a>',
+    '--> [hidden](missing.md) <!-- \u2028<a id="hidden"> --> <a id="details"></a>',
   ].join('\n');
   for (const absent of [
     null,
