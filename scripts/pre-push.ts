@@ -82,10 +82,13 @@ const thematicBreak = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,
 const inlineLink =
   /\]\(\s*(?<inlineTarget><[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))?\s*\)/g;
 const referenceDefinition =
-  /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\([^)\n]*\)))?[ \t]*$/gm;
+  /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n]|\n(?![ \t]*\n))*"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'|\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)))?[ \t]*$/gm;
+
+const rawHtml =
+  /<!--[\s\S]*?(?:-->|(?![\s\S]))|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
 
 function markdownText(path: string) {
-  let fence = '';
+  let blockEnd = '';
   const quotePrefix = /^ {0,3}> ?/;
   const listPrefix = /^ {0,3}(?:[-+*]|\d+[.)])(?: {1,4}(?! )| )/;
   const containers: (number | 'quote')[] = [];
@@ -107,9 +110,9 @@ function markdownText(path: string) {
       }
       if (depth < containers.length) {
         containers.length = depth;
-        fence = '';
+        blockEnd = '';
       }
-      while (!fence && !thematicBreak.test(content)) {
+      while (!blockEnd && !thematicBreak.test(content)) {
         const quote = quotePrefix.exec(content)?.[0];
         const prefix = quote ?? listPrefix.exec(content)?.[0];
         if (!prefix) break;
@@ -117,30 +120,46 @@ function markdownText(path: string) {
         content = content.slice(prefix.length);
       }
       if (!content.trim()) return '';
+      if (blockEnd === '-->' || (!blockEnd && /^ {0,3}<!--/.test(content))) {
+        const end = content.indexOf('-->');
+        if (end < 0) {
+          blockEnd = '-->';
+          return '';
+        }
+        blockEnd = '';
+        return (content.slice(end + 3).match(rawHtml) ?? [])
+          .filter((tag) => !tag.startsWith('<!--'))
+          .join('');
+      }
       const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content);
-      if (fence) {
+      if (blockEnd) {
         if (
           marker &&
-          marker[1][0] === fence[0] &&
-          marker[1].length >= fence.length &&
+          marker[1][0] === blockEnd[0] &&
+          marker[1].length >= blockEnd.length &&
           !marker[2].trim()
         )
-          fence = '';
+          blockEnd = '';
         return '';
       }
       if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
-        fence = marker[1];
+        blockEnd = marker[1];
         return '';
       }
-      return /^ {4}/.test(content) ? '' : content;
+      return content;
     })
     .join('\n');
 }
 
-const htmlAndCode =
-  /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)|<!--[\s\S]*?(?:-->|(?![\s\S]))|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
+const inlineCodeOrEscape = /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)/g;
 const markdownInline = new RegExp(
-  [htmlAndCode.source, inlineLink.source, referenceDefinition.source].join('|'),
+  [
+    /^ {4}.*$/.source,
+    inlineCodeOrEscape.source,
+    rawHtml.source,
+    inlineLink.source,
+    referenceDefinition.source,
+  ].join('|'),
   'gim',
 );
 

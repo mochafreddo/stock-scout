@@ -94,10 +94,19 @@ for (const mode of ['docs', 'staged', 'push']) {
   }
 
   for (const [kind, hidden] of [
-    ['comment', '<!--\n[example](hidden.md)\n[example]: hidden.md\n-->'],
+    ['block comment with a fence', '<!--\n```\n[example](hidden.md)\n-->\n'],
+    ['block comment with an indented end', '<!--\n[example]: hidden.md\n    -->\n'],
+    [
+      'block comment with text on its closing line',
+      '   <!--\n[example](hidden.md)\n--> [still hidden](hidden.md)\n',
+    ],
+    ['unclosed quoted block comment', '> <!--\n> [example](hidden.md)\n'],
+    ['unclosed list item block comment', '- <!--\n  [example](hidden.md)\n'],
+    ['inline comment', 'Text <!--\n[example](hidden.md)\n[example]: hidden.md\n-->'],
+    ['fence containing a comment opener', '```md\n<!--\n```\n'],
     ['code span', '``sample `\n[example](hidden.md)\n[example]: hidden.md\nend``'],
   ]) {
-    test(`${mode} checks links immediately after a multiline ${kind}`, (t) => {
+    test(`${mode} checks links immediately after a ${kind}`, (t) => {
       const { root, base } = fixture(t);
       const body = `# Use \`Tag\`\n\n[ref]: #use-tag\n\n${hidden}`;
       for (const destination of ['#use-tag', 'missing.md']) {
@@ -108,6 +117,24 @@ for (const mode of ['docs', 'staged', 'push']) {
       }
     });
   }
+
+  test(`${mode} checks a reference definition with a multiline title`, (t) => {
+    const { root, base } = fixture(t);
+    const valid = [
+      '# [Single][single] [Parentheses][parentheses]',
+      '[heading](#single-parentheses)',
+      "[single]: #start 'first\nsecond'",
+      '[parentheses]: #start (first\nsecond)',
+      '[invalid]: hidden.md "first\n\nsecond"',
+      '    [code](hidden.md)',
+    ].join('\n\n');
+    for (const target of ['#start', 'missing.md']) {
+      const body = `# Start\n\n${valid}\n\n[Read][r]\n\n[r]: ${target} "first\n    second"\n`;
+      const result = checkReadme(root, base, body);
+      assert.equal(result.status, target === 'missing.md' ? 1 : 0, result.stderr);
+      if (target === 'missing.md') assert.match(result.stderr, /missing local target missing\.md/);
+    }
+  });
 
   for (const target of ['guides/Intro.md', 'Guides/intro.md']) {
     test(`${mode} rejects the misspelled local path ${target}`, (t) => {
@@ -155,7 +182,7 @@ for (const mode of ['docs', 'staged', 'push']) {
     '',
     '<!--',
     '<span id="hidden"></span>',
-    '-->',
+    '--> [hidden](missing.md) <!-- <a id="hidden"> --> <a id="details"></a>',
   ].join('\n');
   for (const absent of [
     null,
@@ -174,6 +201,7 @@ for (const mode of ['docs', 'staged', 'push']) {
         ? [absent]
         : [
             'section',
+            'details',
             'legacy',
             'use-tag',
             'use-tag-1',
