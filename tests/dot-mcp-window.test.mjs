@@ -56,6 +56,29 @@ test('the adapter module does not open an unscheduled server when run directly',
   assert.equal(output, '');
 });
 
+const readyRow = { readiness: 'ready', token: 'valid', reasons: [] };
+function envelope(endpoint, data, fields = {}) {
+  return {
+    version: 1,
+    status: 'success',
+    source: { provider: 'tossinvest', endpoint, freshness: 'unknown' },
+    retrievedAt: '2026-11-24T11:55:00.000Z',
+    data,
+    omissions: [],
+    ...fields,
+  };
+}
+const readyResponse = envelope('local:readiness', [readyRow]);
+const pricesResponse = envelope('/api/v1/prices', [{ symbol: 'DEMO' }]);
+const redactedError = {
+  version: 1,
+  retrievedAt: '2026-11-24T11:55:00.000Z',
+  status: 'error',
+  data: [],
+  source: { provider: 'tossinvest' },
+  error: { code: 'SENSITIVE_OUTPUT' },
+};
+
 function fixture(t) {
   const state = mkdtempSync(join(tmpdir(), 'dot-window-'));
   let stop;
@@ -87,8 +110,8 @@ exec "${process.execPath}" --input-type=module -e '
     `#!/bin/sh
 echo "$*" >> "${trace}"
 case "$1" in
-readiness) echo '{"version":1,"data":[{"readiness":"ready"}],"status":"success"}';;
-*) echo '{"version":1,"data":[{"symbol":"DEMO"}],"status":"success"}';;
+readiness) echo '${JSON.stringify(readyResponse)}';;
+*) echo '${JSON.stringify(pricesResponse)}';;
 esac
 `,
     { mode: 0o700 },
@@ -110,7 +133,11 @@ esac
   return { options, logs, trace, start };
 }
 
-async function price(url, signal) {
+function price(url, signal) {
+  return query(url, { name: 'prices', arguments: { symbols: ['DEMO'] } }, signal);
+}
+
+async function query(url, params, signal) {
   const res = await fetch(url, {
     signal,
     method: 'POST',
@@ -119,7 +146,7 @@ async function price(url, signal) {
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
-      params: { name: 'prices', arguments: { symbols: ['DEMO'] } },
+      params,
     }),
   });
   return (await res.json()).result.structuredContent;
@@ -188,25 +215,28 @@ test('the session charges every started lookup including partial and failed resu
   const { options, logs, trace, start } = fixture(t);
   const run = await start();
   const program = readFileSync(options.launcher, 'utf8');
-  const response = (status, exit) =>
-    `echo '{"version":1,"data":[],"status":"${status}"}'; exit ${exit}`;
-  writeFileSync(options.launcher, `#!/bin/sh\n${response('error', 1)}\n`);
-  assert.equal((await price(run.url)).stage, 'readiness');
+  const blocked = envelope(
+    'local:readiness',
+    [{ readiness: 'blocked', token: 'valid', reasons: ['WAIT_REQUIRED'] }],
+    { status: 'error', error: { code: 'WAIT_REQUIRED' } },
+  );
+  writeFileSync(options.launcher, `#!/bin/sh\necho '${JSON.stringify(blocked)}'; exit 1\n`);
+  assert.deepEqual((await price(run.url)).response, blocked);
   writeFileSync(
     options.launcher,
     program.replace('readiness) echo', 'readiness) mv "$0" "$0.saved"; echo'),
   );
   assert.equal((await price(run.url)).error.code, 'CLI_RESULT_UNAVAILABLE');
   renameSync(`${options.launcher}.saved`, options.launcher);
-  for (const [status, exit] of [
-    ['partial', 2],
-    ['error', 1],
+  for (const [response, exit] of [
+    [{ ...pricesResponse, status: 'partial', omissions: [{ reason: 'invalid_item' }] }, 2],
+    [redactedError, 1],
   ]) {
     writeFileSync(
       options.launcher,
-      program.replace(/\*\) echo [^\n]+/, `*) ${response(status, exit)};;`),
+      program.replace(/\*\) echo [^\n]+/, `*) echo '${JSON.stringify(response)}'; exit ${exit};;`),
     );
-    assert.equal((await price(run.url)).exitCode, exit);
+    assert.deepEqual(await price(run.url), { stage: 'query', exitCode: exit, response });
   }
   writeFileSync(
     options.launcher,
@@ -239,6 +269,84 @@ test('the session charges every started lookup including partial and failed resu
   );
   for (const entry of logs)
     assert.ok(Object.keys(entry).every((k) => ['session', 'time', 'status', 'code'].includes(k)));
+});
+
+test('incomplete or inconsistent readiness never admits or classifies a market query as blocked', async (t) => {
+  const { options, trace, start } = fixture(t);
+  const run = await start();
+  for (const [data, status, exit, error] of [
+    [[{ readiness: 'ready' }], 'success', 0],
+    [[{ ...readyRow, reasons: ['WAIT_REQUIRED'] }], 'success', 0],
+    [[], 'error', 1, { code: 'WAIT_REQUIRED' }],
+    [
+      [{ ...readyRow, readiness: 'blocked', reasons: ['WAIT_REQUIRED'] }],
+      'error',
+      1,
+      { code: 'AUTH_STORAGE' },
+    ],
+    [[{ ...readyRow, readiness: 'unavailable' }], 'partial', 2],
+  ]) {
+    const response = envelope('local:readiness', data, { status, error });
+    writeFileSync(
+      options.launcher,
+      `#!/bin/sh\necho "$1" >> "${trace}"\necho '${JSON.stringify(response)}'\nexit ${exit}\n`,
+    );
+    assert.deepEqual(await price(run.url), {
+      stage: 'readiness',
+      error: { code: 'CLI_RESULT_UNAVAILABLE' },
+    });
+  }
+  assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), Array(5).fill('readiness'));
+});
+
+test('a market query rejects a mismatched CLI envelope or command source', async (t) => {
+  const { options, start } = fixture(t);
+  const run = await start();
+  const program = readFileSync(options.launcher, 'utf8');
+  const candles = { name: 'candles', arguments: { symbol: 'DEMO' } };
+  const prices = { name: 'prices', arguments: { symbols: ['DEMO'] } };
+  const candlePage = (symbol, interval) => ({
+    ...envelope('/api/v1/candles', []),
+    source: { provider: 'tossinvest', endpoint: '/api/v1/candles', symbol, interval },
+  });
+  const calendar = { name: 'sessions', arguments: { date: '2026-11-24' } };
+  for (const [label, params, response, exit] of [
+    ['different command', prices, envelope('/api/v1/stocks', []), 0],
+    ['provider only success', prices, { ...pricesResponse, source: { provider: 'tossinvest' } }, 0],
+    ['invalid retrieval time', prices, { ...pricesResponse, retrievedAt: 'yesterday' }, 0],
+    ['missing omissions', prices, { ...pricesResponse, omissions: undefined }, 0],
+    ['batch candles', candles, envelope('/api/v1/candles', []), 0],
+    ['minute candles', candles, candlePage('DEMO', '1m'), 0],
+    ['another candle symbol', candles, candlePage('OTHER', '1d'), 0],
+    [
+      'calendar constraints',
+      calendar,
+      envelope('/api/v1/market-calendar/US', [], {
+        source: {
+          provider: 'tossinvest',
+          endpoint: '/api/v1/market-calendar/US',
+          date: '2026-11-24',
+          symbol: 'DEMO',
+        },
+      }),
+      0,
+    ],
+    ['unexpected error rows', prices, { ...redactedError, data: [readyRow] }, 1],
+  ]) {
+    await t.test(label, async () => {
+      writeFileSync(
+        options.launcher,
+        program.replace(
+          /\*\) echo [^\n]+/,
+          `*) echo '${JSON.stringify(response)}'; exit ${exit};;`,
+        ),
+      );
+      assert.deepEqual(await query(run.url, params), {
+        stage: 'query',
+        error: { code: 'CLI_RESULT_UNAVAILABLE' },
+      });
+    });
+  }
 });
 
 test('a readiness check crossing the deadline cannot start prices', async (t) => {
@@ -436,7 +544,7 @@ for (const [command, cleanup, title] of [
       process.on('SIGTERM', () => {
         fs.writeFileSync(process.argv[2] + '.term', '');
         if (${JSON.stringify(cleanup)} === 'stubborn') return;
-        console.log('{"version":1,"status":"success","data":[{"readiness":"ready"}]}');
+        console.log('${JSON.stringify(command === 'prices' ? pricesResponse : readyResponse)}');
         process.exit(0);
       });
       fs.writeFileSync(process.argv[2] + '.pid', String(process.pid));

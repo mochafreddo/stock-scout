@@ -1,16 +1,109 @@
 import { type ChildProcess, execFile } from 'node:child_process';
-import { record } from './toss-values.ts';
+import { record, validTime } from './toss-values.ts';
 
-type CliResponse = Record<string, unknown> & { data: unknown[] };
+type CliResponse = Record<string, unknown> & {
+  data: unknown[];
+  source: Record<string, unknown>;
+};
+
+function nonempty(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
 
 function isCliResponse(response: unknown, status: string | undefined): response is CliResponse {
+  if (
+    status === undefined ||
+    !record(response) ||
+    response.version !== 1 ||
+    response.status !== status ||
+    !Array.isArray(response.data) ||
+    !response.data.every(record) ||
+    !record(response.source) ||
+    response.source.provider !== 'tossinvest' ||
+    !validTime(response.retrievedAt)
+  )
+    return false;
+  const { omissions, error } = response;
+  if (status === 'error')
+    return (
+      record(error) &&
+      nonempty(error.code) &&
+      (omissions === undefined || (Array.isArray(omissions) && !omissions.length))
+    );
   return (
-    status !== undefined &&
-    record(response) &&
-    response.version === 1 &&
-    Array.isArray(response.data) &&
-    response.status === status
+    error === undefined &&
+    Array.isArray(omissions) &&
+    omissions.every((item) => record(item) && nonempty(item.reason)) &&
+    (status === 'partial' ? omissions.length > 0 : omissions.length === 0)
   );
+}
+
+function readinessState({ source, data, error }: CliResponse, exitCode: number) {
+  const row = data[0];
+  if (
+    !(
+      source.endpoint === 'local:readiness' ||
+      (exitCode === 1 && Object.keys(source).length === 1)
+    ) ||
+    data.length !== 1 ||
+    !record(row) ||
+    !Array.isArray(row.reasons) ||
+    !row.reasons.every(nonempty)
+  )
+    return;
+  const observedToken = ['missing', 'expired', 'refresh_required', 'valid'].some(
+    (v) => v === row.token,
+  );
+  const { reasons, readiness } = row;
+  if (exitCode === 0 && readiness === 'ready' && observedToken && !reasons.length) return readiness;
+  if (exitCode !== 1 || !reasons.length || !record(error) || reasons[0] !== error.code) return;
+  const observedReasons = ['AUTH_ISSUANCE_UNKNOWN', 'WAIT_REQUIRED', 'LOCK_PRESENT'];
+  if (row.token === 'unknown' && reasons.length === 1 && !observedReasons.includes(reasons[0])) {
+    if (readiness === (error.code === 'AUTH_STATE_TRANSITION_REQUIRED' ? 'blocked' : 'unavailable'))
+      return readiness;
+  } else if (
+    observedToken &&
+    readiness === 'blocked' &&
+    reasons.every((reason) => observedReasons.includes(reason))
+  )
+    return readiness;
+}
+
+function matchesMarketQuery(
+  { source, data, status }: CliResponse,
+  [command, target, option, count]: string[],
+) {
+  if (status === 'error') {
+    if (data.length) return false;
+    if (Object.keys(source).length === 1) return true;
+  }
+  switch (command) {
+    case 'prices':
+      return source.endpoint === '/api/v1/prices';
+    case 'stock':
+      return source.endpoint === '/api/v1/stocks';
+    case 'rankings':
+      return (
+        source.endpoint === '/api/v1/rankings' &&
+        source.type === target &&
+        source.duration === option &&
+        source.count === (count ?? '20')
+      );
+    case 'candles':
+      return (
+        source.endpoint === '/api/v1/candles' &&
+        source.interval === option &&
+        source.symbol === target
+      );
+    case 'sessions':
+      return (
+        source.endpoint === '/api/v1/market-calendar/US' &&
+        source.date === target &&
+        !Object.hasOwn(source, 'symbol')
+      );
+    default:
+      return false;
+  }
 }
 
 function queryResult(payload: object, isError: boolean) {
@@ -122,8 +215,8 @@ export class DotWindow {
       const beforeReadiness = this.rejection();
       if (beforeReadiness) return this.rejected(beforeReadiness);
       const ready = await this.execute(['readiness']);
-      const rows = ready.response.data;
-      const readiness = record(rows[0]) ? rows[0].readiness : undefined;
+      const readiness = readinessState(ready.response, ready.exitCode);
+      if (!readiness) throw new Error('Invalid readiness result');
       if (ready.exitCode !== 0) {
         this.report(
           'ready_blocked',
@@ -131,13 +224,13 @@ export class DotWindow {
         );
         return queryResult({ stage, ...ready }, true);
       }
-      if (rows.length !== 1 || readiness !== 'ready') throw new Error('Invalid readiness result');
       stage = 'query';
       const beforeStart = this.rejection();
       if (beforeStart) return this.rejected(beforeStart);
       const output = await this.execute(args, () => {
         this.starts++;
       });
+      if (!matchesMarketQuery(output.response, args)) throw new Error('Invalid market result');
       this.report(
         ['success', 'query_error', 'partial'][output.exitCode],
         output.exitCode === 1 ? 'QUERY_ERROR' : undefined,
