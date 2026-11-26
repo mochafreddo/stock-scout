@@ -46,7 +46,14 @@ test('shutdown terminates an unresponsive query and tunnel at the absolute deadl
       'launcher',
       `
       if (process.argv[2] === 'readiness') {
-        console.log('{"version":1,"status":"success","data":[{"readiness":"ready"}]}');
+        console.log(JSON.stringify({
+          version: 1,
+          status: 'success',
+          data: [{ readiness: 'ready', token: 'valid', reasons: [] }],
+          source: { provider: 'tossinvest', endpoint: 'local:readiness' },
+          retrievedAt: '2026-11-24T12:00:00.000Z',
+          omissions: [],
+        }));
       } else {
         ${stubborn('query')}
         ${pipeHolder}
