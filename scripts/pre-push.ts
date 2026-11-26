@@ -481,28 +481,40 @@ function checkSnapshot(
   }
 }
 
-const command = process.argv[2];
+const [command, ...operands] = process.argv.slice(2);
 const installed = command === '--installed-pre-commit' || command === '--installed-pre-push';
-const docsCommand = !installed && process.argv.includes('--docs');
+const docsCommand = !installed && (command === '--docs' || operands.includes('--docs'));
 const stagedCommand = command === '--staged' || command === '--installed-pre-commit';
 
 function main() {
   if (docsCommand) {
     if (command !== '--docs') throw new Error('Usage: --docs FILE.md ...');
     const root = git(['rev-parse', '--show-toplevel']).toString().trim();
-    checkDocuments(realpathSync(root), process.argv.slice(3));
+    checkDocuments(realpathSync(root), operands);
     return;
   }
   if (command === '--print-hook') {
-    const name = process.argv[3];
-    if (process.argv.length !== 4 || (name !== 'pre-commit' && name !== 'pre-push'))
+    const [name] = operands;
+    if (operands.length !== 1 || (name !== 'pre-commit' && name !== 'pre-push'))
       throw new Error('Usage: --print-hook pre-commit|pre-push');
     process.stdout.write(hookWrapper(name));
     return;
   }
   if (command === '--install' || command === '--install-pre-commit') {
+    if (operands.length) throw new Error(`Usage: ${command}`);
     installHook(command === '--install-pre-commit' ? 'pre-commit' : 'pre-push');
     return;
+  }
+
+  if (stagedCommand) {
+    if (operands.length) throw new Error(`Usage: ${command}`);
+  } else if (command === '--installed-pre-push') {
+    if (operands.length !== 0 && operands.length !== 2)
+      throw new Error('Usage: --installed-pre-push [REMOTE LOCATION]');
+  } else if (command !== undefined && (command.startsWith('-') || operands.length !== 1)) {
+    throw new Error(
+      'Usage: pre-push.ts [REMOTE LOCATION | --staged | --install | --install-pre-commit | --docs FILE.md ... | --print-hook pre-commit|pre-push]',
+    );
   }
 
   const source = git(['rev-parse', '--show-toplevel']).toString().trim();

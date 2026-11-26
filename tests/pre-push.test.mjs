@@ -431,6 +431,38 @@ test('docs CLI rejects missing files and mixed operational flags without changin
   assert.deepEqual(readdirSync(join(root, '.git/hooks')).sort(), hooks);
 });
 
+test('manual CLI rejects invalid arguments before changing hooks or index', async (t) => {
+  for (const args of [
+    ['--stage'],
+    ['--install', 'extra'],
+    ['--install-pre-commit', 'extra'],
+    ['--staged', 'extra'],
+    ['origin'],
+    ['origin', 'remote.git', 'extra'],
+  ]) {
+    await t.test(args.join(' '), (t) => {
+      const { root } = fixture(t);
+      const index = readFileSync(join(root, '.git/index'));
+      const hooks = readdirSync(join(root, '.git/hooks')).sort();
+      const result = fixtureProcess(process.execPath, [cli, ...args], { cwd: root });
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /Usage:/);
+      assert.deepEqual(readFileSync(join(root, '.git/index')), index);
+      assert.deepEqual(readdirSync(join(root, '.git/hooks')).sort(), hooks);
+    });
+  }
+});
+
+test('all transmitted refs via legacy hook arguments still undergo checks and allow deletion', (t) => {
+  const { root, base } = fixture(t);
+  const args = ['origin', join(root, 'remote.git')];
+  const checked = run(root, base, base, args);
+  assert.equal(checked.status, 0, checked.stderr);
+  assert.match(checked.stderr, new RegExp(`Verified ${base}`));
+  const deleted = run(root, '0'.repeat(40), base, args);
+  assert.equal(deleted.status, 0, deleted.stderr);
+});
+
 for (const mode of ['staged', 'push']) {
   for (const failure of [false, true]) {
     test(`${mode} CLI removes its observed runner workspace after ${failure ? 'failed' : 'successful'} checks`, (t) => {
