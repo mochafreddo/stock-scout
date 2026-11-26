@@ -637,6 +637,45 @@ test('Toss CLI reuses a token replaced by a peer before expired-token recovery',
   }
 });
 
+test('Toss CLI reports invalid locks as storage errors before readiness or price requests', async () => {
+  for (const kind of ['file', 'symlink', 'permissions']) {
+    const f = fixture();
+    try {
+      const lock = join(f.directory, 'client.lock');
+      if (kind === 'file') writeFileSync(lock, '', { mode: 0o700 });
+      if (kind === 'symlink') symlinkSync(f.directory, lock);
+      if (kind === 'permissions') {
+        mkdirSync(lock, { mode: 0o700 });
+        chmodSync(lock, 0o755);
+      }
+      for (const args of [['readiness'], ['prices', 'AAPL']]) {
+        const result = await runCli(f, [], args);
+        assert.equal(result.status, 1);
+        assert.equal(JSON.parse(result.stdout).error.code, 'AUTH_STORAGE', kind);
+        assert.deepEqual(result.requests, []);
+      }
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('Toss CLI reacquires a lock released during inspection and completes the price query', async () => {
+  const f = fixture();
+  try {
+    mkdirSync(join(f.directory, 'client.lock'), { mode: 0o700 });
+    const result = await runCli(f, [], ['prices', 'AAPL'], { TEST_RELEASE_CLIENT_LOCK: '1' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(JSON.parse(result.stdout).status, 'success');
+    assert.deepEqual(
+      result.requests.map((r) => r.path),
+      ['/oauth2/token', '/api/v1/prices'],
+    );
+  } finally {
+    f.close();
+  }
+});
+
 test('Toss CLI rejects unsafe storage, bounds abandoned locks and releases locks on interruption', async () => {
   for (const kind of ['permissions', 'symlink', 'lock', 'interrupt']) {
     const f = fixture();

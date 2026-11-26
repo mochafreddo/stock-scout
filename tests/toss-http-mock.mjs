@@ -106,6 +106,13 @@ if (process.env.TEST_WAIT_GATE) {
   });
 }
 const readlinkSync = fs.readlinkSync;
+if (process.env.TEST_RELEASE_CLIENT_LOCK) {
+  const lstatSync = fs.lstatSync;
+  mock.method(fs, 'lstatSync', (path, ...args) => {
+    if (path === `${process.env.TOSS_STATE_DIR}/client.lock`) fs.rmdirSync(path);
+    return lstatSync(path, ...args);
+  });
+}
 const mkdirSync = fs.mkdirSync;
 mock.method(fs, 'mkdirSync', (path, ...args) => {
   const result = mkdirSync(path, ...args);

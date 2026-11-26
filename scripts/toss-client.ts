@@ -241,6 +241,16 @@ function save(
     throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
   }
 }
+function lockPresent(path: string): boolean {
+  try {
+    secure(path, true);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 async function withLock<T>(
   directory: string,
   name: string,
@@ -257,7 +267,7 @@ async function withLock<T>(
         break;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        await wait(25);
+        if (lockPresent(lock)) await wait(25);
       }
     }
     try {
@@ -300,14 +310,8 @@ class SharedRequestCoordinator {
     if (state.pending) reasons.push('AUTH_ISSUANCE_UNKNOWN');
     if (BigInt(state.clock.nextNs) > process.hrtime.bigint()) reasons.push('WAIT_REQUIRED');
     let locked = false;
-    for (const name of ['client.lock', 'issuance.lock', 'account.lock']) {
-      try {
-        secure(join(this.directory, name), true);
-        locked = true;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-    }
+    for (const name of ['client.lock', 'issuance.lock', 'account.lock'])
+      if (lockPresent(join(this.directory, name))) locked = true;
     if (locked) reasons.push('LOCK_PRESENT');
     return {
       token: tokenStatus(state.token),
