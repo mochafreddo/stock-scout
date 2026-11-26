@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { decimal, record, symbolPattern, validTime } from '../scripts/toss-values.ts';
+import {
+  compareNonnegativeDecimals,
+  decimal,
+  laterThan,
+  record,
+  symbolPattern,
+  validTime,
+} from '../scripts/toss-values.ts';
 
 const tradeDateFormat = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/New_York',
@@ -8,6 +15,37 @@ const tradeDateFormat = new Intl.DateTimeFormat('en-CA', {
   month: '2-digit',
   day: '2-digit',
 });
+
+function closeChange(bars) {
+  const newest = bars[0];
+  const oldest = bars.at(-1);
+  let reason;
+  if (!laterThan(newest.timestamp, oldest.timestamp)) {
+    reason = 'insufficient_distinct_timestamps';
+  } else if (
+    [newest, oldest].some((endpoint) =>
+      bars.some(
+        (bar) =>
+          !laterThan(bar.timestamp, endpoint.timestamp) &&
+          !laterThan(endpoint.timestamp, bar.timestamp) &&
+          (bar.currency !== endpoint.currency ||
+            compareNonnegativeDecimals(bar.closePrice, endpoint.closePrice) !== 0),
+      ),
+    )
+  ) {
+    reason = 'ambiguous_endpoint';
+  } else if (newest.currency !== oldest.currency) {
+    reason = 'currency_mismatch';
+  }
+  if (reason) return { closeChangePercent: null, closeChangeUnavailableReason: reason };
+  return {
+    closeChangePercent:
+      Number(oldest.closePrice) === 0
+        ? null
+        : (Number(newest.closePrice) / Number(oldest.closePrice) - 1) * 100,
+  };
+}
+
 const output = JSON.parse(readFileSync(0, 'utf8'));
 assert.equal(output.version, 1);
 assert.ok(['success', 'partial', 'error'].includes(output.status), 'valid CLI status required');
@@ -57,11 +95,14 @@ const batch = !Object.hasOwn(output.source, 'interval');
 const rows = batch ? output.data : [{ ...output, symbol: output.source.symbol }];
 const data = rows.map((row) => {
   const usable = row.status === 'success' || row.status === 'partial';
+  if (usable)
+    assert.ok(
+      typeof row.symbol === 'string' && symbolPattern.test(row.symbol),
+      'daily candle symbol required',
+    );
   if (batch && usable)
     assert.ok(
-      typeof row.symbol === 'string' &&
-        symbolPattern.test(row.symbol) &&
-        row.source?.symbol === row.symbol &&
+      row.source?.symbol === row.symbol &&
         row.source.endpoint === '/api/v1/candles' &&
         row.source.interval === '1d',
       'batch item must match its daily candle source',
@@ -88,7 +129,6 @@ const data = rows.map((row) => {
       currency: bar.currency,
     };
   });
-  const currencyMismatch = bars.length > 0 && bars[0].currency !== bars.at(-1).currency;
   return {
     symbol: row.symbol,
     status: row.status,
@@ -105,11 +145,7 @@ const data = rows.map((row) => {
     analysis:
       usable && bars.length
         ? {
-            closeChangePercent:
-              currencyMismatch || Number(bars.at(-1).closePrice) === 0
-                ? null
-                : (Number(bars[0].closePrice) / Number(bars.at(-1).closePrice) - 1) * 100,
-            ...(currencyMismatch ? { closeChangeUnavailableReason: 'currency_mismatch' } : {}),
+            ...closeChange(bars),
             totalVolume: bars.reduce((total, bar) => total + Number(bar.volume), 0),
           }
         : null,

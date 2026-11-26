@@ -465,6 +465,79 @@ test('actual CLI mixed-currency stdout retains bars and volume in the executable
   }
 });
 
+test('actual daily CLI bars require distinct instants and unambiguous endpoint closes', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const newest = '2026-11-05T21:00:00.0002Z';
+  const equivalent = '2026-11-05T16:00:00.000200-05:00';
+  const oldest = '2026-11-05T21:00:00.0001Z';
+  const bar = (timestamp, closePrice, currency = 'USD') => ({
+    timestamp,
+    closePrice,
+    currency,
+    openPrice: '10',
+    highPrice: '100',
+    lowPrice: '0',
+    volume: '3',
+  });
+  const latest = bar(newest, '15');
+  const base = bar(oldest, '10');
+  for (const [name, candles, percent, reason, volume] of [
+    ['one bar', [latest], null, 'insufficient_distinct_timestamps', 3],
+    ['one instant', [latest, bar(equivalent, '15')], null, 'insufficient_distinct_timestamps', 6],
+    [
+      'latest close conflict',
+      [latest, bar(equivalent, '15.00000000000000001'), base],
+      null,
+      'ambiguous_endpoint',
+      9,
+    ],
+    [
+      'oldest currency conflict',
+      [latest, bar(oldest, '10', 'KRW'), base],
+      null,
+      'ambiguous_endpoint',
+      9,
+    ],
+    [
+      'equivalent close values',
+      [latest, bar(equivalent, '015.00'), base, bar(oldest, '10.00')],
+      50,
+      null,
+      12,
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const result = await runCli(
+        f,
+        [{ path: '/api/v1/candles', body: { result: { candles, nextBefore: null } } }],
+        ['candles', 'DEMO', '1d'],
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const consumed = consume(result);
+      assert.equal(consumed.status, 0, consumed.stderr);
+      const output = JSON.parse(consumed.stdout);
+      assert.equal(output.status, 'success');
+      const [row] = output.data;
+      assert.deepEqual(row.analysis, {
+        closeChangePercent: percent,
+        ...(reason && { closeChangeUnavailableReason: reason }),
+        totalVolume: volume,
+      });
+      assert.deepEqual(
+        row.bars,
+        candles.map(({ timestamp, closePrice, volume, currency }) => ({
+          timestamp,
+          closePrice,
+          volume,
+          currency,
+          tradeDate: null,
+        })),
+      );
+    });
+  }
+});
+
 test('actual CLI and candle consumer retain valid bars beside negative prices or volume', async (t) => {
   const f = fixture();
   t.after(f.close);
@@ -990,6 +1063,33 @@ test('batch consumer requires each usable item to match its daily candle source'
       const consumed = consume({ stdout: JSON.stringify(query) });
       assert.equal(consumed.status, 1, consumed.stderr);
       assert.equal(consumed.stdout, '');
+    });
+  }
+});
+
+test('successful empty daily CLI pages require a valid source symbol in the consumer', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const result = await runCli(
+    f,
+    [{ path: '/api/v1/candles', body: { result: { candles: [], nextBefore: null } } }],
+    ['candles', 'DEMO', '1d'],
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const consumed = consume(result);
+  assert.equal(consumed.status, 0, consumed.stderr);
+  const [empty] = JSON.parse(consumed.stdout).data;
+  assert.equal(empty.symbol, 'DEMO');
+  assert.equal(empty.status, 'success');
+  assert.deepEqual(empty.bars, []);
+  assert.equal(empty.analysis, null);
+  for (const symbol of [undefined, 'DEMO/']) {
+    await t.test(String(symbol), () => {
+      const query = JSON.parse(result.stdout);
+      query.source.symbol = symbol;
+      const invalid = consume({ stdout: JSON.stringify(query) });
+      assert.equal(invalid.status, 1, invalid.stderr);
+      assert.equal(invalid.stdout, '');
     });
   }
 });
