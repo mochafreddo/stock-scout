@@ -4,6 +4,27 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, price, runCli } from './toss-cli-helper.mjs';
 
+for (const args of [['prices', 'AAPL'], ['readiness'], ['account-select']])
+  test(`Toss CLI rejects malformed UTF-8 before HTTP for ${args[0]}`, async () => {
+    const f = fixture();
+    try {
+      const selecting = args[0] === 'account-select';
+      const path = join(f.directory, selecting ? 'selection.json' : 'credentials.json');
+      const input = selecting
+        ? { alias: 'primary', accountSeq: '741', scopes: ['holdings'], note: '\xff' }
+        : { clientId: 'synthetic-client', clientSecret: 'synthetic-\xff' };
+      writeFileSync(path, Buffer.from(JSON.stringify(input), 'latin1'), { mode: 0o600 });
+      const result = await runCli(f, [], selecting ? [...args, path] : args);
+      const code = selecting ? 'ACCOUNT_SELECTION_REQUIRED' : 'AUTH_STORAGE';
+      assert.equal(result.requests.length, 0);
+      assert.equal(result.status, 1);
+      assert.equal(result.stderr, code + '\n');
+      assert.equal(JSON.parse(result.stdout).error.code, code);
+    } finally {
+      f.close();
+    }
+  });
+
 for (const boundary of ['directory', 'worktree-file'])
   test(`Toss CLI rejects protected authentication storage below a Git ${boundary} boundary before HTTP`, async () => {
     const f = fixture();

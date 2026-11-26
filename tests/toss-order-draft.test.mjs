@@ -43,7 +43,9 @@ async function draft(value, now = '2026-11-06T14:00:00Z', args, extra = {}) {
   };
   const path = join(directory, 'input.json');
   for (const file of [f.trace, f.cliTrace]) writeFileSync(file, '', { mode: 0o600 });
-  writeFileSync(path, typeof value === 'string' ? value : JSON.stringify(value), { mode: 0o600 });
+  const content =
+    typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value);
+  writeFileSync(path, content, { mode: 0o600 });
   try {
     const result = await runCli(f, [], args ?? ['order-draft', path], {
       TEST_CLOCK_START: String(Date.parse(now)),
@@ -432,6 +434,16 @@ test('order draft rejects a FIFO without waiting for a writer', async () => {
 });
 
 const oneMiB = 1_048_576;
+
+test('order draft rejects malformed UTF-8 inside a JSON string', async () => {
+  const value = input();
+  value.sessions.data[0].label = '\xff';
+  assertInvalidDraft(await draft(Buffer.from(JSON.stringify(value), 'latin1')));
+});
+
+test('order draft rejects a leading UTF-8 BOM', async () => {
+  assertInvalidDraft(await draft('\uFEFF' + JSON.stringify(input())));
+});
 
 function draftAtSizeLimit() {
   const value = input();
