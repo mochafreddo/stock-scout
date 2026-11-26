@@ -442,7 +442,7 @@ test('order draft rejects malformed UTF-8 inside a JSON string', async () => {
 });
 
 test('order draft rejects a leading UTF-8 BOM', async () => {
-  assertInvalidDraft(await draft('\uFEFF' + JSON.stringify(input())));
+  assertInvalidDraft(await draft(`\uFEFF${JSON.stringify(input())}`));
 });
 
 function draftAtSizeLimit() {

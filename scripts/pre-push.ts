@@ -77,6 +77,12 @@ function snapshot(commit: string, destination: string) {
   return entries.map((entry) => entry.path);
 }
 
+const thematicBreak = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/;
+const inlineLink =
+  /\]\(\s*(<[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))?\s*\)/g;
+const referenceDefinition =
+  /^ {0,3}\[([^\]\n]+)\]:[ \t]*(<[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\([^)\n]*\)))?[ \t]*$/gm;
+
 function markdownText(path: string) {
   let fence = '';
   const quotePrefix = /^ {0,3}> ?/;
@@ -102,7 +108,7 @@ function markdownText(path: string) {
         containers.length = depth;
         fence = '';
       }
-      while (!fence) {
+      while (!fence && !thematicBreak.test(content)) {
         const quote = quotePrefix.exec(content)?.[0];
         const prefix = quote ?? listPrefix.exec(content)?.[0];
         if (!prefix) break;
@@ -132,9 +138,16 @@ function markdownText(path: string) {
 
 function headingIds(text: string) {
   const anchors = new Set<string>();
-  const inline =
-    /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)|<!--[\s\S]*?(?:-->|$)|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
-  const visible = text.replace(inline, (token, ticks, tag, attributes) => {
+  const referenceLabels = new Set<string>();
+  const htmlAndCode =
+    /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)|<!--[\s\S]*?(?:-->|(?![\s\S]))|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
+  const inline = new RegExp(
+    [htmlAndCode.source, inlineLink.source, referenceDefinition.source].join('|'),
+    'gim',
+  );
+  const visible = text.replace(inline, (token, ticks, tag, attributes, destination, label) => {
+    if (destination) return ']';
+    if (label) referenceLabels.add(label.toLowerCase());
     if (ticks || token.startsWith('\\')) return token;
     if (tag && !token.startsWith('</')) {
       const attribute = /\s+([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
@@ -153,10 +166,13 @@ function headingIds(text: string) {
     const atx = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
     const underline = /^ {0,3}(?:=+|-+)[ \t]*$/.test(line);
     const title = atx?.[1] ?? (underline ? paragraph.join(' ') : '');
-    if (atx || underline || !line.trim()) paragraph.length = 0;
+    if (atx || underline || thematicBreak.test(line) || !line.trim()) paragraph.length = 0;
     else paragraph.push(line.trim());
     if (!title) continue;
     const slug = title
+      .replace(/\[([^\]\n]+)\]\[([^\]\n]*)\]/g, (token, label, reference) =>
+        referenceLabels.has((reference || label).toLowerCase()) ? label : token,
+      )
       .toLowerCase()
       .replace(/[^\p{L}\p{M}\p{N}_\-\s]/gu, '')
       .replace(/\s/g, '-');
@@ -175,13 +191,11 @@ function checkLinks(root: string, files: string[], headingCache?: Map<string, Se
       throw new Error(`${file}: document leaves snapshot`);
     const text = markdownText(source).replace(/(`+)[^\n]*?\1/g, '');
     const links = [
-      ...text.matchAll(
-        /\]\(\s*(<[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))?\s*\)/g,
-      ),
-      ...text.matchAll(/^ {0,3}\[[^\]\n]+\]:\s*(<[^>\n]*>|\S+)/gm),
+      ...Array.from(text.matchAll(inlineLink), (match) => match[1]),
+      ...Array.from(text.matchAll(/^ {0,3}\[[^\]\n]+\]:\s*(<[^>\n]*>|\S+)/gm), (match) => match[1]),
     ];
-    for (const match of links) {
-      const link = match[1].replace(/^<|>$/g, '');
+    for (const destination of links) {
+      const link = destination.replace(/^<|>$/g, '');
       if (/^[a-z][a-z\d+.-]*:/i.test(link) || link.startsWith('//')) continue;
       const [path, fragment] = link.split('#');
       const target = path

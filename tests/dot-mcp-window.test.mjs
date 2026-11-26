@@ -349,6 +349,87 @@ test('a market query rejects a mismatched CLI envelope or command source', async
   }
 });
 
+test('market errors expose only CLI error fields and candle results identify the requested page', async (t) => {
+  const { options, start } = fixture(t);
+  const run = await start();
+  const program = readFileSync(options.launcher, 'utf8');
+  const stock = { name: 'stock', arguments: { symbol: 'DEMO' } };
+  const choices = ['NYSE', 'NASDAQ'].map((market) => ({
+    symbol: 'DEMO',
+    market,
+    name: null,
+    isinCode: null,
+  }));
+  const date = '2026-11-24';
+  const before = '2026-11-24T05:00:00.000Z';
+  const candles = {
+    name: 'candles',
+    arguments: { symbol: 'DEMO', count: 2, adjusted: false, date },
+  };
+  const page = {
+    provider: 'tossinvest',
+    endpoint: '/api/v1/candles',
+    symbol: 'DEMO',
+    interval: '1d',
+    count: 2,
+    adjusted: false,
+    date,
+    dateTimeZone: 'America/New_York',
+    before,
+  };
+  for (const [label, params, response, valid] of [
+    ...[
+      [{ code: 'IDENTITY_AMBIGUOUS', choices }, true],
+      [{ code: 'UPSTREAM_ERROR', providerCode: 'provider-error', requestId: 'Demo_1' }, true],
+      [{ code: 'UPSTREAM_ERROR', message: 'private fixture' }, false],
+      [{ code: 'UPSTREAM_ERROR', details: { value: 'private fixture' } }, false],
+      [{ code: 'UPSTREAM_ERROR', requestId: {} }, false],
+      [
+        {
+          code: 'IDENTITY_AMBIGUOUS',
+          choices: [{ ...choices[0], details: 'private fixture' }, choices[1]],
+        },
+        false,
+      ],
+    ].map(([error, valid]) => [JSON.stringify(error), stock, { ...redactedError, error }, valid]),
+    ...[
+      ['matching dated page', {}, true],
+      ['wrong count', { count: 1 }, false],
+      ['wrong adjustment', { adjusted: true }, false],
+      ['wrong date', { date: '2026-11-23' }, false],
+      ['wrong cursor', { before: '2026-11-23T05:00:00.000Z' }, false],
+    ].map(([label, fields, valid]) => [
+      label,
+      candles,
+      envelope(page.endpoint, [], { source: { ...page, ...fields } }),
+      valid,
+    ]),
+    [
+      'unexpected dated page on cursor request',
+      { name: 'candles', arguments: { symbol: 'DEMO', count: 2, adjusted: false, before } },
+      envelope(page.endpoint, [], { source: page }),
+      false,
+    ],
+  ]) {
+    await t.test(label, async () => {
+      const exit = response.status === 'error' ? 1 : 0;
+      writeFileSync(
+        options.launcher,
+        program.replace(
+          /\*\) echo [^\n]+/,
+          `*) echo '${JSON.stringify(response)}'; exit ${exit};;`,
+        ),
+      );
+      assert.deepEqual(
+        await query(run.url, params),
+        valid
+          ? { stage: 'query', response, exitCode: exit }
+          : { stage: 'query', error: { code: 'CLI_RESULT_UNAVAILABLE' } },
+      );
+    });
+  }
+});
+
 test('a readiness check crossing the deadline cannot start prices', async (t) => {
   const { options, trace, start } = fixture(t);
   options.now = () =>

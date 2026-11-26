@@ -105,6 +105,15 @@ for (const mode of ['docs', 'staged', 'push']) {
     '<a id="multiline-example"></a>',
     'example`',
     '',
+    '***',
+    'After break',
+    '---',
+    '',
+    'Read [these rules](#section "<a id=inline-title>")',
+    '===',
+    '',
+    '[reference]: #section "<a id=reference-title>"',
+    '',
     '<!--',
     '<span id="hidden"></span>',
     '-->',
@@ -117,12 +126,23 @@ for (const mode of ['docs', 'staged', 'push']) {
     'example',
     'multiline-example',
     'hidden',
+    'inline-title',
+    'reference-title',
   ]) {
     test(`${mode} checks heading and HTML anchor targets: ${absent ?? 'valid targets'}`, (t) => {
       const { root, base } = fixture(t);
       const targets = absent
         ? [absent]
-        : ['section', 'legacy', 'use-tag', 'use-tag-1', 'use-tag-1-1', 'multiline-heading'];
+        : [
+            'section',
+            'legacy',
+            'use-tag',
+            'use-tag-1',
+            'use-tag-1-1',
+            'multiline-heading',
+            'after-break',
+            'read-these-rules',
+          ];
       const links = targets.map((id) => `[target](#${id})`).join('\n');
       writeFileSync(join(root, 'README.md'), `${anchorDocument}\n\n${links}\n`);
       if (mode !== 'docs') git(root, 'add', 'README.md');

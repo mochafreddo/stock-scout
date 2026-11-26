@@ -18,7 +18,7 @@ for (const args of [['prices', 'AAPL'], ['readiness'], ['account-select']])
       const code = selecting ? 'ACCOUNT_SELECTION_REQUIRED' : 'AUTH_STORAGE';
       assert.equal(result.requests.length, 0);
       assert.equal(result.status, 1);
-      assert.equal(result.stderr, code + '\n');
+      assert.equal(result.stderr, `${code}\n`);
       assert.equal(JSON.parse(result.stdout).error.code, code);
     } finally {
       f.close();

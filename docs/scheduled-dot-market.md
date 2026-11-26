@@ -16,17 +16,25 @@
    ```
 
 4. 회차 상태 디렉터리는 재부팅 후에도 유지되는 사용자 전용 위치에 두세요. 실행기는 이 디렉터리가 실제 디렉터리인지, 실행 사용자 소유인지, 그룹과 다른 사용자에게 권한이 없는지 검사합니다. 실패하면 `SESSION_STORAGE_UNSAFE`로 중단합니다. 검사를 통과하면 터널을 열기 전에 KST 날짜별 디렉터리를 만듭니다. 같은 날짜가 이미 있으면 `SESSION_CLAIMED`로 건너뜁니다. 터널 시작 실패나 비정상 종료 후에도 해당 항목을 보존하고 다음 회차를 기다리세요. 운영 시간 중 실행기를 시험 삼아 시작해도 그날 회차를 차지합니다.
-5. 등록 전에 로그인 사용자 계정으로 로그 디렉터리와 파일 두 개를 준비하세요. 아래 명령은 기존 로그 내용을 보존합니다. 사용자 소유의 실제 디렉터리와 일반 파일을 사용하고, `ls -ld` 결과에서 소유자가 현재 사용자이고 권한이 디렉터리 `700`, 파일 `600`인지 확인하세요.
+5. 등록 전에 로그인 사용자 계정으로 로그 디렉터리와 파일 두 개를 준비하세요. 아래 명령은 기존 로그 내용과 권한을 보존합니다. 사용자 소유의 실제 디렉터리와 일반 파일만 사용하며 권한은 디렉터리 `700`, 파일 `600`이어야 합니다. 확인에 실패하면 다른 사용자 전용 경로를 준비한 뒤 진행하세요.
 
    ```sh
    (
      set -e
      umask 077
      log_dir="$HOME/Library/Logs/stock-scout-dot"
+     [ ! -L "$log_dir" ]
      mkdir -p "$log_dir"
-     chmod 700 "$log_dir"
-     touch "$log_dir/stdout.log" "$log_dir/stderr.log"
-     chmod 600 "$log_dir/stdout.log" "$log_dir/stderr.log"
+     [ -d "$log_dir" ] && [ -O "$log_dir" ] &&
+       [ "$(stat -f '%Lp' "$log_dir")" = 700 ] || exit 1
+     for log in "$log_dir/stdout.log" "$log_dir/stderr.log"; do
+       [ ! -L "$log" ]
+       if [ ! -e "$log" ]; then
+         (set -C; : > "$log")
+       fi
+       [ -f "$log" ] && [ -O "$log" ] &&
+         [ "$(stat -f '%Lp:%l' "$log")" = 600:1 ] || exit 1
+     done
      ls -ld "$log_dir" "$log_dir/stdout.log" "$log_dir/stderr.log"
    )
    ```

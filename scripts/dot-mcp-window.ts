@@ -1,5 +1,7 @@
 import { type ChildProcess, execFile } from 'node:child_process';
-import { record, validTime } from './toss-values.ts';
+import { candleQuery } from './toss-candles.ts';
+import { isinPattern, marketPattern } from './toss-stock.ts';
+import { record, symbolPattern, validTime } from './toss-values.ts';
 
 type CliResponse = Record<string, unknown> & {
   data: Record<string, unknown>[];
@@ -8,6 +10,39 @@ type CliResponse = Record<string, unknown> & {
 
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+function validCliError(error: unknown) {
+  if (!record(error)) return false;
+  const { code, choices, providerCode, requestId } = error;
+  return (
+    Object.keys(error).every((key) =>
+      ['code', 'choices', 'providerCode', 'requestId'].includes(key),
+    ) &&
+    typeof code === 'string' &&
+    /^[A-Z][A-Z0-9_]*$/.test(code) &&
+    (providerCode === undefined ||
+      (typeof providerCode === 'string' && /^[a-z][a-z0-9_-]{0,79}$/.test(providerCode))) &&
+    (requestId === undefined ||
+      (typeof requestId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(requestId))) &&
+    (choices === undefined ||
+      (code === 'IDENTITY_AMBIGUOUS' &&
+        Array.isArray(choices) &&
+        choices.length > 1 &&
+        choices.every(
+          (choice) =>
+            record(choice) &&
+            Object.keys(choice).length === 4 &&
+            typeof choice.symbol === 'string' &&
+            symbolPattern.test(choice.symbol) &&
+            typeof choice.market === 'string' &&
+            marketPattern.test(choice.market) &&
+            (choice.name === null ||
+              (typeof choice.name === 'string' && choice.name.trim().length > 0)) &&
+            (choice.isinCode === null ||
+              (typeof choice.isinCode === 'string' && isinPattern.test(choice.isinCode))),
+        )))
+  );
 }
 
 function isCliResponse(response: unknown, status: string | undefined): response is CliResponse {
@@ -26,8 +61,7 @@ function isCliResponse(response: unknown, status: string | undefined): response 
   const { omissions, error } = response;
   if (status === 'error')
     return (
-      record(error) &&
-      nonempty(error.code) &&
+      validCliError(error) &&
       (omissions === undefined || (Array.isArray(omissions) && !omissions.length))
     );
   return (
@@ -72,10 +106,8 @@ function readinessState({ source, data, error }: CliResponse, exitCode: number) 
     return readiness;
 }
 
-function matchesMarketQuery(
-  { source, data, status }: CliResponse,
-  [command, target, option, count]: string[],
-) {
+function matchesMarketQuery({ source, data, status }: CliResponse, args: string[]) {
+  const [command, target, option, count] = args;
   if (status === 'error') {
     if (data.length) return false;
     if (Object.keys(source).length === 1) return true;
@@ -92,12 +124,15 @@ function matchesMarketQuery(
         source.duration === option &&
         source.count === (count ?? '20')
       );
-    case 'candles':
+    case 'candles': {
+      const expected: Record<string, unknown> = candleQuery(target, args.slice(2)).source;
       return (
         source.endpoint === '/api/v1/candles' &&
-        source.interval === option &&
-        source.symbol === target
+        ['symbol', 'interval', 'count', 'adjusted', 'date', 'dateTimeZone', 'before'].every(
+          (key) => source[key] === expected[key],
+        )
       );
+    }
     case 'sessions':
       return (
         source.endpoint === '/api/v1/market-calendar/US' &&
