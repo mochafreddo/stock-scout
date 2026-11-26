@@ -86,6 +86,35 @@ function run(root, tip, base, args = [], extraEnv = {}, timeout) {
 
 for (const mode of ['docs', 'staged', 'push']) {
   const args = mode === 'docs' ? ['--docs', 'README.md'] : mode === 'staged' ? ['--staged'] : [];
+  const anchorDocument = [
+    'Use `<Tag>`',
+    '===',
+    '# Use `<Tag>`',
+    'Use Tag-1',
+    '---',
+    '<section title="text > id=\'quoted\'" ID = "section"></section><A NAME=legacy></A>',
+    '<span data-id="metadata" name="other"></span>',
+    '``<a id="example">`</a>``',
+    '<!--',
+    '<span id="hidden"></span>',
+    '-->',
+  ].join('\n');
+  for (const absent of [null, 'quoted', 'metadata', 'other', 'example', 'hidden']) {
+    test(`${mode} checks heading and HTML anchor targets: ${absent ?? 'valid targets'}`, (t) => {
+      const { root, base } = fixture(t);
+      const targets = absent
+        ? [absent]
+        : ['section', 'legacy', 'use-tag', 'use-tag-1', 'use-tag-1-1'];
+      const links = targets.map((id) => `[target](#${id})`).join('\n');
+      writeFileSync(join(root, 'README.md'), `${anchorDocument}\n\n${links}\n`);
+      if (mode !== 'docs') git(root, 'add', 'README.md');
+      if (mode === 'push') git(root, 'commit', '-m', 'anchor targets');
+      const result = run(root, git(root, 'rev-parse', 'HEAD'), base, args);
+      assert.equal(result.status, absent ? 1 : 0, result.stderr);
+      if (absent) assert.ok(result.stderr.includes(`missing heading #${absent}`), result.stderr);
+    });
+  }
+
   test(`${mode} CLI finishes checking a long unfinished inline link within the child-process limit`, (t) => {
     const { root, base } = fixture(t);
     writeFileSync(join(root, 'README.md'), `# Start\n\n[unfinished](${'a'.repeat(32_768)}\n`);

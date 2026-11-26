@@ -131,11 +131,32 @@ function markdownText(path: string) {
 }
 
 function headingIds(text: string) {
+  const anchors = new Set<string>();
+  const inline =
+    /\\[\\<`]|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)|<!--[\s\S]*?(?:-->|$)|<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi;
+  const visible = text.replace(inline, (token, ticks, tag, attributes) => {
+    if (ticks || token.startsWith('\\')) return token;
+    if (tag && !token.startsWith('</')) {
+      const attribute = /\s+([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
+      for (const [, key, double, single, bare] of attributes.matchAll(attribute)) {
+        const value = double ?? single ?? bare;
+        const name = key.toLowerCase();
+        if (value && (name === 'id' || (tag.toLowerCase() === 'a' && name === 'name')))
+          anchors.add(value);
+      }
+    }
+    return token.replace(/[^\n]/g, '');
+  });
   const ids = new Set<string>();
-  for (const match of text.matchAll(/^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/gm)) {
-    const slug = match[1]
+  let previous = '';
+  for (const line of visible.split('\n')) {
+    const atx = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    const underline = /^ {0,3}(?:=+|-+)[ \t]*$/.test(line);
+    const title = atx?.[1] ?? (underline ? previous : '');
+    previous = atx || underline ? '' : line.trim();
+    if (!title) continue;
+    const slug = title
       .toLowerCase()
-      .replace(/<[^>]*>/g, '')
       .replace(/[^\p{L}\p{M}\p{N}_\-\s]/gu, '')
       .replace(/\s/g, '-');
     let id = slug;
@@ -143,8 +164,7 @@ function headingIds(text: string) {
     while (ids.has(id)) id = `${slug}-${++suffix}`;
     ids.add(id);
   }
-  for (const match of text.matchAll(/\b(?:id|name)=["']([^"']+)["']/g)) ids.add(match[1]);
-  return ids;
+  return new Set([...ids, ...anchors]);
 }
 
 function checkLinks(root: string, files: string[], headingCache?: Map<string, Set<string>>) {
