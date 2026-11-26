@@ -16,8 +16,25 @@
    ```
 
 4. 회차 상태 디렉터리는 재부팅 후에도 유지되는 사용자 전용 위치에 두세요. 실행기는 이 디렉터리가 실제 디렉터리인지, 실행 사용자 소유인지, 그룹과 다른 사용자에게 권한이 없는지 검사합니다. 실패하면 `SESSION_STORAGE_UNSAFE`로 중단합니다. 검사를 통과하면 터널을 열기 전에 KST 날짜별 디렉터리를 만듭니다. 같은 날짜가 이미 있으면 `SESSION_CLAIMED`로 건너뜁니다. 터널 시작 실패나 비정상 종료 후에도 해당 항목을 보존하고 다음 회차를 기다리세요. 운영 시간 중 실행기를 시험 삼아 시작해도 그날 회차를 차지합니다.
-5. [LaunchAgent 예시](../examples/stock-scout-dot.launchagent.plist)를 사용자의 `~/Library/LaunchAgents/`에 복사하고 `ProgramArguments`를 시작 래퍼의 절대 경로로 바꾸세요. 예시는 Mac **현지 시각 20:55**에 실행되므로 Mac 시간대가 `Asia/Seoul`인지 확인하세요. 등록 전에 래퍼의 실행 권한을 확인하고, 사본의 절대 경로를 셸 변수 `plist`에 지정한 뒤 `plutil -lint "$plist"`로 검사하세요. 승인된 실행기의 `readiness`는 공급자 호출 없이 로컬 차단 사유를 점검합니다. JSON의 `data[0].readiness`가 `ready`이고 종료 코드가 0인지 확인하세요.
-6. 등록 승인 후 로그인한 사용자 세션에서 `launchctl bootstrap "gui/$(id -u)" "$plist"`로 등록하세요. `launchctl print "gui/$(id -u)/local.stock-scout.dot"`로 예시 레이블의 등록을 확인하세요. 등록 정보는 예약 실행의 증거와 다릅니다. 기존 21:00 KST Dot 예약이 승인된 비공개 연결을 사용하도록 확인하세요.
+5. 등록 전에 로그인 사용자 계정으로 로그 디렉터리와 파일 두 개를 준비하세요. 아래 명령은 기존 로그 내용을 보존합니다. 사용자 소유의 실제 디렉터리와 일반 파일을 사용하고, `ls -ld` 결과에서 소유자가 현재 사용자이고 권한이 디렉터리 `700`, 파일 `600`인지 확인하세요.
+
+   ```sh
+   (
+     set -e
+     umask 077
+     log_dir="$HOME/Library/Logs/stock-scout-dot"
+     mkdir -p "$log_dir"
+     chmod 700 "$log_dir"
+     touch "$log_dir/stdout.log" "$log_dir/stderr.log"
+     chmod 600 "$log_dir/stdout.log" "$log_dir/stderr.log"
+     ls -ld "$log_dir" "$log_dir/stdout.log" "$log_dir/stderr.log"
+   )
+   ```
+
+6. [LaunchAgent 예시](../examples/stock-scout-dot.launchagent.plist)를 사용자의 `~/Library/LaunchAgents/`에 복사하고 `ProgramArguments`를 시작 래퍼의 절대 경로로 바꾸세요. 사본의 `StandardOutPath`와 `StandardErrorPath`에는 위에서 준비한 `stdout.log`와 `stderr.log`의 절대 경로를 각각 입력하세요. plist에 `~`나 `$HOME`을 그대로 쓰면 경로가 확장되지 않습니다. 예시는 Mac **현지 시각 20:55**에 실행되므로 Mac 시간대가 `Asia/Seoul`인지 확인하세요. 등록 전에 래퍼의 실행 권한을 확인하고, 사본의 절대 경로를 셸 변수 `plist`에 지정한 뒤 `plutil -lint "$plist"`로 검사하세요. 승인된 실행기의 `readiness`는 공급자 호출 없이 로컬 차단 사유를 점검합니다. JSON의 `data[0].readiness`가 `ready`이고 종료 코드가 0인지 확인하세요.
+7. 등록 승인 후 로그인한 사용자 세션에서 `launchctl bootstrap "gui/$(id -u)" "$plist"`로 등록하세요. `launchctl print "gui/$(id -u)/local.stock-scout.dot"`로 예시 레이블의 등록을 확인하세요. 등록 정보는 예약 실행의 증거와 다릅니다. 기존 21:00 KST Dot 예약이 승인된 비공개 연결을 사용하도록 확인하세요.
+
+첫 시작이 실패하면 두 로그를 확인하세요. 예를 들어 터널을 시작하지 못하면 표준 출력에 `session`(KST 회차 날짜), `time`(UTC 시각), `status=error`, `code=TUNNEL_START_FAILED`가 남습니다. 실행기가 예기치 않은 시작 예외를 처리하면 표준 오류에 `time`, `status=error`, `code=START_FAILED`가 남습니다. 시작 래퍼도 이 범위의 메타데이터만 기록하도록 하세요. 셸 실행 추적이나 조회 인수·금융 응답·터널 설정 덤프는 꺼 두세요.
 
 ## 조회와 종료
 
@@ -33,7 +50,7 @@
 | `prices` | 심볼별 가격의 소수 문자열과 통화를 보존합니다. 같은 심볼에 여러 상장 종목이 있다면 가격을 특정 상장 종목에 귀속할 별도 근거가 필요합니다. |
 | `sessions` | 조회 시각의 뉴욕 현지 날짜에 반환된 `today.regularMarket.startTime`과 조회 시각을 비교해 정규장 개장 전인지 판단합니다. 개장 시각이 없으면 판단을 보류합니다. |
 
-인수는 `tools/list`의 구조화된 스키마를 따릅니다. 21:20부터 새 연결과 대기 중인 요청의 새 조회를 차단합니다. 마감 전 시작한 조회의 응답 처리가 끝나면 터널 종료를 시작합니다. 종료 시작 75초에 남은 연결을 닫고 실행기와 터널에 종료 신호를 보냅니다. 필요하면 80초에 강제 종료합니다. 실행기가 종료를 요청하기 전에 터널이 먼저 끝나면 `TUNNEL_EXIT`를 기록하고 종료 코드 1을 반환합니다. 회차 점유는 보존합니다. Mac이 마감 후 깨어나면 그 회차는 건너뜁니다. 예약을 중지하려면 실행 중인 회차의 종료를 확인한 뒤 `launchctl bootout "gui/$(id -u)" "$plist"`로 등록을 해제하고, 다음 로그인 때도 중지하려면 해당 사본을 LaunchAgents 밖으로 옮기세요.
+인수는 `tools/list`의 구조화된 스키마를 따릅니다. 21:20 KST부터는 이미 대기 중이거나 준비 점검을 통과한 요청도 새 시장 조회를 시작할 수 없습니다. 실행기는 별도로 1초 간격으로 마감을 확인합니다. 마감을 감지해 종료 절차를 시작할 때 서버가 새 연결을 차단합니다. 마감 전 시작한 조회의 응답 처리가 끝나면 터널 종료를 시작합니다. 종료 시작 75초에 남은 연결을 닫고 실행기와 터널에 종료 신호를 보냅니다. 필요하면 80초에 강제 종료합니다. 실행기가 종료를 요청하기 전에 터널이 먼저 끝나면 `TUNNEL_EXIT`를 기록하고 종료 코드 1을 반환합니다. 회차 점유는 보존합니다. Mac이 마감 후 깨어나면 그 회차는 건너뜁니다. 예약을 중지하려면 실행 중인 회차의 종료를 확인한 뒤 `launchctl bootout "gui/$(id -u)" "$plist"`로 등록을 해제하고, 다음 로그인 때도 중지하려면 해당 사본을 LaunchAgents 밖으로 옮기세요.
 
 ## 보고서에서 결과 구분하기
 

@@ -5,6 +5,8 @@
   <key>Label</key><string>local.stock-scout.dot</string>
   <key>ProgramArguments</key>
   <array><string>/absolute/machine-local/path/to/run-stock-scout-dot</string></array>
+  <key>StandardOutPath</key><string>/absolute/private/log/directory/stdout.log</string>
+  <key>StandardErrorPath</key><string>/absolute/private/log/directory/stderr.log</string>
   <!-- launchd interprets this in the Mac's local timezone. This example assumes Asia/Seoul. -->
   <key>StartCalendarInterval</key>
   <dict>

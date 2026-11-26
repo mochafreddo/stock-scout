@@ -184,3 +184,18 @@ test('direct startup identifies a state path occupied by a file as unsafe', (t) 
   writeFileSync(state, '');
   invoke(state, open, 'error', 'SESSION_STORAGE_UNSAFE', 1);
 });
+
+test('direct startup reports only diagnostic metadata on stderr for a storage exception', (t) => {
+  const file = join(stateDirectory(t), 'parent');
+  writeFileSync(file, '');
+  const result = spawnSync(process.execPath, args(join(file, 'state'), open, '/unused'), {
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  const entry = JSON.parse(result.stderr);
+  assert.equal(new Date(entry.time).toISOString(), entry.time);
+  assert.deepEqual(entry, { time: entry.time, status: 'error', code: 'START_FAILED' });
+});
