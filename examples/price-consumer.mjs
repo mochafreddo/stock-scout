@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { priceAge } from '../scripts/toss-prices.ts';
-import { validTime } from '../scripts/toss-values.ts';
+import {
+  currencyPattern,
+  nonnegativeDecimal,
+  record,
+  symbolPattern,
+  validTime,
+} from '../scripts/toss-values.ts';
 
 const [asOf, ...extra] = process.argv.slice(2);
 if (!asOf || !validTime(asOf) || extra.length)
@@ -14,6 +20,17 @@ if (
 )
   throw new TypeError('Expected a usable prices CLI response');
 const prices = query.data.map((row) => {
+  if (
+    !record(row) ||
+    typeof row.symbol !== 'string' ||
+    !symbolPattern.test(row.symbol) ||
+    !nonnegativeDecimal(row.lastPrice) ||
+    typeof row.currency !== 'string' ||
+    !currencyPattern.test(row.currency)
+  )
+    throw new TypeError(
+      'Expected a price row with a symbol, nonnegative decimal price and currency',
+    );
   const threshold = row.priceAge?.thresholdSeconds;
   if (
     !Number.isSafeInteger(threshold) ||

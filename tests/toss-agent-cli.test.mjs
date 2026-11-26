@@ -222,6 +222,7 @@ test('consumer preserves safe empty CLI errors when sensitive source metadata is
   assert.equal(consumed.status, 0, consumed.stderr);
   assert.deepEqual(JSON.parse(consumed.stdout), {
     status: 'error',
+    retrievedAt: original.retrievedAt,
     data: [],
     error: original.error,
   });
@@ -534,6 +535,7 @@ test('consumer preserves early daily input errors without candle source metadata
     assert.equal(consumed.status, 0, consumed.stderr);
     assert.deepEqual(JSON.parse(consumed.stdout), {
       status: 'error',
+      retrievedAt: original.retrievedAt,
       data: [],
       error: { code: 'INPUT_INVALID' },
     });
@@ -639,6 +641,22 @@ test('batch consumer preserves usable partial coverage, empty pages, errors and 
   const output = JSON.parse(consumed.stdout);
   assert.equal(output.status, 'partial');
   const [complete, partial, empty, invalid, denied, later] = output.data;
+  const query = JSON.parse(result.stdout);
+  assert.notEqual(query.data[0].retrievedAt, query.data[1].retrievedAt);
+  assert.notEqual(query.data[0].retrievedAt, query.retrievedAt);
+  assert.equal(output.retrievedAt, query.retrievedAt);
+  assert.deepEqual(
+    output.data.map((row) => row.retrievedAt),
+    query.data.map((row) => row.retrievedAt),
+  );
+  delete query.retrievedAt;
+  delete query.data[0].retrievedAt;
+  const omitted = consume({ stdout: JSON.stringify(query) });
+  assert.equal(omitted.status, 0, omitted.stderr);
+  const withoutTimes = JSON.parse(omitted.stdout);
+  assert.ok(!Object.hasOwn(withoutTimes, 'retrievedAt'));
+  assert.ok(!Object.hasOwn(withoutTimes.data[0], 'retrievedAt'));
+  assert.equal(withoutTimes.data[1].retrievedAt, query.data[1].retrievedAt);
   assert.deepEqual(
     output.data.map((row) => row.status),
     ['success', 'partial', 'partial', 'partial', 'error', 'not_queried'],
@@ -956,4 +974,22 @@ test('synthetic notice survives fixture creation failure', (t) => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /ENOENT: no such file or directory, mkdtemp/);
   assert.match(result.stderr, /SYNTHETIC/);
+});
+
+test('batch consumer requires each usable item to match its daily candle source', async (t) => {
+  const result = run('success', 'candles-batch', 'DEMO,EMPTY');
+  assert.equal(result.status, 0, result.stderr);
+  for (const [field, value] of [
+    ['symbol', 'OTHER'],
+    ['interval', '1m'],
+    ['endpoint', '/api/v1/prices'],
+  ]) {
+    await t.test(field, () => {
+      const query = JSON.parse(result.stdout);
+      query.data[0].source[field] = value;
+      const consumed = consume({ stdout: JSON.stringify(query) });
+      assert.equal(consumed.status, 1, consumed.stderr);
+      assert.equal(consumed.stdout, '');
+    });
+  }
 });

@@ -5,6 +5,22 @@ import { fixture, runCli } from './toss-cli-helper.mjs';
 
 const reportAsOf = '2026-11-06T15:45:00Z';
 
+const priceRow = {
+  symbol: 'DEMO',
+  lastPrice: '0.000',
+  currency: 'USD',
+  priceAge: { thresholdSeconds: 900 },
+};
+
+function runConsumer(input) {
+  return spawnSync(process.execPath, ['examples/price-consumer.mjs', reportAsOf], {
+    input,
+    encoding: 'utf8',
+    timeout: 10000,
+    env: { PATH: process.env.PATH },
+  });
+}
+
 async function consume(t, timestamp, threshold) {
   const f = fixture();
   t.after(f.close);
@@ -22,12 +38,7 @@ async function consume(t, timestamp, threshold) {
   );
   assert.equal(query.status, 0, query.stderr);
   assert.equal(query.requests.filter((r) => r.path === '/api/v1/prices').length, 1);
-  const result = spawnSync(process.execPath, ['examples/price-consumer.mjs', reportAsOf], {
-    input: query.stdout,
-    encoding: 'utf8',
-    timeout: 10000,
-    env: { PATH: process.env.PATH },
-  });
+  const result = runConsumer(query.stdout);
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.deepEqual(output.query, JSON.parse(query.stdout));
@@ -110,5 +121,51 @@ test('consumer rejects an invalid report instant and a failed query', () => {
     assert.equal(result.status, 1);
     assert.equal(result.stdout, '');
     assert.match(result.stderr, /TypeError/);
+  }
+});
+
+test('consumer rejects missing or malformed price fields before emitting any analysis', async (t) => {
+  const query = { version: 1, status: 'partial', source: { endpoint: '/api/v1/prices' } };
+  for (const [field, value] of [
+    ['symbol', undefined],
+    ['lastPrice', undefined],
+    ['currency', undefined],
+    ['symbol', 42],
+    ['symbol', 'A/B'],
+    ['lastPrice', '-0.01'],
+    ['lastPrice', 10],
+    ['currency', 'usd'],
+    ['currency', ['USD']],
+  ]) {
+    await t.test(`${field}=${JSON.stringify(value)}`, () => {
+      const result = runConsumer(
+        JSON.stringify({ ...query, data: [priceRow, { ...priceRow, [field]: value }] }),
+      );
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(result.stdout, '');
+    });
+  }
+});
+
+test('consumer preserves usable partial prices and successful empty results', () => {
+  for (const query of [
+    {
+      status: 'partial',
+      data: [priceRow],
+      omissions: [{ symbol: 'OTHER', reason: 'missing_item' }],
+    },
+    { status: 'success', data: [] },
+  ]) {
+    const input = { version: 1, source: { endpoint: '/api/v1/prices' }, ...query };
+    const result = runConsumer(JSON.stringify(input));
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(output.query, input);
+    if (query.status === 'partial') {
+      assert.equal(output.report.prices[0].lastPrice, '0.000');
+      assert.equal(output.report.prices[0].classification, 'timestamp_unknown');
+    } else {
+      assert.deepEqual(output.report.prices, []);
+    }
   }
 });

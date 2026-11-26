@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { decimal, record, validTime } from '../scripts/toss-values.ts';
+import { decimal, record, symbolPattern, validTime } from '../scripts/toss-values.ts';
 
 const tradeDateFormat = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/New_York',
@@ -57,6 +57,15 @@ const batch = !Object.hasOwn(output.source, 'interval');
 const rows = batch ? output.data : [{ ...output, symbol: output.source.symbol }];
 const data = rows.map((row) => {
   const usable = row.status === 'success' || row.status === 'partial';
+  if (batch && usable)
+    assert.ok(
+      typeof row.symbol === 'string' &&
+        symbolPattern.test(row.symbol) &&
+        row.source?.symbol === row.symbol &&
+        row.source.endpoint === '/api/v1/candles' &&
+        row.source.interval === '1d',
+      'batch item must match its daily candle source',
+    );
   const knownMarket =
     ['NYSE', 'NASDAQ', 'AMEX', 'US_ETC'].includes(row.source.market) &&
     row.source.dateTimeZone === 'America/New_York';
@@ -83,6 +92,7 @@ const data = rows.map((row) => {
   return {
     symbol: row.symbol,
     status: row.status,
+    retrievedAt: batch ? row.retrievedAt : undefined,
     source: row.source,
     ...(Object.hasOwn(row, 'summary') ? { summary: row.summary } : {}),
     ...(row.omissions ? { omissions: row.omissions } : {}),
@@ -108,6 +118,7 @@ const data = rows.map((row) => {
 process.stdout.write(
   `${JSON.stringify({
     status: output.status,
+    retrievedAt: output.retrievedAt,
     data,
     ...(output.error ? { error: output.error } : {}),
   })}\n`,

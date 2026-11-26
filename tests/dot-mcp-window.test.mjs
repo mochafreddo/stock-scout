@@ -110,8 +110,9 @@ esac
   return { options, logs, trace, start };
 }
 
-async function price(url) {
+async function price(url, signal) {
   const res = await fetch(url, {
+    signal,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -124,17 +125,20 @@ async function price(url) {
   return (await res.json()).result.structuredContent;
 }
 
+const realTimeout = setTimeout;
+const clearRealTimeout = clearTimeout;
+
 async function observe(label, ...events) {
   let timer;
   try {
     return await Promise.race([
       ...events,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 5000);
+        timer = realTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 5000);
       }),
     ]);
   } finally {
-    clearTimeout(timer);
+    clearRealTimeout(timer);
   }
 }
 
@@ -390,3 +394,145 @@ test('killing the serving process leaves the session claimed before any replacem
   assert.equal(logs.at(-1).code, 'SESSION_CLAIMED');
   assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), ['readiness', 'prices DEMO']);
 });
+
+async function waitFor(check, label) {
+  const deadline = performance.now() + 3000;
+  while (!check()) {
+    assert.ok(performance.now() < deadline, label);
+    await new Promise((resolve) => realTimeout(resolve, 10));
+  }
+}
+
+for (const [command, cleanup, title] of [
+  ['readiness', 'release', '70s timeout waits for readiness pipes before the queued lookup'],
+  ['prices', 'release', '70s timeout waits for prices pipes before admitting the queued lookup'],
+  ['prices', 'stubborn', '75s deadline kills a stubborn lookup and closes the claimed session'],
+  ['readiness', 'pipe', '75s deadline closes the claimed session when only a pipe remains'],
+]) {
+  test(title, async (t) => {
+    const { options, trace, logs, start } = fixture(t);
+    const pid = (suffix) => {
+      const value = Number(readFileSync(trace + suffix, 'utf8'));
+      assert.ok(Number.isSafeInteger(value) && value > 0);
+      return value;
+    };
+    const normal = readFileSync(options.launcher, 'utf8');
+    const held = join(options.state, 'held.cjs');
+    const holder = join(options.state, 'holder.cjs');
+    writeFileSync(
+      holder,
+      `
+      const fs = require('node:fs');
+      process.on('SIGUSR2', () => process.exit());
+      fs.writeFileSync(process.argv[2], String(process.pid));
+      setTimeout(() => process.exit(0), 60000);
+    `,
+    );
+    writeFileSync(
+      held,
+      `
+      const fs = require('node:fs');
+      const { spawn } = require('node:child_process');
+      process.on('SIGTERM', () => {
+        fs.writeFileSync(process.argv[2] + '.term', '');
+        if (${JSON.stringify(cleanup)} === 'stubborn') return;
+        console.log('{"version":1,"status":"success","data":[{"readiness":"ready"}]}');
+        process.exit(0);
+      });
+      fs.writeFileSync(process.argv[2] + '.pid', String(process.pid));
+      spawn(process.execPath, [process.argv[3], process.argv[2] + '.pipe'], { stdio: 'inherit' });
+    `,
+    );
+    writeFileSync(
+      options.launcher,
+      normal.replace(
+        'case "$1"',
+        `
+if [ "$1" = "${command}" ] && [ ! -f "${trace}.pid" ]; then
+  exec "${process.execPath}" "${held}" "${trace}" "${holder}"
+fi
+case "$1"`,
+      ),
+    );
+    const run = await start();
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const controller = new AbortController();
+    const active = price(run.url, controller.signal);
+    let queued;
+    try {
+      await waitFor(() => existsSync(`${trace}.pipe`), 'inherited pipe opened');
+      queued = price(run.url, controller.signal);
+      await waitFor(() => logs.some((e) => e.status === 'queued'), 'queued request');
+      t.mock.timers.tick(69999);
+      assert.equal(existsSync(`${trace}.term`), false);
+      t.mock.timers.tick(1);
+      await waitFor(() => existsSync(`${trace}.term`), '70s SIGTERM');
+      if (cleanup === 'pipe') {
+        await waitFor(() => {
+          try {
+            process.kill(pid('.pid'), 0);
+            return false;
+          } catch (error) {
+            assert.equal(error.code, 'ESRCH');
+            return true;
+          }
+        }, 'launcher exited while its pipe is held');
+      }
+      t.mock.timers.tick(4999);
+      const started = command === 'prices' ? ['readiness', 'prices DEMO'] : ['readiness'];
+      assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), started);
+      if (cleanup === 'release') {
+        process.kill(pid('.pipe'), 'SIGUSR2');
+      } else {
+        assert.ok(!logs.some((entry) => entry.status === 'closed'));
+        t.mock.timers.tick(1);
+        await waitFor(() => logs.some((entry) => entry.status === 'closed'), '75s session close');
+        assert.throws(() => process.kill(pid('.pid'), 0), {
+          code: 'ESRCH',
+        });
+        process.kill(pid('.pipe'), 0);
+        assert.deepEqual(await observe('queued rejection', queued), {
+          stage: 'admission',
+          error: { code: 'WINDOW_CLOSED' },
+        });
+        assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), started);
+        assert.equal(await runScheduledDot(options), undefined);
+        assert.equal(logs.at(-1).code, 'SESSION_CLAIMED');
+      }
+      assert.deepEqual(await observe('timed out request', active), {
+        stage: command === 'prices' ? 'query' : 'readiness',
+        error: { code: 'CLI_RESULT_UNAVAILABLE' },
+      });
+      if (cleanup !== 'release') return;
+      assert.equal((await observe('queued lookup', queued)).exitCode, 0);
+      assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), [
+        ...started,
+        'readiness',
+        'prices DEMO',
+      ]);
+      const spentSlots = command === 'prices' ? 2 : 1;
+      for (let n = spentSlots; n < 16; n++) {
+        const result = await observe('remaining lookup', price(run.url, controller.signal));
+        assert.equal(result.exitCode, 0);
+      }
+      assert.deepEqual(await observe('exhausted budget', price(run.url, controller.signal)), {
+        stage: 'admission',
+        error: { code: 'SESSION_BUDGET' },
+      });
+    } finally {
+      const responses = Promise.allSettled([active, queued]);
+      controller.abort();
+      const stopped = run.stop();
+      t.mock.timers.tick(80000);
+      for (const suffix of ['.pid', '.pipe']) {
+        if (!existsSync(trace + suffix)) continue;
+        try {
+          process.kill(pid(suffix), 'SIGKILL');
+        } catch (error) {
+          assert.equal(error.code, 'ESRCH');
+        }
+      }
+      await Promise.all([stopped, responses]);
+    }
+  });
+}

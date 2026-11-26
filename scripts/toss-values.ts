@@ -1,5 +1,6 @@
 import { TossError } from './toss-client.ts';
 
+export const currencyPattern = /^[A-Z]{3}$/;
 export const symbolPattern = /^[A-Za-z0-9.-]+$/;
 
 export function wholeSecondMillis(value: string) {

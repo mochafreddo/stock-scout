@@ -48,7 +48,12 @@ export async function runScheduledDot(options: Options) {
     return;
   }
   let tunnelSpawned = false;
-  const window = new DotWindow(options.launcher, () => tunnelSpawned && isOpen(), report);
+  const window = new DotWindow(
+    options.launcher,
+    () => tunnelSpawned && isOpen(),
+    report,
+    () => void stop('CLI_RESULT_UNAVAILABLE'),
+  );
   let stopping = false;
   const server = createDotServer(window);
   server.on('request', (_request, response) => {
@@ -83,6 +88,7 @@ export async function runScheduledDot(options: Options) {
     return;
   }
   const finished = Promise.withResolvers<void>();
+  let unexpectedTunnelExit = false;
   const stop = async (code?: string) => {
     if (stopping) return finished.promise;
     stopping = true;
@@ -109,13 +115,18 @@ export async function runScheduledDot(options: Options) {
     await Promise.race([graceful, deadline.promise]);
     clearTimeout(grace);
     clearTimeout(force);
-    report('closed', code);
+    if (unexpectedTunnelExit) report('error', 'TUNNEL_EXIT');
+    else report('closed', code);
     finished.resolve();
   };
   const timer = setInterval(() => {
     if (!isOpen()) void stop('WINDOW_CLOSED');
   }, 1000);
-  tunnel.once('exit', () => void stop('TUNNEL_EXIT'));
+  tunnel.once('exit', () => {
+    if (tunnel.killed) return;
+    unexpectedTunnelExit = true;
+    void stop();
+  });
   report('started');
   return { url, done: finished.promise, stop };
 }

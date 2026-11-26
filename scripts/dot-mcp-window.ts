@@ -25,14 +25,17 @@ export class DotWindow {
   private readonly launcher: string;
   private readonly isOpen: () => boolean;
   private readonly report: (status: string, code?: string) => void;
+  private readonly onCleanupDeadline: () => void;
   constructor(
     launcher: string,
     isOpen: () => boolean,
     report: (status: string, code?: string) => void,
+    onCleanupDeadline: () => void,
   ) {
     this.launcher = launcher;
     this.isOpen = isOpen;
     this.report = report;
+    this.onCleanupDeadline = onCleanupDeadline;
   }
   async query(args: string[]) {
     const previous = this.tail;
@@ -54,12 +57,16 @@ export class DotWindow {
     onStart?: () => void,
   ): Promise<{ exitCode: number; response: CliResponse }> {
     return new Promise((resolve, reject) => {
+      let timedOut = false;
       const child = execFile(
         this.launcher,
         args,
-        { encoding: 'utf8', timeout: 70000, maxBuffer: 4 * 1024 * 1024 },
+        { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
         (error, stdout) => {
+          clearTimeout(timeout);
+          clearTimeout(deadline);
           this.child = undefined;
+          if (timedOut) return reject(new Error('CLI_RESULT_UNAVAILABLE'));
           const exitCode = error ? error.code : 0;
           try {
             const response: unknown = JSON.parse(stdout);
@@ -74,6 +81,14 @@ export class DotWindow {
           }
         },
       );
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGTERM');
+      }, 70000).unref();
+      const deadline = setTimeout(() => {
+        this.onCleanupDeadline();
+        this.terminate('SIGKILL');
+      }, 75000).unref();
       this.child = child;
       if (onStart) child.once('spawn', onStart);
     });

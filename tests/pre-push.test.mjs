@@ -127,6 +127,24 @@ for (const mode of ['docs', 'staged', 'push']) {
     }
   });
 
+  for (const [target, title, diagnostic] of [
+    ['missing.md', '"First title"', /missing local target missing\.md/],
+    ['#absent', "'First title'", /missing heading #absent/],
+  ]) {
+    test(`${mode} CLI checks the second titled link to ${target} on the same line`, (t) => {
+      const { root, base } = fixture(t);
+      writeFileSync(
+        join(root, 'README.md'),
+        `# Start\n\n[First](#start ${title}) [Second](${target} "Second title")\n`,
+      );
+      if (mode !== 'docs') git(root, 'add', 'README.md');
+      if (mode === 'push') git(root, 'commit', '-m', 'two titled links');
+      const result = run(root, git(root, 'rev-parse', 'HEAD'), base, args);
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, diagnostic);
+    });
+  }
+
   test(`${mode} checks links around quoted code blocks`, async (t) => {
     const { root, base } = fixture(t);
     git(root, 'config', 'core.whitespace', 'cr-at-eol');

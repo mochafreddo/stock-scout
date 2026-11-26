@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { setTimeout as delay } from 'node:timers/promises';
 
 export async function startScheduledTestServer(t, dir, launcher, env) {
   const tunnel = join(dir, 'test-tunnel');
@@ -30,16 +31,34 @@ await run.done;
     ],
     { env, stdio: ['ignore', 'pipe', 'inherit'] },
   );
-  const closed = once(child, 'close');
+  const exited = once(child, 'exit');
   t.after(async () => {
-    child.kill();
-    await closed;
+    try {
+      for (const signal of ['SIGTERM', 'SIGKILL']) {
+        if (!child.kill(signal)) return;
+        if (await Promise.race([exited, delay(1000, false, { ref: false })])) return;
+      }
+      child.unref();
+      throw Error('test server did not exit after SIGKILL');
+    } finally {
+      child.stdout.destroy();
+    }
   });
-  const [url] = await Promise.race([
-    once(createInterface({ input: child.stdout }), 'line'),
-    closed.then(([code]) => {
-      throw Error(`server exited ${code}`);
-    }),
-  ]);
-  return url;
+  const lines = createInterface({ input: child.stdout });
+  let timer;
+  try {
+    const [url] = await Promise.race([
+      once(lines, 'line'),
+      exited.then(([code, signal]) => {
+        throw Error(`server exited ${code ?? signal}`);
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error('timed out waiting for server URL')), 5000);
+      }),
+    ]);
+    return url;
+  } finally {
+    clearTimeout(timer);
+    lines.close();
+  }
 }
