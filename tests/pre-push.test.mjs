@@ -97,9 +97,14 @@ for (const mode of ['docs', 'staged', 'push']) {
   test(`${mode} checks inline Markdown links with a parenthesized title`, (t) => {
     const { root, base } = fixture(t);
     writeFileSync(join(root, 'guide(v1).md'), '# Details\n');
+    writeFileSync(join(root, 'guide(((v1))).md'), '# Details\n');
     const valid = '[Guide](guide(v1).md#details (first title))';
     for (const [link, diagnostic] of [
       [valid, null],
+      ['[Guide](guide(((v1))).md#details (nested destination))', null],
+      ['[Guide](missing((v1)).md (nested destination))', /missing local target/],
+      ['[Guide](missing((((v1)))).md (nested destination))', /missing local target/],
+      ['[Guide](missing((v1 draft)).md (spaces in an unbracketed target))', null],
       ['[Guide](missing(v1).md (first title))', /missing local target missing\(v1\)\.md/],
       ['[Guide](guide(v1).md#absent (first title))', /missing heading guide\(v1\)\.md#absent/],
       [`${valid} [Next](missing.md (second title))`, /missing local target missing\.md/],
@@ -112,6 +117,7 @@ for (const mode of ['docs', 'staged', 'push']) {
 
   test(`${mode} checks rendered emphasis in Markdown heading anchors`, (t) => {
     const { root, base } = fixture(t);
+    writeFileSync(join(root, 'guide.md'), '# Details\n');
     const headings = [
       '# _Read_ __this__',
       'Read _this_',
@@ -119,9 +125,22 @@ for (const mode of ['docs', 'staged', 'push']) {
       'Read this-1',
       '---',
       '# _snake_case_ \\_literal\\_ `_code_` unmatched_',
+      '# [_one](guide.md) [two_](guide.md)',
+      '# *A _B* C_',
+      '# _[Wrapped](guide.md)_',
+      '# [Inner _emphasis_][guide]',
+      '# [Shortcut _label] outside_',
+      '# [_ordinary] bracket_',
+      '',
+      '[guide]: guide.md',
+      '[Shortcut _label]: guide.md',
     ].join('\n');
     for (const [targets, missing] of [
       [['read-this', 'read-this-1', 'read-this-1-1', 'snake_case-_literal_-_code_-unmatched_']],
+      [['_one-two_', 'a-_b-c_', 'wrapped', 'inner-emphasis']],
+      [['shortcut-_label-outside_', 'ordinary-bracket']],
+      [['one-two'], 'one-two'],
+      [['a-b-c'], 'a-b-c'],
       [['_read_-__this__'], '_read_-__this__'],
       [['read-_this_'], 'read-_this_'],
     ]) {

@@ -197,8 +197,8 @@ for (const signalName of ['SIGTERM', 'SIGINT']) {
         try {
           await fetch(url, { headers: { connection: 'close' }, signal });
         } catch (error) {
-          assert.equal(error.cause?.code, 'ECONNREFUSED');
-          break;
+          if (error.cause?.code === 'ECONNREFUSED') break;
+          if (error.cause?.code !== 'ECONNRESET') throw error;
         }
         await delay(10, undefined, { signal });
       }

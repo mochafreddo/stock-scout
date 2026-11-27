@@ -82,8 +82,13 @@ function snapshot(commit: string, destination: string) {
 
 const thematicBreak = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/;
 const parenthesizedTitle = /\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)/;
+const destinationCharacter = /[^\s()]/.source;
+const githubLinkParenthesisLimit = 32;
+let destinationPart = destinationCharacter;
+for (let depth = 0; depth < githubLinkParenthesisLimit; depth++)
+  destinationPart = String.raw`${destinationCharacter}|\((?:${destinationPart})*\)`;
 const inlineLink = new RegExp(
-  String.raw`\]\(\s*(?<inlineTarget><[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|${parenthesizedTitle.source}))?\s*\)`,
+  String.raw`\]\(\s*(?<inlineTarget><[^>\n]*>|(?:${destinationPart})+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|${parenthesizedTitle.source}))?\s*\)`,
   'g',
 );
 const referenceDefinition = new RegExp(
@@ -171,36 +176,63 @@ const markdownInline = new RegExp(
   'gim',
 );
 
+const linkLabelEnd = '\uE000';
 const headingTokens = new RegExp(
-  String.raw`${inlineCodeOrEscape.source}|\\_|(?<=(?<before>.|^))_+(?=(?<after>.|$))`,
+  [
+    inlineCodeOrEscape.source,
+    /\\[[_*\]]/.source,
+    String.raw`\[|${linkLabelEnd}?\]`,
+    /(?<=(?<before>.|^))(?<marker>[_*])\k<marker>*(?=(?<after>.|$))/.source,
+  ].join('|'),
   'gu',
 );
+const headingPunctuation = /[\p{P}\p{S}]/u;
 
 function stripHeadingEmphasis(title: string) {
+  const tokens = Array.from(title.matchAll(headingTokens));
+  const brackets: number[] = [];
+  const linkStarts = new Set<number>();
+  const linkEnds = new Set<number>();
+  for (const { 0: token, index } of tokens) {
+    if (token === '[') brackets.push(index);
+    else if (token === ']' || token === `${linkLabelEnd}]`) {
+      const opening = brackets.pop();
+      if (opening !== undefined && token.startsWith(linkLabelEnd)) {
+        linkStarts.add(opening);
+        linkEnds.add(index);
+      }
+    }
+  }
+
   const parts: string[] = [];
-  const openers: { part: number; canClose: boolean; size: number }[] = [];
+  const delimiters: { part: number; marker: string; canClose: boolean; size: number }[][] = [[]];
   let end = 0;
-  for (const match of title.matchAll(headingTokens)) {
+  for (const match of tokens) {
     const [token] = match;
     parts.push(title.slice(end, match.index), token);
     end = match.index + token.length;
-    if (!token.startsWith('_')) continue;
+    if (linkStarts.has(match.index)) delimiters.push([]);
+    if (linkEnds.has(match.index)) delimiters.pop();
+    const marker = match.groups?.marker;
+    if (!marker) continue;
+    const openers = delimiters[delimiters.length - 1];
     const before = match.groups?.before || ' ';
     const after = match.groups?.after || ' ';
-    const beforePunct = /[\p{P}\p{S}]/u.test(before);
-    const afterPunct = /[\p{P}\p{S}]/u.test(after);
+    const beforePunct = before === linkLabelEnd || headingPunctuation.test(before);
+    const afterPunct = after === linkLabelEnd || headingPunctuation.test(after);
     const left = !/\s/.test(after) && (!afterPunct || beforePunct || /\s/.test(before));
     const right = !/\s/.test(before) && (!beforePunct || afterPunct || /\s/.test(after));
-    const canOpen = left && (!right || beforePunct);
-    const canClose = right && (!left || afterPunct);
+    const canOpen = left && (marker === '*' || !right || beforePunct);
+    const canClose = right && (marker === '*' || !left || afterPunct);
     const part = parts.length - 1;
     if (canClose) {
       for (let i = openers.length - 1; i >= 0 && parts[part]; i--) {
         const opener = openers[i];
         if (
-          (opener.canClose || canOpen) &&
-          (opener.size + token.length) % 3 === 0 &&
-          token.length % 3 !== 0
+          opener.marker !== marker ||
+          ((opener.canClose || canOpen) &&
+            (opener.size + token.length) % 3 === 0 &&
+            (opener.size % 3 !== 0 || token.length % 3 !== 0))
         )
           continue;
         const used = Math.min(parts[part].length, parts[opener.part].length);
@@ -209,10 +241,19 @@ function stripHeadingEmphasis(title: string) {
         openers.length = parts[opener.part] ? i + 1 : i;
       }
     }
-    if (canOpen && parts[part]) openers.push({ part, canClose, size: token.length });
+    if (canOpen && parts[part]) openers.push({ part, marker, canClose, size: token.length });
   }
   return parts.join('') + title.slice(end);
 }
+
+const headingReference = new RegExp(
+  [
+    inlineCodeOrEscape.source,
+    /\\[[\]]/.source,
+    String.raw`\[([^\]\n${linkLabelEnd}]+)\](?:\[([^\]\n${linkLabelEnd}]*)\])?`,
+  ].join('|'),
+  'g',
+);
 
 function headingIds(text: string) {
   const anchors = new Set<string>();
@@ -220,7 +261,7 @@ function headingIds(text: string) {
   const visible = text.replace(
     markdownInline,
     (token, ticks, tag, attributes, destination, label) => {
-      if (destination) return ']';
+      if (destination) return `${linkLabelEnd}]`;
       if (label) referenceLabels.add(label.toLowerCase());
       if (ticks || token.startsWith('\\')) return token;
       if (tag && !token.startsWith('</')) {
@@ -244,8 +285,10 @@ function headingIds(text: string) {
     if (atx || underline || thematicBreak.test(line) || !line.trim()) paragraph.length = 0;
     else paragraph.push(line.trim());
     if (!title) continue;
-    const labelText = title.replace(/\[([^\]\n]+)\]\[([^\]\n]*)\]/g, (token, label, reference) =>
-      referenceLabels.has((reference || label).toLowerCase()) ? label : token,
+    const labelText = title.replace(headingReference, (token, _ticks, label, reference) =>
+      label && referenceLabels.has((reference || label).toLowerCase())
+        ? `[${label}${linkLabelEnd}]`
+        : token,
     );
     const slug = stripHeadingEmphasis(labelText)
       .toLowerCase()
