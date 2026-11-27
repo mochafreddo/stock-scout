@@ -109,15 +109,30 @@ const htmlBlockTag =
   /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t/>]|$)/i;
 const rawTextTag = /^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)/i;
 
-function htmlTags(line: string) {
-  return (line.replace(inlineCodeOrEscape, '').match(rawHtml) ?? [])
-    .filter((tag) => !tag.startsWith('<!--'))
-    .join('');
+function htmlTags(html: string) {
+  return (html.match(rawHtml) ?? []).filter((tag) => !tag.startsWith('<!--')).join('');
 }
 
 const completeTag = new RegExp(`^ {0,3}${htmlTag.source}[ \\t]*$`, 'i');
 const quotePrefix = /^ {0,3}> ?/;
 const listPrefix = /^ {0,3}(?:[-+*]|\d+[.)])(?: {1,4}(?! )| )/;
+const paragraphListStart = /^ {0,3}(?:[-+*]|1[.)]) +\S/;
+const fenceMarker = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+function openingFence(line: string) {
+  const marker = fenceMarker.exec(line);
+  if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) return marker[1];
+}
+
+function htmlBlockEnd(line: string, paragraph: boolean) {
+  const rawTag = rawTextTag.exec(line);
+  if (rawTag) return new RegExp(`</${rawTag[1]}>`, 'i');
+  if (htmlBlockTag.test(line) || (!paragraph && completeTag.test(line))) return /^\s*$/;
+  if (/^ {0,3}<!--/.test(line)) return /-->/;
+  if (/^ {0,3}<\?/.test(line)) return /\?>/;
+  if (/^ {0,3}<!\[CDATA\[/.test(line)) return /\]\]>/;
+  if (/^ {0,3}<![A-Z]/.test(line)) return />/;
+}
 
 function markdownText(path: string) {
   const source = readFileSync(path, 'utf8').replace(/\t/g, '    ').split(/\r?\n/);
@@ -160,6 +175,19 @@ function markdownText(path: string) {
     const current = continuation(source[i]);
     let line = current.line;
     if (current.depth < containers.length) {
+      if (
+        paragraph &&
+        line.trim() &&
+        !quotePrefix.test(line) &&
+        !paragraphListStart.test(line) &&
+        !atxHeading.test(line) &&
+        !thematicBreak.test(line) &&
+        !openingFence(line) &&
+        !htmlBlockEnd(line, true)
+      ) {
+        append(setextUnderline.test(line) ? `    ${line}` : line);
+        continue;
+      }
       if (htmlEnd) finishHtml();
       containers.length = current.depth;
       fence = '';
@@ -177,19 +205,13 @@ function markdownText(path: string) {
       append('');
       paragraph = false;
     }
-    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
+      const marker = fenceMarker.exec(line);
       if (marker?.[1].startsWith(fence) && !marker[2].trim()) fence = '';
       continue;
     }
     if (!htmlEnd) {
-      const rawTag = rawTextTag.exec(line);
-      if (rawTag) htmlEnd = new RegExp(`</${rawTag[1]}>`, 'i');
-      else if (htmlBlockTag.test(line) || (!paragraph && completeTag.test(line))) htmlEnd = /^\s*$/;
-      else if (/^ {0,3}<!--/.test(line)) htmlEnd = /-->/;
-      else if (/^ {0,3}<\?/.test(line)) htmlEnd = /\?>/;
-      else if (/^ {0,3}<!\[CDATA\[/.test(line)) htmlEnd = /\]\]>/;
-      else if (/^ {0,3}<![A-Z]/.test(line)) htmlEnd = />/;
+      htmlEnd = htmlBlockEnd(line, paragraph);
       if (htmlEnd) append('');
     }
     if (htmlEnd) {
@@ -198,8 +220,9 @@ function markdownText(path: string) {
       if (htmlEnd.test(line)) finishHtml();
       continue;
     }
-    if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
-      fence = marker[1];
+    const opened = openingFence(line);
+    if (opened) {
+      fence = opened;
       paragraph = false;
       append('');
       continue;

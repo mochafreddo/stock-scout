@@ -114,6 +114,8 @@ for (const mode of ['docs', 'staged', 'push']) {
     for (const [body, diagnostic] of [
       [`${html}\n\n[jump](#example)`, null],
       [`${html}\n\n[jump](#hidden)`, /missing heading #hidden/],
+      ['<div id="a`x`b"></div>\n\n[jump](#a%60x%60b)', null],
+      ['<div id="a`x`b"></div>\n\n[jump](#ab)', /missing heading #ab/],
       [
         '<pre>\n\n[hidden](missing.md)\n</pre>\n[visible](absent.md)',
         /missing local target absent.md/,
@@ -149,6 +151,20 @@ for (const mode of ['docs', 'staged', 'push']) {
       ['Paragraph\n    [visible](missing.md)', true],
       ['Paragraph\n\n    [code](missing.md)', false],
       ['Multi\n    line\n===\n\n[jump](#multi-line)', false],
+    ]) {
+      const result = checkReadme(root, base, `${body}\n`);
+      assert.equal(result.status, missing ? 1 : 0, result.stderr);
+      if (missing) assert.match(result.stderr, /missing local target missing\.md/);
+    }
+  });
+
+  test(`${mode} keeps lazy container continuations in their paragraph`, (t) => {
+    const { root, base } = fixture(t);
+    for (const [body, missing] of [
+      ['> Paragraph\n    [visible](missing.md)', true],
+      ['> Paragraph\n[label]: missing.md', false],
+      ['> Paragraph\n\n    [code](missing.md)', false],
+      ['> Paragraph\n# Next\n\n[jump](#next)', false],
     ]) {
       const result = checkReadme(root, base, `${body}\n`);
       assert.equal(result.status, missing ? 1 : 0, result.stderr);
@@ -322,6 +338,7 @@ for (const mode of ['docs', 'staged', 'push']) {
     '',
     '<section title="text > id=\'quoted\'" ID = "section"></section><A NAME=legacy></A>',
     '<span data-id="metadata" name="other"></span>',
+    '',
     '``<a id="example">`</a>``',
     '',
     '`sample',
