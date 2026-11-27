@@ -83,86 +83,168 @@ function snapshot(commit: string, destination: string) {
 const thematicBreak = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/;
 const parenthesizedTitle = /\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)/;
 const linkTitle = String.raw`"(?:\\.|[^"\\\n]|\n(?![ \t]*\n))*"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'|${parenthesizedTitle.source}`;
-const destinationCharacter = /[^\s()]/.source;
+const punctuation = /[!-/:-@[-`{-~]/.source;
+const markdownEscape = new RegExp(String.raw`\\(${punctuation})`, 'g');
+const destinationEscape = String.raw`\\(?:${punctuation}|(?!${punctuation}))`;
+const angleDestination = String.raw`<(?:${destinationEscape}|[^<>\\\n])*>`;
+const destinationCharacter = String.raw`(?:${destinationEscape}|[^\s()\\])`;
 const githubLinkParenthesisLimit = 32;
 let destinationPart = destinationCharacter;
 for (let depth = 0; depth < githubLinkParenthesisLimit; depth++)
   destinationPart = String.raw`${destinationCharacter}|\((?:${destinationPart})*\)`;
 const inlineSpace = /[ \t]*(?:\n[ \t]*)?/.source;
 const inlineLink = new RegExp(
-  String.raw`\]\(${inlineSpace}(?<inlineTarget><[^>\n]*>|(?:${destinationPart})+)(?:(?=[ \t\n])${inlineSpace}(?:${linkTitle}))?${inlineSpace}\)`,
+  String.raw`\]\(${inlineSpace}(?<inlineTarget>${angleDestination}|(?:${destinationPart})+)(?:(?=[ \t\n])${inlineSpace}(?:${linkTitle}))?${inlineSpace}\)`,
   'g',
 );
 const referenceDefinition = new RegExp(
-  String.raw`^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:${linkTitle}))?[ \t]*$`,
+  String.raw`^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget>${angleDestination}|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:${linkTitle}))?[ \t]*$`,
   'gm',
 );
 
 const htmlTag = /<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/;
 const rawHtml = new RegExp([/<!--[\s\S]*?(?:-->|$)/.source, htmlTag.source].join('|'), 'gi');
 
+const htmlBlockTag =
+  /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t/>]|$)/i;
+const rawTextTag = /^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)/i;
+
+function htmlTags(line: string) {
+  return (line.replace(inlineCodeOrEscape, '').match(rawHtml) ?? [])
+    .filter((tag) => !tag.startsWith('<!--'))
+    .join('');
+}
+
+const completeTag = new RegExp(`^ {0,3}${htmlTag.source}[ \\t]*$`, 'i');
+const quotePrefix = /^ {0,3}> ?/;
+const listPrefix = /^ {0,3}(?:[-+*]|\d+[.)])(?: {1,4}(?! )| )/;
+
 function markdownText(path: string) {
-  let blockEnd = '';
-  const quotePrefix = /^ {0,3}> ?/;
-  const listPrefix = /^ {0,3}(?:[-+*]|\d+[.)])(?: {1,4}(?! )| )/;
+  const source = readFileSync(path, 'utf8').replace(/\t/g, '    ').split(/\r?\n/);
   const containers: (number | 'quote')[] = [];
-  return readFileSync(path, 'utf8')
-    .split(/\r?\n/)
-    .map((line) => {
-      let content = line.replace(/\t/g, '    ');
-      let depth = 0;
-      for (const container of containers) {
-        if (container === 'quote') {
-          const quote = quotePrefix.exec(content);
-          if (!quote) break;
-          content = content.slice(quote[0].length);
-        } else {
-          if (content.slice(0, container).trim()) break;
-          content = content.slice(container);
-        }
-        depth++;
+  const lines: string[] = [];
+  const references = new Map<number, RegExpExecArray>();
+  const definition = new RegExp(referenceDefinition, 'my');
+  let offset = 0;
+  let paragraph = false;
+  let fence = '';
+  let htmlEnd: RegExp | undefined;
+  const htmlLines: string[] = [];
+
+  function append(line: string) {
+    lines.push(line);
+    offset += line.length + 1;
+  }
+  function finishHtml() {
+    append(htmlTags(htmlLines.join('\n')));
+    append('');
+    htmlLines.length = 0;
+    htmlEnd = undefined;
+  }
+  function continuation(line: string) {
+    let depth = 0;
+    for (const container of containers) {
+      if (container === 'quote') {
+        const quote = quotePrefix.exec(line);
+        if (!quote) break;
+        line = line.slice(quote[0].length);
+      } else {
+        if (line.slice(0, container).trim()) break;
+        line = line.slice(container);
       }
-      if (depth < containers.length) {
-        containers.length = depth;
-        blockEnd = '';
-      }
-      while (!blockEnd && !thematicBreak.test(content)) {
-        const quote = quotePrefix.exec(content)?.[0];
-        const prefix = quote ?? listPrefix.exec(content)?.[0];
-        if (!prefix) break;
-        containers.push(quote ? 'quote' : prefix.length);
-        content = content.slice(prefix.length);
-      }
-      if (!content.trim()) return '';
-      if (blockEnd === '-->' || (!blockEnd && /^ {0,3}<!--/.test(content))) {
-        const end = content.indexOf('-->');
-        if (end < 0) {
-          blockEnd = '-->';
-          return '';
-        }
-        blockEnd = '';
-        return (content.slice(end + 3).match(rawHtml) ?? [])
-          .filter((tag) => !tag.startsWith('<!--'))
-          .join('');
-      }
-      const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content);
-      if (blockEnd) {
+      depth++;
+    }
+    return { depth, line };
+  }
+  for (let i = 0; i < source.length; i++) {
+    const current = continuation(source[i]);
+    let line = current.line;
+    if (current.depth < containers.length) {
+      if (htmlEnd) finishHtml();
+      containers.length = current.depth;
+      fence = '';
+      paragraph = false;
+      append('');
+    }
+    while (!htmlEnd && !fence && !thematicBreak.test(line)) {
+      const quote = quotePrefix.exec(line)?.[0];
+      const prefix = quote ?? listPrefix.exec(line)?.[0];
+      if (!prefix) break;
+      containers.push(quote ? 'quote' : prefix.length);
+      line = line.slice(prefix.length);
+    }
+    if (containers.length > current.depth) {
+      append('');
+      paragraph = false;
+    }
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker?.[1].startsWith(fence) && !marker[2].trim()) fence = '';
+      continue;
+    }
+    if (!htmlEnd) {
+      const rawTag = rawTextTag.exec(line);
+      if (rawTag) htmlEnd = new RegExp(`</${rawTag[1]}>`, 'i');
+      else if (htmlBlockTag.test(line) || (!paragraph && completeTag.test(line))) htmlEnd = /^\s*$/;
+      else if (/^ {0,3}<!--/.test(line)) htmlEnd = /-->/;
+      else if (/^ {0,3}<\?/.test(line)) htmlEnd = /\?>/;
+      else if (/^ {0,3}<!\[CDATA\[/.test(line)) htmlEnd = /\]\]>/;
+      else if (/^ {0,3}<![A-Z]/.test(line)) htmlEnd = />/;
+      if (htmlEnd) append('');
+    }
+    if (htmlEnd) {
+      paragraph = false;
+      htmlLines.push(line);
+      if (htmlEnd.test(line)) finishHtml();
+      continue;
+    }
+    if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
+      fence = marker[1];
+      paragraph = false;
+      append('');
+      continue;
+    }
+    if (!paragraph && line.startsWith('    ')) continue;
+    if (!paragraph && /^ {0,3}\[[^\]]+\]:/.test(line)) {
+      const candidate = [line];
+      for (let j = i + 1; j < source.length; j++) {
+        const next = continuation(source[j]);
         if (
-          marker &&
-          marker[1][0] === blockEnd[0] &&
-          marker[1].length >= blockEnd.length &&
-          !marker[2].trim()
+          next.depth !== containers.length ||
+          !next.line.trim() ||
+          quotePrefix.test(next.line) ||
+          listPrefix.test(next.line) ||
+          atxHeading.test(next.line) ||
+          thematicBreak.test(next.line)
         )
-          blockEnd = '';
-        return '';
+          break;
+        candidate.push(next.line);
       }
-      if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
-        blockEnd = marker[1];
-        return '';
+      const text = candidate.join('\n');
+      definition.lastIndex = 0;
+      let consumed = false;
+      for (let match = definition.exec(text); match; match = definition.exec(text)) {
+        match.index = offset;
+        references.set(offset + match[0].indexOf('['), match);
+        append(match[0]);
+        i += match[0].split('\n').length;
+        definition.lastIndex++;
+        consumed = true;
       }
-      return containers.length > depth ? `\n${content}` : content;
-    })
-    .join('\n');
+      if (consumed) {
+        i--;
+        continue;
+      }
+    }
+    append(line);
+    paragraph =
+      !!line.trim() &&
+      !atxHeading.test(line) &&
+      !(paragraph && setextUnderline.test(line)) &&
+      !thematicBreak.test(line);
+  }
+  if (htmlEnd) finishHtml();
+  return { text: lines.join('\n'), references };
 }
 
 const inlineCodeOrEscape = /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)/g;
@@ -170,12 +252,10 @@ const atxHeading = /^ {0,3}#{1,6}(?=[ \t]|$)/;
 const setextUnderline = /^ {0,3}(?:=+|-+)[ \t]*$/;
 const markdownInline = new RegExp(
   [
-    /^ {4}.*$/.source,
     inlineCodeOrEscape.source,
     /<!--(?:[^\n]|\n(?![ \t]*\n))*?-->/.source,
     htmlTag.source,
     inlineLink.source,
-    referenceDefinition.source,
     `(?<atx>${atxHeading.source})`,
     `(?<blockBreak>${setextUnderline.source}|${thematicBreak.source})`,
     /\\[[\]]|\[|\]|\n(?:[ \t]*\n)?/.source,
@@ -183,13 +263,18 @@ const markdownInline = new RegExp(
   'gim',
 );
 
-function* markdownMatches(text: string) {
+function* markdownMatches({ text, references }: ReturnType<typeof markdownText>) {
   const pattern = new RegExp(markdownInline);
   let labels = 0;
   let heading = false;
   for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
     const [token] = match;
-    if (match.groups?.atx) {
+    const reference = token === '[' && references.get(match.index);
+    if (reference) {
+      yield reference;
+      pattern.lastIndex = reference.index + reference[0].length;
+      labels = 0;
+    } else if (match.groups?.atx) {
       labels = 0;
       heading = true;
     } else if (token.startsWith('\n')) {
@@ -296,20 +381,25 @@ const headingReference = new RegExp(
   'g',
 );
 
-function headingIds(text: string) {
+function headingIds(document: ReturnType<typeof markdownText>) {
+  const { text } = document;
   const anchors = new Set<string>();
   const referenceLabels = new Set<string>();
   const pieces: string[] = [];
   let end = 0;
-  for (const match of markdownMatches(text)) {
-    const [token, ticks, tag, attributes, destination, label] = match;
+  for (const match of markdownMatches(document)) {
+    const [token, ticks, tag, attributes, destination] = match;
     pieces.push(text.slice(end, match.index));
     end = match.index + token.length;
     if (destination) {
       pieces.push(`${linkLabelEnd}]`);
       continue;
     }
-    if (label) referenceLabels.add(label.toLowerCase());
+    if (match.groups?.referenceTarget) {
+      referenceLabels.add(match[1].toLowerCase());
+      pieces.push('\n');
+      continue;
+    }
     if (ticks || token.startsWith('\\')) {
       pieces.push(token);
       continue;
@@ -360,7 +450,10 @@ function checkLinks(root: string, files: string[], headingCache?: Map<string, Se
     for (const match of markdownMatches(markdownText(source))) {
       const destination = match.groups?.inlineTarget ?? match.groups?.referenceTarget;
       if (!destination) continue;
-      const link = destination.replace(/^<|>$/g, '');
+      const link = (destination.startsWith('<') ? destination.slice(1, -1) : destination).replace(
+        markdownEscape,
+        '$1',
+      );
       if (/^[a-z][a-z\d+.-]*:/i.test(link) || link.startsWith('//')) continue;
       const [path, fragment] = link.split('#');
       const target = path
