@@ -116,6 +116,9 @@ for (const mode of ['docs', 'staged', 'push']) {
       [`${html}\n\n[jump](#hidden)`, /missing heading #hidden/],
       ['<div id="a`x`b"></div>\n\n[jump](#a%60x%60b)', null],
       ['<div id="a`x`b"></div>\n\n[jump](#ab)', /missing heading #ab/],
+      ['<textarea id="real"><a id="sample"></textarea>\n\n[jump](#real)', null],
+      ['<textarea><a id="sample"></textarea>\n\n[jump](#sample)', /missing heading #sample/],
+      ['<![CDATA[<a id="sample">]]>\n\n[jump](#sample)', /missing heading #sample/],
       [
         '<pre>\n\n[hidden](missing.md)\n</pre>\n[visible](absent.md)',
         /missing local target absent.md/,
@@ -138,6 +141,8 @@ for (const mode of ['docs', 'staged', 'push']) {
       ['Text\n[label]: [visible](missing.md)', true],
       ['[first]: #start\n[second]: missing.md', true],
       ['[first]: #start\n    [code](missing.md)', false],
+      ['[example]:\n```js\nconst n = 1;\n```', false],
+      ['[example]:\n<div>\n[hidden](missing.md)\n</div>', false],
     ]) {
       const result = checkReadme(root, base, `# Start\n\n${body}\n`);
       assert.equal(result.status, missing ? 1 : 0, result.stderr);
@@ -150,6 +155,10 @@ for (const mode of ['docs', 'staged', 'push']) {
     for (const [body, missing] of [
       ['Paragraph\n    [visible](missing.md)', true],
       ['Paragraph\n\n    [code](missing.md)', false],
+      ['Paragraph\n2. <div>\n   [visible](missing.md)', true],
+      ['Paragraph\n2. [label]: missing.md', false],
+      ['1. First\n2. <div>\n   [hidden](missing.md)', false],
+      ['Paragraph\n> 2. <div>\n>    [hidden](missing.md)', false],
       ['Multi\n    line\n===\n\n[jump](#multi-line)', false],
     ]) {
       const result = checkReadme(root, base, `${body}\n`);

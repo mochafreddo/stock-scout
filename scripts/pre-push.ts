@@ -103,14 +103,35 @@ const referenceDefinition = new RegExp(
 );
 
 const htmlTag = /<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/;
-const rawHtml = new RegExp([/<!--[\s\S]*?(?:-->|$)/.source, htmlTag.source].join('|'), 'gi');
+const rawHtml = new RegExp(
+  [
+    /<!--[\s\S]*?(?:-->|$)/.source,
+    /<!\[CDATA\[[\s\S]*?(?:\]\]>|$)/.source,
+    /<\?[\s\S]*?(?:\?>|$)/.source,
+    /<![A-Z][^>]*(?:>|$)/.source,
+    htmlTag.source,
+  ].join('|'),
+  'gi',
+);
 
 const htmlBlockTag =
   /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t/>]|$)/i;
 const rawTextTag = /^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)/i;
 
 function htmlTags(html: string) {
-  return (html.match(rawHtml) ?? []).filter((tag) => !tag.startsWith('<!--')).join('');
+  const pattern = new RegExp(rawHtml);
+  const tags: string[] = [];
+  for (let match = pattern.exec(html); match; match = pattern.exec(html)) {
+    const [tag, name] = match;
+    if (!name) continue;
+    tags.push(tag);
+    if (!tag.startsWith('</') && /^(?:script|style|textarea)$/i.test(name)) {
+      const closing = new RegExp(`</${name}\\s*>`, 'gi');
+      closing.lastIndex = pattern.lastIndex;
+      pattern.lastIndex = closing.exec(html) ? closing.lastIndex : html.length;
+    }
+  }
+  return tags.join('');
 }
 
 const completeTag = new RegExp(`^ {0,3}${htmlTag.source}[ \\t]*$`, 'i');
@@ -132,6 +153,17 @@ function htmlBlockEnd(line: string, paragraph: boolean) {
   if (/^ {0,3}<\?/.test(line)) return /\?>/;
   if (/^ {0,3}<!\[CDATA\[/.test(line)) return /\]\]>/;
   if (/^ {0,3}<![A-Z]/.test(line)) return />/;
+}
+
+function startsBlock(line: string) {
+  return (
+    quotePrefix.test(line) ||
+    listPrefix.test(line) ||
+    atxHeading.test(line) ||
+    thematicBreak.test(line) ||
+    openingFence(line) ||
+    htmlBlockEnd(line, true)
+  );
 }
 
 function markdownText(path: string) {
@@ -175,16 +207,7 @@ function markdownText(path: string) {
     const current = continuation(source[i]);
     let line = current.line;
     if (current.depth < containers.length) {
-      if (
-        paragraph &&
-        line.trim() &&
-        !quotePrefix.test(line) &&
-        !paragraphListStart.test(line) &&
-        !atxHeading.test(line) &&
-        !thematicBreak.test(line) &&
-        !openingFence(line) &&
-        !htmlBlockEnd(line, true)
-      ) {
+      if (paragraph && line.trim() && !startsBlock(line)) {
         append(setextUnderline.test(line) ? `    ${line}` : line);
         continue;
       }
@@ -196,15 +219,14 @@ function markdownText(path: string) {
     }
     while (!htmlEnd && !fence && !thematicBreak.test(line)) {
       const quote = quotePrefix.exec(line)?.[0];
-      const prefix = quote ?? listPrefix.exec(line)?.[0];
+      const list = !paragraph || paragraphListStart.test(line) ? listPrefix.exec(line)?.[0] : null;
+      const prefix = quote ?? list;
       if (!prefix) break;
       containers.push(quote ? 'quote' : prefix.length);
       line = line.slice(prefix.length);
-    }
-    if (containers.length > current.depth) {
-      append('');
       paragraph = false;
     }
+    if (containers.length > current.depth) append('');
     if (fence) {
       const marker = fenceMarker.exec(line);
       if (marker?.[1].startsWith(fence) && !marker[2].trim()) fence = '';
@@ -232,15 +254,7 @@ function markdownText(path: string) {
       const candidate = [line];
       for (let j = i + 1; j < source.length; j++) {
         const next = continuation(source[j]);
-        if (
-          next.depth !== containers.length ||
-          !next.line.trim() ||
-          quotePrefix.test(next.line) ||
-          listPrefix.test(next.line) ||
-          atxHeading.test(next.line) ||
-          thematicBreak.test(next.line)
-        )
-          break;
+        if (next.depth !== containers.length || !next.line.trim() || startsBlock(next.line)) break;
         candidate.push(next.line);
       }
       const text = candidate.join('\n');
