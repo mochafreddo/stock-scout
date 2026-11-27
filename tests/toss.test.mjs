@@ -817,6 +817,49 @@ test('Toss CLI rejects oversized rate headers without poisoning shared state', a
   }
 });
 
+for (const [valid, oversized] of [
+  ['Retry-After', 'X-RateLimit-Reset'],
+  ['X-RateLimit-Reset', 'Retry-After'],
+]) {
+  test(`Toss CLI shares ${valid} despite oversized ${oversized}`, async (t) => {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(f, [
+      { status: 429, headers: { [valid]: '4.25', [oversized]: '9'.repeat(400) }, body: {} },
+    ]);
+    assert.equal(JSON.parse(r.stdout).error.code, 'RESPONSE_INVALID');
+    const next = await runCli(f);
+    assert.equal(next.status, 0, next.stdout);
+    assert.deepEqual(
+      next.requests.map(({ method }) => method),
+      ['POST', 'GET', 'GET'],
+    );
+    assert.ok(next.requests[2].at - next.requests[1].at >= 4250);
+  });
+}
+
+test('Toss CLI preserves access and storage errors on mixed rate headers', async (t) => {
+  for (const [status, code] of [
+    [401, 'AUTH_FAILED'],
+    [403, 'PERMISSION_DENIED'],
+  ]) {
+    for (const failSave of [false, true]) {
+      const f = fixture();
+      t.after(f.close);
+      const headers = { 'Retry-After': '4', 'X-RateLimit-Reset': '9'.repeat(400) };
+      const r = await runCli(f, [], undefined, {
+        TEST_AUTH_STEPS: JSON.stringify([{ status, headers, body: {} }]),
+        ...(failSave ? { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' } : {}),
+      });
+      assert.equal(JSON.parse(r.stdout).error.code, failSave ? 'AUTH_STORAGE' : code);
+      assert.deepEqual(
+        r.requests.map(({ method }) => method),
+        ['POST'],
+      );
+    }
+  }
+});
+
 test('Toss CLI applies a peer Retry-After while another process is waiting to send', async () => {
   const f = fixture();
   const gate = join(f.directory, 'cooldown-gate');
