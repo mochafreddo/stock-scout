@@ -94,6 +94,19 @@ assert.ok(
 const batch = !Object.hasOwn(output.source, 'interval');
 const rows = batch ? output.data : [{ ...output, symbol: output.source.symbol }];
 assert.ok(emptyError || rows.length > 0, 'daily candle batch requires at least one symbol row');
+if (batch && !emptyError) {
+  const states = rows.map(({ status }) => status);
+  assert.ok(
+    states.every((status) => ['success', 'partial', 'error', 'not_queried'].includes(status)),
+    'daily candle batch row status required',
+  );
+  const expected = states.every((status) => status === 'success')
+    ? 'success'
+    : states.some((status) => status === 'success' || status === 'partial')
+      ? 'partial'
+      : 'error';
+  assert.equal(output.status, expected, 'daily candle batch status must match its rows');
+}
 const data = rows.map((row) => {
   const usable = row.status === 'success' || row.status === 'partial';
   if (usable)

@@ -981,6 +981,29 @@ function issuedToken(value, seconds) {
   return { body: { access_token: value, token_type: 'Bearer', expires_in: seconds } };
 }
 
+test('prices uses the shared clock for expiration after a backward wall clock correction', async (t) => {
+  for (const jump of [0, -30000]) {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(
+      f,
+      [{ expectedToken: 'synthetic-next', body: { result: [price] } }],
+      undefined,
+      {
+        TEST_AUTH_STEPS: JSON.stringify([
+          { ...issuedToken('synthetic-short', 1), responseWallJump: jump },
+          issuedToken('synthetic-next', 60),
+        ]),
+      },
+    );
+    assert.deepEqual(
+      r.requests.map(({ method, authorization }) => authorization ?? method),
+      ['POST', 'POST', 'Bearer synthetic-next'],
+    );
+    assert.equal(r.status, 0, r.stderr);
+  }
+});
+
 test('prices combines expiry during the shared wait with provider recovery and transient retry', async (t) => {
   const f = fixture();
   t.after(f.close);
@@ -1023,7 +1046,11 @@ test('prices checks expiry and the execution deadline after reservation director
       join(f.directory, 'state.json'),
       JSON.stringify(
         authState({
-          token: { value: 'synthetic-cached', expiresAt: start + 16000 },
+          token: {
+            value: 'synthetic-cached',
+            expiresAt: start + 16000,
+            expiresNs: (BigInt(start + 16000) * 1000000n).toString().padStart(30, '0'),
+          },
         }),
       ),
       { mode: 0o600 },

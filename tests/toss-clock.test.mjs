@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, price, readRequests, runCli, waitForFile } from './toss-cli-helper.mjs';
 
-test('v2 reservation with incompatible legacy sentinel remains queryable by the current CLI', async () => {
+test('v2 reservation with the legacy sentinel refreshes a token without a shared expiration', async () => {
   const f = fixture();
   try {
     writeFileSync(
@@ -25,10 +25,17 @@ test('v2 reservation with incompatible legacy sentinel remains queryable by the 
       }),
       { mode: 0o600 },
     );
+    const readiness = await runCli(f, [], ['readiness'], { TEST_PLATFORM: 'darwin' });
+    assert.deepEqual(JSON.parse(readiness.stdout).data, [
+      { readiness: 'ready', token: 'refresh_required', reasons: [] },
+    ]);
+    assert.equal(readiness.requests.length, 0);
     const result = await runCli(f, [], undefined, { TEST_PLATFORM: 'darwin' });
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.equal(result.requests.length, 1);
-    assert.equal(result.requests[0].method, 'GET');
+    assert.deepEqual(
+      result.requests.map(({ method }) => method),
+      ['POST', 'GET'],
+    );
   } finally {
     f.close();
   }

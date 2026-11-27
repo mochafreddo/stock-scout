@@ -176,6 +176,15 @@ for (const signalName of ['SIGTERM', 'SIGINT']) {
     });
     const completed = Promise.allSettled([run]);
     const signal = AbortSignal.timeout(5000);
+    let inject = signalName === 'SIGINT';
+    const fetchResponse = globalThis.fetch;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+      if (inject && options.headers?.connection === 'close') {
+        inject = false;
+        throw new TypeError('synthetic observation failure', { cause: { code: 'EPIPE' } });
+      }
+      return fetchResponse(url, options);
+    });
     try {
       while (!existsSync(marker('url'))) await delay(10, undefined, { signal });
       const url = readFileSync(marker('url'), 'utf8');
@@ -198,10 +207,11 @@ for (const signalName of ['SIGTERM', 'SIGINT']) {
           await fetch(url, { headers: { connection: 'close' }, signal });
         } catch (error) {
           if (error.cause?.code === 'ECONNREFUSED') break;
-          if (error.cause?.code !== 'ECONNRESET') throw error;
+          if (!['ECONNRESET', 'EPIPE'].includes(error.cause?.code)) throw error;
         }
         await delay(10, undefined, { signal });
       }
+      assert.equal(inject, false);
       assert.ok(run.child.kill(signalName));
       writeFileSync(marker('release'), '');
       const { stdout, stderr } = await run;

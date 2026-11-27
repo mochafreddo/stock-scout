@@ -82,17 +82,18 @@ function snapshot(commit: string, destination: string) {
 
 const thematicBreak = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/;
 const parenthesizedTitle = /\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)/;
+const linkTitle = String.raw`"(?:\\.|[^"\\\n]|\n(?![ \t]*\n))*"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'|${parenthesizedTitle.source}`;
 const destinationCharacter = /[^\s()]/.source;
 const githubLinkParenthesisLimit = 32;
 let destinationPart = destinationCharacter;
 for (let depth = 0; depth < githubLinkParenthesisLimit; depth++)
   destinationPart = String.raw`${destinationCharacter}|\((?:${destinationPart})*\)`;
 const inlineLink = new RegExp(
-  String.raw`\]\(\s*(?<inlineTarget><[^>\n]*>|(?:${destinationPart})+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|${parenthesizedTitle.source}))?\s*\)`,
+  String.raw`\]\(\s*(?<inlineTarget><[^>\n]*>|(?:${destinationPart})+)(?:\s+(?:${linkTitle}))?\s*\)`,
   'g',
 );
 const referenceDefinition = new RegExp(
-  String.raw`^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n]|\n(?![ \t]*\n))*"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'|${parenthesizedTitle.source}))?[ \t]*$`,
+  String.raw`^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:${linkTitle}))?[ \t]*$`,
   'gm',
 );
 
@@ -172,9 +173,39 @@ const markdownInline = new RegExp(
     htmlTag.source,
     inlineLink.source,
     referenceDefinition.source,
+    /(?<atx>^ {0,3}#{1,6}(?=[ \t]|$))/.source,
+    /(?<setext>^ {0,3}=+[ \t]*$)/.source,
+    thematicBreak.source,
+    /\\[[\]]|\[|\]|\n(?:[ \t]*\n)?/.source,
   ].join('|'),
   'gim',
 );
+
+function* markdownMatches(text: string) {
+  const pattern = new RegExp(markdownInline);
+  let labels = 0;
+  let heading = false;
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    const [token] = match;
+    if (match.groups?.atx) {
+      labels = 0;
+      heading = true;
+    } else if (token.startsWith('\n')) {
+      if (heading || token.length > 1) labels = 0;
+      heading = false;
+    } else if (match.groups?.setext || thematicBreak.test(token)) {
+      labels = 0;
+    } else if (token === '[') labels++;
+    else if (token === ']') labels = Math.max(0, labels - 1);
+    else if (match.groups?.inlineTarget) {
+      if (labels && (!heading || !token.includes('\n'))) yield match;
+      else pattern.lastIndex = match.index + 1;
+      labels = Math.max(0, labels - 1);
+    } else {
+      yield match;
+    }
+  }
+}
 
 const linkLabelEnd = '\uE000';
 const headingTokens = new RegExp(
@@ -258,24 +289,33 @@ const headingReference = new RegExp(
 function headingIds(text: string) {
   const anchors = new Set<string>();
   const referenceLabels = new Set<string>();
-  const visible = text.replace(
-    markdownInline,
-    (token, ticks, tag, attributes, destination, label) => {
-      if (destination) return `${linkLabelEnd}]`;
-      if (label) referenceLabels.add(label.toLowerCase());
-      if (ticks || token.startsWith('\\')) return token;
-      if (tag && !token.startsWith('</')) {
-        const attribute = /\s+([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
-        for (const [, key, double, single, bare] of attributes.matchAll(attribute)) {
-          const value = double ?? single ?? bare;
-          const name = key.toLowerCase();
-          if (value && (name === 'id' || (tag.toLowerCase() === 'a' && name === 'name')))
-            anchors.add(value);
-        }
+  const pieces: string[] = [];
+  let end = 0;
+  for (const match of markdownMatches(text)) {
+    const [token, ticks, tag, attributes, destination, label] = match;
+    pieces.push(text.slice(end, match.index));
+    end = match.index + token.length;
+    if (destination) {
+      pieces.push(`${linkLabelEnd}]`);
+      continue;
+    }
+    if (label) referenceLabels.add(label.toLowerCase());
+    if (ticks || token.startsWith('\\')) {
+      pieces.push(token);
+      continue;
+    }
+    if (tag && !token.startsWith('</')) {
+      const attribute = /\s+([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
+      for (const [, key, double, single, bare] of attributes.matchAll(attribute)) {
+        const value = double ?? single ?? bare;
+        const name = key.toLowerCase();
+        if (value && (name === 'id' || (tag.toLowerCase() === 'a' && name === 'name')))
+          anchors.add(value);
       }
-      return token.replace(/[^\n]/g, '');
-    },
-  );
+    }
+    pieces.push(token.replace(/[^\n]/g, ''));
+  }
+  const visible = pieces.join('') + text.slice(end);
   const ids = new Set<string>();
   const paragraph: string[] = [];
   for (const line of visible.split('\n')) {
@@ -307,7 +347,7 @@ function checkLinks(root: string, files: string[], headingCache?: Map<string, Se
     const source = join(root, file);
     if (!realpathSync(source).startsWith(`${root}/`))
       throw new Error(`${file}: document leaves snapshot`);
-    for (const match of markdownText(source).matchAll(markdownInline)) {
+    for (const match of markdownMatches(markdownText(source))) {
       const destination = match.groups?.inlineTarget ?? match.groups?.referenceTarget;
       if (!destination) continue;
       const link = destination.replace(/^<|>$/g, '');

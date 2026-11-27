@@ -183,7 +183,7 @@ node scripts/toss.ts prices AAPL,MSFT staleAfterSeconds=300
 
 정상 상태에서 `pending:true`는 `AUTH_ISSUANCE_UNKNOWN`, 아직 지나지 않은 예약 또는 대기 기록의 마감은 `WAIT_REQUIRED`, `client.lock`·`issuance.lock`·`account.lock`의 존재는 `LOCK_PRESENT`입니다. 여러 사유가 있으면 이 순서로 함께 반환하며 기다리거나 잠금을 빼앗지 않습니다. 만료된 대기 기록도 그대로 남깁니다. `pending:true`는 유효한 캐시 토큰이 있더라도 표시하는 보수적인 점검 차단입니다. 정상 조회의 기존 토큰 선택·복구 규칙은 바꾸지 않습니다.
 
-`token`은 `valid`·`missing`·`expired`·`refresh_required`·`unknown` 중 하나입니다. `valid`는 로컬 만료까지 15초를 초과해 남은 캐시, `refresh_required`는 만료 전이지만 정상 조회에서 재발급할 캐시입니다. 상태 검증을 마치지 못하면 `unknown`입니다. 토큰 부재·만료·재발급 필요만으로는 로컬 차단으로 처리하지 않으므로 다른 문제가 없다면 `ready`입니다. 일반 조회는 기존 계약대로 토큰을 자동 발급할 수 있습니다. 이를 공급자의 인증 거부나 상태 전환 승인으로 해석하지 마세요.
+`token`은 `valid`·`missing`·`expired`·`refresh_required`·`unknown` 중 하나입니다. `valid`는 로컬 만료까지 15초를 초과해 남은 캐시입니다. `refresh_required`는 만료가 임박했거나 벽시계상 만료 전인 기존 v2 캐시에 공유 단조 시계 만료가 없어 일반 조회에서 재발급할 상태입니다. 상태 검증을 마치지 못하면 `unknown`입니다. 토큰 부재·만료·재발급 필요만으로는 로컬 차단으로 처리하지 않으므로 다른 문제가 없다면 `ready`입니다. 일반 조회는 기존 계약대로 토큰을 자동 발급할 수 있습니다. 이를 공급자의 인증 거부나 상태 전환 승인으로 해석하지 마세요.
 
 정상 예시의 자료 부분은 `"data":[{"readiness":"ready","token":"missing","reasons":[]}]`입니다. 발급 미확인·대기·잠금이 함께 있으면 `"data":[{"readiness":"blocked","token":"missing","reasons":["AUTH_ISSUANCE_UNKNOWN","WAIT_REQUIRED","LOCK_PRESENT"]}]`와 `"error":{"code":"AUTH_ISSUANCE_UNKNOWN"}`을 반환합니다.
 
@@ -529,7 +529,7 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 
 같은 클라이언트를 사용하는 모든 로컬 실행은 같은 `TOSS_STATE_DIR`를 사용해야 합니다. 별도 디렉터리·다른 프로그램·다른 기기는 이 공통 제한에 포함되지 않습니다. 승인된 위치 외에 실제 자격 증명이나 토큰을 복사하지 마세요.
 
-공통 모듈이 `state.json`·`cooldown-<UUID>.json`·`client.lock`·`issuance.lock`의 쓰기를 소유합니다. 상태 파일에는 자격 증명 지문·토큰·만료 시각·예약 규약 버전·부팅과 시계 기준·다음 호출 가능 시각·발급 결과 미확인 표시를 저장합니다. 금융 응답은 별도 파일이나 로그에 기본 저장하지 않습니다. 토큰 만료는 발급 시작 시각과 공식 `expires_in` 초로 보수적으로 계산하며 KIS의 KST 해석·5분 제한을 사용하지 않습니다. 잠금 안에서 캐시를 다시 읽고 유효 토큰을 재사용하며, 토큰 발급에는 자동 재시도를 하지 않습니다.
+공통 모듈이 `state.json`·`cooldown-<UUID>.json`·`client.lock`·`issuance.lock`의 쓰기를 소유합니다. 상태 파일에는 자격 증명 지문·토큰·만료 시각·예약 규약 버전·부팅과 시계 기준·다음 호출 가능 시각·발급 결과 미확인 표시를 저장합니다. 금융 응답은 별도 파일이나 로그에 기본 저장하지 않습니다. 토큰 만료는 실제 발급 POST가 시작된 때의 벽시계와 공유 단조 시계 각각에 공식 `expires_in` 초를 더해 계산합니다. 두 시계 중 먼저 도달한 만료를 적용합니다. 새 잠금은 사용 전에, 임시 보호 파일은 교체 전에 실제 권한을 확인합니다. 현재 `umask`에서 권한 조건을 만족하지 못하면 해당 호출이 만든 항목을 정리하고 `AUTH_STORAGE`로 종료합니다. 잠금 안에서 캐시를 다시 읽고 유효 토큰을 재사용하며, 토큰 발급에는 자동 재시도를 하지 않습니다.
 
 상태 파일의 읽기·저장 상한은 전체 JSON을 UTF-8로 직렬화한 16,384바이트입니다. 토큰과 만료 시각뿐 아니라 모든 상태 메타데이터를 포함하며, 한도와 같은 크기는 허용합니다. 발급 응답을 반영한 전체 상태가 상한을 넘으면 첫 실행은 `AUTH_RESPONSE_INVALID`로 실패합니다. 토큰을 잘라 저장하거나 읽을 수 없는 상태를 게시하지 않으며, 읽을 수 있는 발급 결과 미확인 상태를 보존합니다.
 
@@ -549,7 +549,7 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 
 1. 같은 클라이언트와 상태를 쓰는 구버전·새 버전 실행을 모두 종료하고, 이후 실행기가 새 버전만 사용하도록 확인하세요. 남은 잠금의 삭제도 실행 종료 확인과 별도 승인 없이 수행하지 마세요.
 2. 공급자가 요구한 남은 대기를 확인하고 실제 대기를 마치세요. `cooldown-<UUID>.json`에 남은 대기도 포함합니다. 구형 상태의 벽시계 마감만으로 시계 보정 이전의 잔여 시간을 복원할 수 없습니다. 남은 대기를 확인할 수 없으면 전환과 조회를 보류하세요.
-3. 실제 보호 상태의 읽기·수정 승인을 받은 뒤, 자격 증명 지문·토큰·만료 시각·`pending`과 다른 상태 필드는 보존하고 예약 필드만 현재 부팅·시계 기준의 v2로 원자적으로 바꾸세요. 이미 대기를 마친 상태의 `clock.nextNs`는 `"000000000000000000000000000000"`으로 시작할 수 있습니다. 남은 기록의 정리는 모든 관련 실행 종료·대기 완료 확인과 별도 승인을 받은 뒤에만 수행하세요. `account.json`과 자격 증명은 바꾸지 마세요. `pending:true`는 이 전환으로 해소되지 않습니다.
+3. 실제 보호 상태의 읽기·수정 승인을 받은 뒤, 예약 필드를 현재 부팅·시계 기준의 v2로 바꾸고 이전 기준으로 기록한 토큰의 공유 단조 시계 만료를 같은 원자 저장에서 제거하세요. 자격 증명 지문·토큰 값·벽시계 만료·`pending`과 나머지 상태 필드는 보존하세요. 이미 대기를 마친 상태의 `clock.nextNs`는 `"000000000000000000000000000000"`으로 시작할 수 있습니다. 남은 기록의 정리는 모든 관련 실행 종료·대기 완료 확인과 별도 승인을 받은 뒤에만 수행하세요. `account.json`과 자격 증명은 바꾸지 마세요. `pending:true`는 이 전환으로 해소되지 않습니다.
 4. 새 실행기로 다시 조회하세요. 이 안내는 전환 명령이나 실제 상태 변경의 승인이 아닙니다. 상태 파일을 삭제하여 인증을 다시 시작하는 방법으로 대체하지 마세요.
 
 ## 응답 계약
@@ -602,7 +602,7 @@ stdout의 버전 1 JSON 하나에서 `data`는 요청 순서의 종목별 결과
 
 예약은 `process.hrtime.bigint()`의 공유 단조 기준을 사용하며 벽시계 전진·후진 보정으로 대기를 줄이지 않습니다. 매 전송 직전 잠금 안에서 최신 상태를 다시 읽고 대기 후에도 재검사합니다. 공급자 대기는 새 실행에서도 같은 마감으로 이어지므로 매번 전체 길이를 다시 시작하지 않습니다. 실행·개별 HTTP 예산의 기존 벽시계·프로세스 경과 검사도 유지하며 실행 예산에는 공유 시계의 경과를 함께 반영합니다.
 
-근거를 확인한 [Node.js 24.0.0의 Darwin libuv](https://github.com/nodejs/node/blob/v24.0.0/deps/uv/src/unix/darwin.c)와 [로컬 libuv 1.52.1](https://github.com/libuv/libuv/blob/v1.52.1/src/unix/darwin.c)은 `mach_continuous_time()`을 사용합니다. [Apple 헤더](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/mach/mach_time.h)는 이 시계가 절전 중에도 진행한다고 명시합니다. [Linux libuv](https://github.com/libuv/libuv/blob/v1.x/src/unix/linux.c)의 고해상도 시계는 `CLOCK_MONOTONIC`이며 [공식 매뉴얼](https://man7.org/linux/man-pages/man3/clock_gettime.3.html)에 따라 벽시계의 불연속 보정을 따르지 않고 절전 시간은 세지 않습니다. Linux 절전은 예약 대기를 더 길게 만드는 보수적인 방향입니다. NTP의 점진적 속도 보정까지 영향을 받지 않는 시계라는 뜻은 아닙니다. [시간 네임스페이스](https://man7.org/linux/man-pages/man7/time_namespaces.7.html)가 다르면 같은 부팅이어도 직접 비교하지 않습니다.
+근거를 확인한 [Node.js 24.0.0의 Darwin libuv](https://github.com/nodejs/node/blob/v24.0.0/deps/uv/src/unix/darwin.c)와 [로컬 libuv 1.52.1](https://github.com/libuv/libuv/blob/v1.52.1/src/unix/darwin.c)은 `mach_continuous_time()`을 사용합니다. [Apple 헤더](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/mach/mach_time.h)는 이 시계가 절전 중에도 진행한다고 명시합니다. [Linux libuv](https://github.com/libuv/libuv/blob/v1.x/src/unix/linux.c)의 고해상도 시계는 `CLOCK_MONOTONIC`이며 [공식 매뉴얼](https://man7.org/linux/man-pages/man3/clock_gettime.3.html)에 따라 벽시계의 불연속 보정을 따르지 않고 절전 시간은 세지 않습니다. Linux 절전은 예약 대기를 더 길게 만드는 보수적인 방향입니다. 같은 부팅·시계 기준을 공유하는 새 실행기끼리만 토큰의 공유 단조 만료를 비교합니다. Linux 절전과 벽시계 후퇴가 겹치면 두 시계가 모두 실제 경과를 놓칠 수 있습니다. 단조 시계는 NTP의 점진적 속도 보정에 영향을 받을 수 있습니다. [시간 네임스페이스](https://man7.org/linux/man-pages/man7/time_namespaces.7.html)가 다르면 같은 부팅이어도 직접 비교하지 않습니다.
 
 2026-11-14 로컬 macOS arm64의 Node.js 26.12.1·libuv 1.52.1에서 독립 자식 프로세스의 시각이 부모의 호출 전후 시각 사이에 드는지 확인했습니다. 프로세스별 상대 시계로 바꾼 음성 대조는 비교를 거부했습니다. 이는 같은 부팅에서의 로컬 비교 실험이며 실제 운영체제 시각 변경·절전·재부팅 실험이나 Linux 실행 검증은 아닙니다. 회귀 검사는 실제 CLI에 합성 HTTP·시계 보정·부팅 기준 변경을 적용합니다.
 

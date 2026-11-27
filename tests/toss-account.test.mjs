@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, runAccountCli, runCli, selectAccount } from './toss-cli-helper.mjs';
@@ -143,6 +143,36 @@ test('deadline before account save preserves the previous selection for the next
     assert.equal(next.requests.at(-1).account, '741');
   } finally {
     f.close();
+  }
+});
+
+test('account selection rejects unreadable protection modes before replacing the saved selection', async (t) => {
+  for (const setting of ['TEST_CLI_UMASK', 'TEST_TEMP_FILE_UMASK']) {
+    await t.test(setting, async () => {
+      const f = fixture();
+      try {
+        assert.equal((await selection(f)).status, 0);
+        const path = join(f.directory, 'account.json');
+        const original = readFileSync(path);
+        const failed = await selection(f, 852, ['buying-power'], 'secondary', {
+          [setting]: String(0o200),
+        });
+        assert.equal(failed.status, 1, failed.stdout);
+        assert.equal(JSON.parse(failed.stdout).error.code, 'AUTH_STORAGE');
+        assert.equal(failed.requests.length, 0);
+        assert.deepEqual(readFileSync(path), original);
+        const first = await runCli(f, [], undefined, { [setting]: String(0o200) });
+        assert.equal(first.status, 1, first.stdout);
+        assert.equal(JSON.parse(first.stdout).error.code, 'AUTH_STORAGE');
+        assert.equal(first.requests.length, 0);
+        assert.ok(
+          !readdirSync(f.directory).some((name) => name.endsWith('.lock') || name.endsWith('.tmp')),
+        );
+        assert.equal((await selection(f, 852, ['buying-power'], 'secondary')).status, 0);
+      } finally {
+        f.close();
+      }
+    });
   }
 });
 

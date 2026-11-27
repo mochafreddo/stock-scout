@@ -57,7 +57,11 @@ export function authState(changes = {}) {
       nextNs: '0'.repeat(30),
     },
     pending: false,
-    token: { value: 'synthetic-token', expiresAt: Date.parse('2026-11-07T15:00:00Z') },
+    token: {
+      value: 'synthetic-token',
+      expiresAt: Date.parse('2026-11-07T15:00:00Z'),
+      expiresNs: '000000000001794063600000000000',
+    },
     ...changes,
   };
 }

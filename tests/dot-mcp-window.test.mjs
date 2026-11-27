@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { runScheduledDot } from '../scripts/run-dot-mcp.ts';
+import { runFreshCli } from './toss-cli-helper.mjs';
 
 test('a Mac waking after the KST close skips the tunnel and records only safe metadata', async (t) => {
   const now = () => Date.parse('2026-11-24T12:20:00Z');
@@ -483,9 +484,6 @@ checkQueryResults('stock', [
 ]);
 
 test('market errors expose only CLI error fields and candle results identify the requested page', async (t) => {
-  const { options, start } = fixture(t);
-  const run = await start();
-  const program = readFileSync(options.launcher, 'utf8');
   const stock = { name: 'stock', arguments: { symbol: 'DEMO' } };
   const choices = ['NYSE', 'NASDAQ'].map((market) => ({
     symbol: 'DEMO',
@@ -499,17 +497,37 @@ test('market errors expose only CLI error fields and candle results identify the
     name: 'candles',
     arguments: { symbol: 'DEMO', count: 2, adjusted: false, date },
   };
-  const page = {
-    provider: 'tossinvest',
-    endpoint: '/api/v1/candles',
+  const stockRow = {
     symbol: 'DEMO',
-    interval: '1d',
-    count: 2,
-    adjusted: false,
-    date,
-    dateTimeZone: 'America/New_York',
-    before,
+    name: 'Synthetic stock',
+    englishName: 'Synthetic stock',
+    market: 'NYSE',
+    isinCode: 'US0000000001',
+    securityType: 'STOCK',
+    isCommonShare: true,
+    status: 'ACTIVE',
+    currency: 'USD',
+    sharesOutstanding: '100',
   };
+  const args = ['candles', 'DEMO', '1d', 'count=2', 'adjusted=false', `date=${date}`];
+  async function datedPage(candlePage, exit) {
+    const result = await runFreshCli(
+      [
+        { path: '/api/v1/stocks', body: { result: [stockRow] } },
+        { path: '/api/v1/candles', body: { result: candlePage } },
+      ],
+      args,
+    );
+    assert.equal(result.status, exit, result.stderr);
+    return result.out;
+  }
+  const last = await datedPage({ candles: [], nextBefore: null }, 0);
+  const next = await datedPage({ candles: [], nextBefore: before }, 2);
+  const unknown = await datedPage({ candles: [] }, 2);
+  const noMarket = structuredClone(last);
+  delete noMarket.source.market;
+  const noPage = structuredClone(last);
+  delete noPage.page;
   for (const [label, params, response, valid] of [
     ...[
       [{ code: 'IDENTITY_AMBIGUOUS', choices }, true],
@@ -534,18 +552,43 @@ test('market errors expose only CLI error fields and candle results identify the
     ].map(([label, fields, valid]) => [
       label,
       candles,
-      envelope(page.endpoint, [], { source: { ...page, ...fields } }),
+      { ...last, source: { ...last.source, ...fields } },
       valid,
     ]),
+    ['actual next page', candles, next, true],
+    ['actual unknown boundary', candles, unknown, true],
+    [
+      'partial terminal page',
+      candles,
+      { ...last, status: 'partial', omissions: [{ reason: 'invalid_item' }] },
+      true,
+    ],
+    ['missing output page', candles, noPage, false],
+    ['missing confirmed market', candles, noMarket, false],
+    [
+      'future continuation',
+      candles,
+      { ...next, page: { nextBefore: '2026-11-25T05:00:00Z' } },
+      false,
+    ],
+    [
+      'inconsistent continuation',
+      candles,
+      { ...next, omissions: [{ reason: 'pagination_unknown' }] },
+      false,
+    ],
     [
       'unexpected dated page on cursor request',
       { name: 'candles', arguments: { symbol: 'DEMO', count: 2, adjusted: false, before } },
-      envelope(page.endpoint, [], { source: page }),
+      last,
       false,
     ],
   ]) {
-    await t.test(label, async () => {
-      const exit = response.status === 'error' ? 1 : 0;
+    await t.test(label, async (t) => {
+      const { options, start } = fixture(t);
+      const run = await start();
+      const program = readFileSync(options.launcher, 'utf8');
+      const exit = { success: 0, error: 1, partial: 2 }[response.status];
       writeFileSync(
         options.launcher,
         program.replace(

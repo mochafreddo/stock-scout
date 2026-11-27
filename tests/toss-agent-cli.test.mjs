@@ -774,6 +774,18 @@ test('batch consumer preserves usable partial coverage, empty pages, errors and 
   }
 });
 
+test('consumer rejects invalid or inconsistent batch row status before analysis', () => {
+  const result = run('success', 'candles-batch', 'DEMO,OTHER', 'count=2');
+  assert.equal(result.status, 0, result.stderr);
+  for (const invalid of [undefined, 'unknown', 'partial']) {
+    const output = JSON.parse(result.stdout);
+    output.data[0].status = invalid;
+    const consumed = consume({ stdout: JSON.stringify(output) });
+    assert.equal(consumed.status, 1, consumed.stdout);
+    assert.equal(consumed.stdout, '');
+  }
+});
+
 test('consumer keeps unconfirmed trade dates null and distinguishes a successful empty batch row', () => {
   for (const args of [
     ['candles', 'DEMO', '1d'],

@@ -115,6 +115,29 @@ for (const mode of ['docs', 'staged', 'push']) {
     }
   });
 
+  test(`${mode} checks multiline quoted link titles and escaped label openers`, (t) => {
+    const { root, base } = fixture(t);
+    writeFileSync(join(root, 'guide.md'), '# Details\n');
+    for (const [text, diagnostic] of [
+      ['[guide](guide.md#details "a\nb")', null],
+      ["[guide](missing.md 'a\nb')", /missing local target missing\.md/],
+      ['[guide](missing.md "a\nb")', /missing local target missing\.md/],
+      ['[guide](missing.md "a\n\nb")', null],
+      [String.raw`\[not a link](missing.md)`, null],
+      ['# [\n\\[not a link](missing.md)', null],
+      [String.raw`\\[even slash](missing.md)`, /missing local target missing\.md/],
+      [
+        String.raw`\[not a link](missing.md) [visible](absent.md)`,
+        /missing local target absent\.md/,
+      ],
+      ['[Use it](guide.md "a\nb") [other](guide.md)\n===\n\n[Go](#use-it-other)', null],
+    ]) {
+      const result = checkReadme(root, base, `${text}\n`);
+      assert.equal(result.status, diagnostic ? 1 : 0, result.stderr || text);
+      if (diagnostic) assert.match(result.stderr, diagnostic);
+    }
+  });
+
   test(`${mode} checks rendered emphasis in Markdown heading anchors`, (t) => {
     const { root, base } = fixture(t);
     writeFileSync(join(root, 'guide.md'), '# Details\n');

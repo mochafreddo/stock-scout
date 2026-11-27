@@ -93,6 +93,24 @@ test('readiness reports missing and expired cached tokens without issuing them',
   }
 });
 
+test('readiness and prices reject malformed shared token expiration without HTTP', async () => {
+  const f = fixture();
+  try {
+    const state = authState();
+    state.token.expiresNs = null;
+    writeState(f, state);
+    const ready = await inspect(f);
+    assert.equal(ready.status, 1, ready.stdout);
+    assert.equal(ready.out.error.code, 'AUTH_STORAGE');
+    const prices = await runCli(f);
+    assert.equal(prices.status, 1, prices.stdout);
+    assert.equal(JSON.parse(prices.stdout).error.code, 'AUTH_STORAGE');
+    assert.equal(prices.requests.length, 0);
+  } finally {
+    f.close();
+  }
+});
+
 test('readiness exposes each lock, pending issuance and active reservation independently', async () => {
   for (const kind of ['client.lock', 'issuance.lock', 'account.lock', 'pending', 'reservation']) {
     const f = fixture();

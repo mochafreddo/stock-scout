@@ -11,6 +11,19 @@ if (process.env.TEST_CLI_TRACE)
     mode: 0o600,
   });
 
+if (process.env.TEST_CLI_UMASK) process.umask(Number(process.env.TEST_CLI_UMASK));
+if (process.env.TEST_TEMP_FILE_UMASK) {
+  const open = fs.openSync;
+  mock.method(fs, 'openSync', (path, ...args) => {
+    if (typeof path !== 'string' || !path.endsWith('.tmp')) return open(path, ...args);
+    const previous = process.umask(Number(process.env.TEST_TEMP_FILE_UMASK));
+    try {
+      return open(path, ...args);
+    } finally {
+      process.umask(previous);
+    }
+  });
+}
 const nativeHrtime = process.hrtime.bigint.bind(process.hrtime);
 function publishJson(path, value) {
   const pending = `${path}.pending`;
@@ -108,8 +121,12 @@ if (process.env.TEST_WAIT_GATE) {
 const readlinkSync = fs.readlinkSync;
 if (process.env.TEST_RELEASE_CLIENT_LOCK) {
   const lstatSync = fs.lstatSync;
+  let released = false;
   mock.method(fs, 'lstatSync', (path, ...args) => {
-    if (path === `${process.env.TOSS_STATE_DIR}/client.lock`) fs.rmdirSync(path);
+    if (!released && path === `${process.env.TOSS_STATE_DIR}/client.lock`) {
+      fs.rmdirSync(path);
+      released = true;
+    }
     return lstatSync(path, ...args);
   });
 }

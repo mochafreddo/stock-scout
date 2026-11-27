@@ -108,11 +108,12 @@ test('Toss CLI applies the 16384-byte limit to the whole UTF-8 state including m
       assert.equal(initial.status, 0, initial.stdout + initial.stderr);
       const path = join(f.directory, 'state.json');
       const state = JSON.parse(readFileSync(path, 'utf8'));
+      const issuedToken = state.token;
       delete state.token;
       state.note = '';
       const candidate = {
         ...state,
-        token: { value: token, expiresAt: Date.parse('2026-11-07T15:00:00Z') },
+        token: { ...issuedToken, value: token },
       };
       const padding = bytes - Buffer.byteLength(JSON.stringify(candidate));
       state.note = '한'.repeat(Math.floor(padding / 3)) + 'x'.repeat(padding % 3);
@@ -166,10 +167,11 @@ for (const operation of ['reuse', 'cooldown'])
       assert.equal(initial.status, 0, initial.stdout + initial.stderr);
       const path = join(f.directory, 'state.json');
       const state = JSON.parse(readFileSync(path, 'utf8'));
+      const issuedToken = state.token;
       delete state.token;
       const candidate = {
         ...state,
-        token: { value: '', expiresAt: Date.parse('2026-11-07T15:00:00Z') },
+        token: { ...issuedToken, value: '' },
       };
       const token = 'x'.repeat(16384 - Buffer.byteLength(JSON.stringify(candidate)));
       writeFileSync(path, JSON.stringify(state));

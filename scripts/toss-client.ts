@@ -98,13 +98,20 @@ type State = {
   nextAt: null;
   clock: { id: string; nextNs: string };
   pending: boolean;
-  token?: { value: string; expiresAt: number };
+  token?: { value: string; expiresAt: number; expiresNs?: string };
 };
+function tokenRemaining(token: NonNullable<State['token']>) {
+  const wall = token.expiresAt - Date.now();
+  if (wall <= 0) return wall;
+  if (token.expiresNs === undefined) return null;
+  return Math.min(wall, Number(BigInt(token.expiresNs) - process.hrtime.bigint()) / 1000000);
+}
+
 function tokenStatus(token: State['token']) {
   if (!token) return 'missing';
-  const remaining = token.expiresAt - Date.now();
-  if (remaining <= 0) return 'expired';
-  return remaining > 15000 ? 'valid' : 'refresh_required';
+  const remaining = tokenRemaining(token);
+  if (remaining !== null && remaining <= 0) return 'expired';
+  return (remaining ?? 0) > 15000 ? 'valid' : 'refresh_required';
 }
 type ReadinessObservation = { token: ReturnType<typeof tokenStatus>; reasons: string[] };
 export function readinessResult(
@@ -219,6 +226,7 @@ function save(
     );
     try {
       try {
+        if ((fstatSync(fd).mode & 0o777) !== 0o600) throw new TossError('AUTH_STORAGE');
         writeFileSync(fd, serialized);
         fsyncSync(fd);
       } finally {
@@ -271,6 +279,7 @@ async function withLock<T>(
       }
     }
     try {
+      secure(lock, true);
       return await operation();
     } finally {
       rmdirSync(lock);
@@ -332,9 +341,9 @@ class SharedRequestCoordinator {
       save(this.directory, state);
     });
   }
-  recordIssuedToken(value: string, expiresAt: number) {
+  recordIssuedToken(token: NonNullable<State['token']>) {
     return this.locked(async (state) => {
-      state.token = { value, expiresAt };
+      state.token = token;
       state.pending = false;
       save(this.directory, state, 'state.json', 'AUTH_RESPONSE_INVALID');
     });
@@ -354,7 +363,9 @@ class SharedRequestCoordinator {
         const previousToken = state.token;
         if (
           token &&
-          (!previousToken || previousToken.value !== token || previousToken.expiresAt <= Date.now())
+          (!previousToken ||
+            previousToken.value !== token ||
+            (tokenRemaining(previousToken) ?? 0) <= 0)
         )
           throw new TossError('AUTH_TOKEN_UNAVAILABLE');
         const previousPending = state.pending;
@@ -373,7 +384,7 @@ class SharedRequestCoordinator {
           }
           throw error;
         }
-        if (previousToken && token && previousToken.expiresAt <= Date.now())
+        if (previousToken && token && (tokenRemaining(previousToken) ?? 0) <= 0)
           throw new TossError('AUTH_TOKEN_UNAVAILABLE');
         startFetch();
         this.reserve(state);
@@ -421,7 +432,10 @@ class SharedRequestCoordinator {
       (state.token !== undefined &&
         (typeof state.token?.value !== 'string' ||
           !/^[A-Za-z0-9._~+/-]+=*$/.test(state.token.value) ||
-          !Number.isFinite(state.token.expiresAt)))
+          !Number.isFinite(state.token.expiresAt) ||
+          (state.token.expiresNs !== undefined &&
+            (typeof state.token.expiresNs !== 'string' ||
+              !/^\d{30}$/.test(state.token.expiresNs)))))
     )
       throw new TossError('AUTH_STORAGE');
     if (state.version === undefined && Number.isFinite(state.nextAt) && state.nextAt >= 0)
@@ -742,6 +756,7 @@ export class TossClient {
     signal.addEventListener('abort', abort, { once: true });
     let flight: Promise<Response> | undefined;
     let receivedResponse: Response | undefined;
+    let requestShared = 0n;
     let requestWall = 0,
       requestStarted = 0,
       requestLimit = 0;
@@ -760,6 +775,7 @@ export class TossClient {
         () => {
           this.requests++;
           requestWall = Date.now();
+          requestShared = process.hrtime.bigint();
           requestStarted = performance.now();
           requestLimit = Math.max(1, Math.floor(Math.min(15000, this.remaining())));
           timer = setTimeout(() => controller.abort(), requestLimit);
@@ -837,7 +853,7 @@ export class TossClient {
         })(),
       ]);
       checkRequest();
-      return { ...result, requestWall };
+      return { ...result, requestWall, requestShared };
     } catch (error) {
       if (
         receivedResponse &&
@@ -846,7 +862,7 @@ export class TossClient {
         !(error instanceof TossError && error.code === 'AUTH_STORAGE')
       ) {
         controller.abort();
-        return { response: receivedResponse, body: undefined, requestWall };
+        return { response: receivedResponse, body: undefined, requestWall, requestShared };
       }
       if (error instanceof TossError && TERMINAL_ERRORS.includes(error.code)) this.stopped = error;
       try {
@@ -868,14 +884,19 @@ export class TossClient {
           if (
             token &&
             token.value !== recovery?.rejected &&
-            (recovery ? token.expiresAt > Date.now() : tokenStatus(token) === 'valid')
+            (recovery ? (tokenRemaining(token) ?? 0) > 0 : tokenStatus(token) === 'valid')
           )
             return token.value;
           if (pending) throw new TossError('AUTH_ISSUANCE_UNKNOWN');
           return undefined;
         });
         if (cached) return cached;
-        const { response, body, requestWall: issuedAt } = await this.transmit('/oauth2/token');
+        const {
+          response,
+          body,
+          requestWall: issuedAt,
+          requestShared,
+        } = await this.transmit('/oauth2/token');
         if (!response.ok) {
           if (response.status >= 400 && response.status < 500)
             await this.coordination.recordRejectedIssuance().catch((error) => {
@@ -906,7 +927,10 @@ export class TossClient {
         const token = body.access_token;
         const expiresAt = issuedAt + body.expires_in * 1000;
         this.secrets.add(token);
-        await this.coordination.recordIssuedToken(token, expiresAt);
+        const expiresNs = (requestShared + BigInt(body.expires_in) * 1000000000n)
+          .toString()
+          .padStart(30, '0');
+        await this.coordination.recordIssuedToken({ value: token, expiresAt, expiresNs });
         return token;
       })
       .catch((error: TossError) => {

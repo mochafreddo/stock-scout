@@ -2,8 +2,8 @@ import { type ChildProcess, execFile } from 'node:child_process';
 import { candleQuery } from './toss-candles.ts';
 import { discoveryQuery } from './toss-discovery.ts';
 import { priceQuery } from './toss-prices.ts';
-import { isinPattern, marketPattern } from './toss-stock.ts';
-import { record, symbolPattern, validTime } from './toss-values.ts';
+import { isinPattern, marketPattern, usMarkets } from './toss-stock.ts';
+import { laterThan, record, symbolPattern, validTime } from './toss-values.ts';
 
 type CliResponse = Record<string, unknown> & {
   data: Record<string, unknown>[];
@@ -125,6 +125,24 @@ function readinessState({ source, data, error }: CliResponse, exitCode: number) 
     return readiness;
 }
 
+function matchesCandlePage(response: CliResponse, before: string | null) {
+  const { page, omissions = [], status } = response;
+  if (!record(page)) return false;
+  const hasNext = omissions.some(({ reason }) => reason === 'next_page');
+  const unknown = omissions.some(({ reason }) => reason === 'pagination_unknown');
+  const { nextBefore } = page;
+  if (nextBefore === null) return !hasNext && !unknown;
+  if (status !== 'partial') return false;
+  if (nextBefore === undefined) return unknown && !hasNext;
+  return (
+    typeof nextBefore === 'string' &&
+    validTime(nextBefore) &&
+    (before === null || !laterThan(nextBefore, before)) &&
+    hasNext &&
+    !unknown
+  );
+}
+
 function matchesMarketQuery(response: CliResponse, args: string[]) {
   const { source, data, status, omissions = [] } = response;
   const [command, target] = args;
@@ -166,12 +184,17 @@ function matchesMarketQuery(response: CliResponse, args: string[]) {
       );
     }
     case 'candles': {
-      const expected: Record<string, unknown> = candleQuery(target, args.slice(2)).source;
+      const request = candleQuery(target, args.slice(2));
+      const expected: Record<string, unknown> = request.source;
       return (
         source.endpoint === '/api/v1/candles' &&
         ['symbol', 'interval', 'count', 'adjusted', 'date', 'dateTimeZone', 'before'].every(
           (key) => source[key] === expected[key],
-        )
+        ) &&
+        (status === 'error' ||
+          ((request.date === null ||
+            (typeof source.market === 'string' && usMarkets.has(source.market))) &&
+            matchesCandlePage(response, request.query.get('before'))))
       );
     }
     case 'sessions':
