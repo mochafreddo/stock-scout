@@ -1,4 +1,4 @@
-import { accountPageQuery } from './toss-account-pagination.ts';
+import { accountPage, accountPageQuery } from './toss-account-pagination.ts';
 import { TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
 import {
@@ -189,18 +189,6 @@ export function orderResult(value: unknown, request: ReturnType<typeof orderQuer
       return;
     }
   });
-  if (value.hasNext) result.omissions.push({ reason: 'next_page' });
-  if (value.hasNext && value.nextCursor == null)
-    result.omissions.push({ reason: 'missing_next_cursor' });
-  return {
-    ...result,
-    ...(paginated
-      ? {
-          page: {
-            hasNext: value.hasNext,
-            ...('nextCursor' in value ? { nextCursor: value.nextCursor } : {}),
-          },
-        }
-      : {}),
-  };
+  if (!paginated) return result;
+  return { ...result, page: accountPage(value.hasNext, value.nextCursor, result.omissions) };
 }

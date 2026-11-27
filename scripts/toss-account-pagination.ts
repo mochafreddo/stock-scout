@@ -39,6 +39,25 @@ export function accountPageQuery(
   return { query, context };
 }
 
+export function accountPage(
+  hasNext: boolean,
+  nextCursor: unknown,
+  omissions: { reason: string }[],
+) {
+  if (hasNext) {
+    omissions.push({ reason: 'next_page' });
+    if (nextCursor == null) omissions.push({ reason: 'missing_next_cursor' });
+    if (
+      typeof nextCursor === 'string' &&
+      (nextCursor.includes('\0') || !nextCursor.isWellFormed())
+    ) {
+      omissions.push({ reason: 'unusable_next_cursor' });
+      return { hasNext };
+    }
+  }
+  return nextCursor === undefined ? { hasNext } : { hasNext, nextCursor };
+}
+
 export function accountCursorPayload(
   clientId: string,
   accountSeq: string,

@@ -1,4 +1,4 @@
-import { accountPageQuery } from './toss-account-pagination.ts';
+import { accountPage, accountPageQuery } from './toss-account-pagination.ts';
 import { TossError } from './toss-client.ts';
 import { validDate } from './toss-sessions.ts';
 import { decimal, items, record, validTime } from './toss-values.ts';
@@ -103,6 +103,5 @@ export function transactionResult(
       isCancellation: row.isCancellation,
     };
   });
-  if (value.hasNext) result.omissions.push({ reason: 'next_page' });
-  return { ...result, page: { hasNext: value.hasNext, nextCursor: value.nextCursor } };
+  return { ...result, page: accountPage(value.hasNext, value.nextCursor, result.omissions) };
 }
