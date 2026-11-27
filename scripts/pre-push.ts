@@ -88,8 +88,9 @@ const githubLinkParenthesisLimit = 32;
 let destinationPart = destinationCharacter;
 for (let depth = 0; depth < githubLinkParenthesisLimit; depth++)
   destinationPart = String.raw`${destinationCharacter}|\((?:${destinationPart})*\)`;
+const inlineSpace = /[ \t]*(?:\n[ \t]*)?/.source;
 const inlineLink = new RegExp(
-  String.raw`\]\(\s*(?<inlineTarget><[^>\n]*>|(?:${destinationPart})+)(?:\s+(?:${linkTitle}))?\s*\)`,
+  String.raw`\]\(${inlineSpace}(?<inlineTarget><[^>\n]*>|(?:${destinationPart})+)(?:(?=[ \t\n])${inlineSpace}(?:${linkTitle}))?${inlineSpace}\)`,
   'g',
 );
 const referenceDefinition = new RegExp(
@@ -165,6 +166,8 @@ function markdownText(path: string) {
 }
 
 const inlineCodeOrEscape = /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)/g;
+const atxHeading = /^ {0,3}#{1,6}(?=[ \t]|$)/;
+const setextUnderline = /^ {0,3}=+[ \t]*$/;
 const markdownInline = new RegExp(
   [
     /^ {4}.*$/.source,
@@ -173,9 +176,8 @@ const markdownInline = new RegExp(
     htmlTag.source,
     inlineLink.source,
     referenceDefinition.source,
-    /(?<atx>^ {0,3}#{1,6}(?=[ \t]|$))/.source,
-    /(?<setext>^ {0,3}=+[ \t]*$)/.source,
-    thematicBreak.source,
+    `(?<atx>${atxHeading.source})`,
+    `(?<blockBreak>${setextUnderline.source}|${thematicBreak.source})`,
     /\\[[\]]|\[|\]|\n(?:[ \t]*\n)?/.source,
   ].join('|'),
   'gim',
@@ -193,12 +195,20 @@ function* markdownMatches(text: string) {
     } else if (token.startsWith('\n')) {
       if (heading || token.length > 1) labels = 0;
       heading = false;
-    } else if (match.groups?.setext || thematicBreak.test(token)) {
+    } else if (match.groups?.blockBreak) {
       labels = 0;
     } else if (token === '[') labels++;
     else if (token === ']') labels = Math.max(0, labels - 1);
     else if (match.groups?.inlineTarget) {
-      if (labels && (!heading || !token.includes('\n'))) yield match;
+      const continuation = token.split('\n').slice(1);
+      const crossesBlock =
+        continuation.length > 0 &&
+        (heading ||
+          continuation.some(
+            (line) =>
+              atxHeading.test(line) || setextUnderline.test(line) || thematicBreak.test(line),
+          ));
+      if (labels && !crossesBlock) yield match;
       else pattern.lastIndex = match.index + 1;
       labels = Math.max(0, labels - 1);
     } else {

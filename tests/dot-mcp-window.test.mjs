@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { runScheduledDot } from '../scripts/run-dot-mcp.ts';
-import { runFreshCli } from './toss-cli-helper.mjs';
+import { runCli, runFreshCli, fixture as tossFixture } from './toss-cli-helper.mjs';
 
 test('a Mac waking after the KST close skips the tunnel and records only safe metadata', async (t) => {
   const now = () => Date.parse('2026-11-24T12:20:00Z');
@@ -524,6 +524,28 @@ test('market errors expose only CLI error fields and candle results identify the
   const last = await datedPage({ candles: [], nextBefore: null }, 0);
   const next = await datedPage({ candles: [], nextBefore: before }, 2);
   const unknown = await datedPage({ candles: [] }, 2);
+  const validCandle = {
+    timestamp: before,
+    openPrice: '10',
+    highPrice: '12',
+    lowPrice: '9',
+    closePrice: '11',
+    volume: '20',
+    currency: 'USD',
+  };
+  const partialLast = await datedPage({ candles: [validCandle, null], nextBefore: null }, 2);
+  const endpoint = '/api/v1/candles';
+  const protectedFixture = tossFixture(endpoint);
+  t.after(protectedFixture.close);
+  const denied = await runCli(
+    protectedFixture,
+    [{ path: endpoint, status: 403, body: { error: { code: 'ip-not-allowed' } } }],
+    ['candles', 'DEMO', '1d'],
+    { TEST_CLIENT_SECRET: endpoint },
+  );
+  assert.equal(denied.status, 1, denied.stderr);
+  const redacted = JSON.parse(denied.stdout);
+  assert.deepEqual(redacted.source, { provider: 'tossinvest' });
   const noMarket = structuredClone(last);
   delete noMarket.source.market;
   const noPage = structuredClone(last);
@@ -557,12 +579,8 @@ test('market errors expose only CLI error fields and candle results identify the
     ]),
     ['actual next page', candles, next, true],
     ['actual unknown boundary', candles, unknown, true],
-    [
-      'partial terminal page',
-      candles,
-      { ...last, status: 'partial', omissions: [{ reason: 'invalid_item' }] },
-      true,
-    ],
+    ['actual redacted error', { name: 'candles', arguments: { symbol: 'DEMO' } }, redacted, true],
+    ['partial terminal page', candles, partialLast, true],
     ['missing output page', candles, noPage, false],
     ['missing confirmed market', candles, noMarket, false],
     [
