@@ -152,6 +152,11 @@ mock.method(fs, 'fsyncSync', (descriptor) => {
     fs.fstatSync(descriptor).isDirectory()
   )
     throw new Error('synthetic-secret');
+  if (
+    process.env.TEST_FAIL_RESERVATION_SYNC === (started ? 'after' : 'before') &&
+    fs.fstatSync(descriptor).isDirectory()
+  )
+    throw new Error('synthetic-secret');
   const result = fsyncSync(descriptor);
   if (directorySyncDelay && fs.fstatSync(descriptor).isDirectory()) {
     mock.timers.tick(directorySyncDelay);
