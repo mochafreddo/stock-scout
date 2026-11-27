@@ -774,6 +774,32 @@ test('batch consumer preserves usable partial coverage, empty pages, errors and 
   }
 });
 
+test('consumer rejects malformed batch failures before emitting analysis', async (t) => {
+  const result = run('partial', 'candles-batch', 'DEMO,DENIED,LATER');
+  assert.equal(result.status, 2, result.stderr);
+  const [usable, failed] = JSON.parse(result.stdout).data;
+  const unsafe = { ...failed.error, message: 'raw provider message' };
+  for (const [name, target, patch] of [
+    ['missing error', 1, { error: undefined }],
+    ['unsafe error', 1, { error: unsafe }],
+    ['unsafe error on usable row', 0, { error: unsafe }],
+    ['unsafe top-level error', 'envelope', { error: unsafe }],
+    ['missing reason', 2, { reason: undefined }],
+    ['blank reason', 2, { reason: ' ' }],
+    ['non-string reason', 2, { reason: {} }],
+    ['bars on failed row', 1, { data: usable.data }],
+    ['bars on unqueried row', 2, { data: usable.data }],
+  ]) {
+    await t.test(name, () => {
+      const output = JSON.parse(result.stdout);
+      Object.assign(target === 'envelope' ? output : output.data[target], patch);
+      const consumed = consume({ stdout: JSON.stringify(output) });
+      assert.equal(consumed.status, 1, consumed.stderr);
+      assert.equal(consumed.stdout, '');
+    });
+  }
+});
+
 test('consumer rejects invalid or inconsistent batch row status before analysis', () => {
   const result = run('success', 'candles-batch', 'DEMO,OTHER', 'count=2');
   assert.equal(result.status, 0, result.stderr);
