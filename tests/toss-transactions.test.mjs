@@ -128,6 +128,32 @@ test('transactions attach settlement semantics only after account validation (ch
   });
 });
 
+test('transactions preserve page data when the next cursor cannot be passed through argv', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  await select(f);
+  for (const [rows, cursor] of [
+    [[row], 'a\0b'],
+    [[], 'a\ud800b'],
+    [[row], 'a\udc00b'],
+  ]) {
+    const result = await runCli(
+      f,
+      [accounts, page(rows, true, cursor)],
+      ['transactions', ...period],
+    );
+    assert.equal(result.status, 2, result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'partial');
+    assert.deepEqual(output.data, rows);
+    assert.deepEqual(output.page, { hasNext: true });
+    assert.deepEqual(output.omissions, [
+      { reason: 'next_page' },
+      { reason: 'unusable_next_cursor' },
+    ]);
+  }
+});
+
 test('empty transaction pages preserve provider cursors and bind continuation to account and filters', async () => {
   const f = fixture();
   try {
@@ -346,19 +372,27 @@ test('transaction cursors remain opaque and account identifiers never appear as 
     await select(f);
     const first = await runCli(
       f,
-      [accounts, page([], true, 'a+/b==')],
+      [accounts, page([], true, '한🧭+/b==')],
       ['transactions', ...period],
     );
     assert.equal(first.status, 2, first.stdout);
     const output = JSON.parse(first.stdout);
-    assert.equal(output.page.nextCursor, 'a+/b==');
+    assert.equal(output.page.nextCursor, '한🧭+/b==');
     const next = await runCli(
       f,
       [accounts, page([])],
-      ['transactions', ...period, 'cursor=a+/b==', `context=${output.page.context}`],
+      [
+        'transactions',
+        ...period,
+        `cursor=${output.page.nextCursor}`,
+        `context=${output.page.context}`,
+      ],
     );
     assert.equal(next.status, 0, next.stdout);
-    assert.equal(new URLSearchParams(next.requests.at(-1).query).get('cursor'), 'a+/b==');
+    assert.equal(
+      next.requests.at(-1).query,
+      '?from=2026-09-01&to=2026-10-31&limit=20&cursor=%ED%95%9C%F0%9F%A7%AD%2B%2Fb%3D%3D',
+    );
     const sensitive = await runCli(
       f,
       [accounts, page([], true, '741')],

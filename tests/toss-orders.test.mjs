@@ -279,21 +279,49 @@ test('conditional orders preserve both legs, optional fields and future codes', 
   }
 });
 
+test('orders preserve page data when the next cursor cannot be passed through argv', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  await select(f);
+  for (const [rows, cursor] of [
+    [[order], 'a\0b'],
+    [[], 'a\ud800b'],
+    [[order], 'a\udc00b'],
+  ]) {
+    const result = await runCli(
+      f,
+      [accounts, page('orders', rows, { hasNext: true, nextCursor: cursor })],
+      ['orders', 'CLOSED'],
+    );
+    assert.equal(result.status, 2, result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'partial');
+    assert.deepEqual(output.data, rows);
+    assert.deepEqual(output.page, { hasNext: true });
+    assert.deepEqual(output.omissions, [
+      { reason: 'next_page' },
+      { reason: 'unusable_next_cursor' },
+    ]);
+  }
+});
+
 test('order pages keep empty-page cursors and bind continuation to endpoint, account and filters', async () => {
   for (const command of ['orders', 'conditional-orders']) {
     const f = fixture();
     try {
       await select(f);
+      const cursor = command === 'orders' ? '한🧭+/b==' : 'next_cursor-1';
       const r = await runCli(
         f,
-        [accounts, page(command, [], { hasNext: true, nextCursor: 'next_cursor-1' })],
+        [accounts, page(command, [], { hasNext: true, nextCursor: cursor })],
         [command, 'CLOSED', 'symbol=AAPL'],
       );
       assert.equal(r.status, 2, r.stdout);
       const output = JSON.parse(r.stdout);
       assert.deepEqual(output.data, []);
       assert.deepEqual(output.omissions, [{ reason: 'next_page' }]);
-      const continuation = ['cursor=next_cursor-1', `context=${output.page.context}`];
+      assert.equal(output.page.nextCursor, cursor);
+      const continuation = [`cursor=${output.page.nextCursor}`, `context=${output.page.context}`];
       const next = await runCli(
         f,
         [accounts, page(command, [])],
@@ -302,7 +330,7 @@ test('order pages keep empty-page cursors and bind continuation to endpoint, acc
       assert.equal(next.status, 0, next.stdout);
       assert.equal(
         next.requests.at(-1).query,
-        '?status=CLOSED&limit=100&symbol=AAPL&cursor=next_cursor-1',
+        `?status=CLOSED&limit=100&symbol=AAPL&cursor=${encodeURIComponent(cursor)}`,
       );
       assert.deepEqual(JSON.parse(next.stdout).page, { hasNext: false, nextCursor: null });
       for (const args of [
