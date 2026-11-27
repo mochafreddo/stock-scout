@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import {
+  accessSync,
+  constants,
   cpSync,
   existsSync,
   linkSync,
@@ -79,10 +81,15 @@ function snapshot(commit: string, destination: string) {
 }
 
 const thematicBreak = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/;
-const inlineLink =
-  /\]\(\s*(?<inlineTarget><[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))?\s*\)/g;
-const referenceDefinition =
-  /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n]|\n(?![ \t]*\n))*"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'|\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)))?[ \t]*$/gm;
+const parenthesizedTitle = /\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)/;
+const inlineLink = new RegExp(
+  String.raw`\]\(\s*(?<inlineTarget><[^>\n]*>|(?:[^\s()]|\([^()\n]*\))+)(?:\s+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|${parenthesizedTitle.source}))?\s*\)`,
+  'g',
+);
+const referenceDefinition = new RegExp(
+  String.raw`^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:\n[ \t]*)?(?<referenceTarget><[^>\n]*>|\S+)(?:(?:[ \t]+|\n[ \t]*)(?:"(?:\\.|[^"\\\n]|\n(?![ \t]*\n))*"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'|${parenthesizedTitle.source}))?[ \t]*$`,
+  'gm',
+);
 
 const htmlTag = /<\/?([a-z][\w-]*)(?=[\s/>])((?:[^<>"']|"[^"]*"|'[^']*')*)>/;
 const rawHtml = new RegExp([/<!--[\s\S]*?(?:-->|$)/.source, htmlTag.source].join('|'), 'gi');
@@ -164,6 +171,49 @@ const markdownInline = new RegExp(
   'gim',
 );
 
+const headingTokens = new RegExp(
+  String.raw`${inlineCodeOrEscape.source}|\\_|(?<=(?<before>.|^))_+(?=(?<after>.|$))`,
+  'gu',
+);
+
+function stripHeadingEmphasis(title: string) {
+  const parts: string[] = [];
+  const openers: { part: number; canClose: boolean; size: number }[] = [];
+  let end = 0;
+  for (const match of title.matchAll(headingTokens)) {
+    const [token] = match;
+    parts.push(title.slice(end, match.index), token);
+    end = match.index + token.length;
+    if (!token.startsWith('_')) continue;
+    const before = match.groups?.before || ' ';
+    const after = match.groups?.after || ' ';
+    const beforePunct = /[\p{P}\p{S}]/u.test(before);
+    const afterPunct = /[\p{P}\p{S}]/u.test(after);
+    const left = !/\s/.test(after) && (!afterPunct || beforePunct || /\s/.test(before));
+    const right = !/\s/.test(before) && (!beforePunct || afterPunct || /\s/.test(after));
+    const canOpen = left && (!right || beforePunct);
+    const canClose = right && (!left || afterPunct);
+    const part = parts.length - 1;
+    if (canClose) {
+      for (let i = openers.length - 1; i >= 0 && parts[part]; i--) {
+        const opener = openers[i];
+        if (
+          (opener.canClose || canOpen) &&
+          (opener.size + token.length) % 3 === 0 &&
+          token.length % 3 !== 0
+        )
+          continue;
+        const used = Math.min(parts[part].length, parts[opener.part].length);
+        parts[part] = parts[part].slice(used);
+        parts[opener.part] = parts[opener.part].slice(used);
+        openers.length = parts[opener.part] ? i + 1 : i;
+      }
+    }
+    if (canOpen && parts[part]) openers.push({ part, canClose, size: token.length });
+  }
+  return parts.join('') + title.slice(end);
+}
+
 function headingIds(text: string) {
   const anchors = new Set<string>();
   const referenceLabels = new Set<string>();
@@ -194,10 +244,10 @@ function headingIds(text: string) {
     if (atx || underline || thematicBreak.test(line) || !line.trim()) paragraph.length = 0;
     else paragraph.push(line.trim());
     if (!title) continue;
-    const slug = title
-      .replace(/\[([^\]\n]+)\]\[([^\]\n]*)\]/g, (token, label, reference) =>
-        referenceLabels.has((reference || label).toLowerCase()) ? label : token,
-      )
+    const labelText = title.replace(/\[([^\]\n]+)\]\[([^\]\n]*)\]/g, (token, label, reference) =>
+      referenceLabels.has((reference || label).toLowerCase()) ? label : token,
+    );
+    const slug = stripHeadingEmphasis(labelText)
       .toLowerCase()
       .replace(/[^\p{L}\p{M}\p{N}_\-\s]/gu, '')
       .replace(/\s/g, '-');
@@ -445,8 +495,9 @@ function installHook(name: 'pre-commit' | 'pre-push') {
   const primaryStat = lstatSync(primary, { throwIfNoEntry: false });
   let destination = primary;
   if (primaryStat) {
-    if (!primaryStat.isFile() || !(primaryStat.mode & 0o111))
+    if (!primaryStat.isFile())
       throw new Error(`Existing ${name} hook is not a regular executable file; preserved`);
+    accessSync(primary, constants.X_OK);
     const contents = readFileSync(primary);
     if (!wrapper.equals(contents)) {
       const text = contents.toString();
@@ -468,16 +519,15 @@ function installHook(name: 'pre-commit' | 'pre-push') {
     try {
       const draft = join(temporary, name);
       writeFileSync(draft, wrapper, { flag: 'wx', mode: 0o700 });
+      accessSync(draft, constants.X_OK);
       linkSync(draft, destination);
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }
-  } else if (
-    !existing.isFile() ||
-    !(existing.mode & 0o111) ||
-    !wrapper.equals(readFileSync(destination))
-  ) {
-    throw new Error('Existing hook preserved; integrate manually');
+  } else {
+    if (!existing.isFile() || !wrapper.equals(readFileSync(destination)))
+      throw new Error('Existing hook preserved; integrate manually');
+    accessSync(destination, constants.X_OK);
   }
   process.stderr.write(`Installed ${destination}\n`);
 }

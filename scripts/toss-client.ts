@@ -339,7 +339,11 @@ class SharedRequestCoordinator {
       save(this.directory, state, 'state.json', 'AUTH_RESPONSE_INVALID');
     });
   }
-  async startRequest(issuingToken: boolean, checkRequestLimit: () => void, startFetch: () => void) {
+  async startRequest(
+    token: string | undefined,
+    checkRequestLimit: () => void,
+    startFetch: () => void,
+  ) {
     for (;;) {
       this.check();
       const delay = await this.locked(async (state) => {
@@ -348,8 +352,13 @@ class SharedRequestCoordinator {
         if (delay > 0) return delay;
         checkRequestLimit();
         const previousToken = state.token;
+        if (
+          token &&
+          (!previousToken || previousToken.value !== token || previousToken.expiresAt <= Date.now())
+        )
+          throw new TossError('AUTH_TOKEN_UNAVAILABLE');
         const previousPending = state.pending;
-        if (issuingToken) {
+        if (!token) {
           state.pending = true;
           delete state.token;
         }
@@ -357,13 +366,15 @@ class SharedRequestCoordinator {
         try {
           this.check();
         } catch (error) {
-          if (issuingToken) {
+          if (!token) {
             state.pending = previousPending;
             state.token = previousToken;
             save(this.directory, state);
           }
           throw error;
         }
+        if (previousToken && token && previousToken.expiresAt <= Date.now())
+          throw new TossError('AUTH_TOKEN_UNAVAILABLE');
         startFetch();
         this.reserve(state);
         return 0;
@@ -575,7 +586,10 @@ export class TossClient {
       throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
     }
   }
-  async selectAccount(path: string) {
+  async selectAccount(
+    path: string,
+    prepareOutput: (selection: Pick<AccountSelection, 'alias' | 'scopes'>) => string,
+  ) {
     let selected: AccountSelection;
     try {
       selected = accountSelection(read(path));
@@ -583,8 +597,7 @@ export class TossClient {
       throw new TossError('ACCOUNT_SELECTION_REQUIRED');
     }
     this.coordination.validateForAccountSelection();
-    for (const secret of this.secrets)
-      if (selected.alias.includes(secret)) throw new TossError('SENSITIVE_OUTPUT');
+    const output = prepareOutput({ alias: selected.alias, scopes: selected.scopes });
     await withLock(
       this.directory,
       'account.lock',
@@ -595,7 +608,7 @@ export class TossClient {
         save(this.directory, { ...selected, fingerprint: this.fingerprint }, 'account.json');
       },
     );
-    return { alias: selected.alias, scopes: selected.scopes };
+    return output;
   }
   containsSecret(json: string) {
     return contains(json, this.secrets);
@@ -740,7 +753,7 @@ export class TossClient {
     };
     try {
       await this.coordination.startRequest(
-        !token,
+        token,
         () => {
           if (this.requests >= this.maxRequests) throw new TossError('REQUEST_LIMIT');
         },
@@ -848,11 +861,15 @@ export class TossClient {
       signal.removeEventListener('abort', abort);
     }
   }
-  private async token(rejected?: string): Promise<string> {
+  private async token(recovery?: { rejected?: string }): Promise<string> {
     return this.coordination
       .withTokenIssuance(async () => {
         const cached = await this.coordination.selectToken((token, pending) => {
-          if (token && token.value !== rejected && tokenStatus(token) === 'valid')
+          if (
+            token &&
+            token.value !== recovery?.rejected &&
+            (recovery ? token.expiresAt > Date.now() : tokenStatus(token) === 'valid')
+          )
             return token.value;
           if (pending) throw new TossError('AUTH_ISSUANCE_UNKNOWN');
           return undefined;
@@ -905,13 +922,23 @@ export class TossClient {
       if (!path.startsWith('/api/v1/') || /[\r\n#]/.test(path))
         throw new TossError('INPUT_INVALID');
       let token = await this.token();
-      let recovered = false,
+      let reselected = false,
+        recovered = false,
         retried = false;
       for (;;) {
         let result: { response: Response; body: unknown };
         try {
           result = await this.transmit(path, token, account);
         } catch (error) {
+          if (error instanceof TossError && error.code === 'AUTH_TOKEN_UNAVAILABLE') {
+            if (reselected) {
+              this.stopped = error;
+              throw error;
+            }
+            reselected = true;
+            token = await this.token({});
+            continue;
+          }
           if (error instanceof TossError && error.code === 'NETWORK_ERROR' && !retried) {
             retried = true;
             continue;
@@ -927,7 +954,7 @@ export class TossClient {
         const error = failure(response, body);
         if (response.status === 401 && error.providerCode === 'expired-token' && !recovered) {
           recovered = true;
-          token = await this.token(token);
+          token = await this.token({ rejected: token });
         } else if (retryableStatus(response.status) && !retried) {
           retried = true;
         } else throw error;

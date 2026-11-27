@@ -189,11 +189,6 @@ try {
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
       return client.readiness();
     }
-    if (command === 'account-select') {
-      if (!symbols || rest.length) throw new TossError('INPUT_INVALID');
-      client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
-      return { data: [await client.selectAccount(symbols)], omissions: [] };
-    }
     if (isAccountScope(command)) {
       const request = accountQuery(command, symbols, rest);
       client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
@@ -253,27 +248,42 @@ try {
     }
     throw new TossError('INPUT_INVALID');
   }
-  const result = await lookup();
-  const { data, omissions } = result;
-  const status = 'status' in result ? result.status : omissions.length ? 'partial' : 'success';
-  if (command !== 'candles-batch' && command !== 'account-select') client?.check();
-  const retrievedAt = new Date().toISOString();
-  const outputData =
-    'priceRequest' in result ? priceAge(result.data, result.priceRequest, retrievedAt) : data;
-  const output = JSON.stringify({
-    version: 1,
-    status,
-    data: outputData,
-    omissions,
-    ...('error' in result ? { error: result.error } : {}),
-    ...('page' in result ? { page: result.page } : {}),
-    source,
-    retrievedAt,
-  });
-  if (client?.containsSecret(output)) throw new TossError('SENSITIVE_OUTPUT');
-  console.log(output);
-  if ('error' in result && result.error) console.error(result.error.code);
-  process.exitCode = status === 'error' ? 1 : status === 'partial' ? 2 : 0;
+  function serializeResult(
+    result: { status: string | undefined; data: unknown; omissions: unknown },
+    retrievedAt = new Date().toISOString(),
+  ) {
+    const output = JSON.stringify({ version: 1, ...result, source, retrievedAt });
+    if (client?.containsSecret(output)) throw new TossError('SENSITIVE_OUTPUT');
+    return output;
+  }
+  if (command === 'account-select') {
+    if (!symbols || rest.length) throw new TossError('INPUT_INVALID');
+    client = new TossClient(process.env.TOSS_STATE_DIR, interruption.signal);
+    const output = await client.selectAccount(symbols, (selection) =>
+      serializeResult({ status: 'success', data: [selection], omissions: [] }),
+    );
+    console.log(output);
+  } else {
+    const result = await lookup();
+    const { data, omissions } = result;
+    const status = 'status' in result ? result.status : omissions.length ? 'partial' : 'success';
+    if (command !== 'candles-batch') client?.check();
+    const retrievedAt = new Date().toISOString();
+    const output = serializeResult(
+      {
+        status,
+        data:
+          'priceRequest' in result ? priceAge(result.data, result.priceRequest, retrievedAt) : data,
+        omissions,
+        ...('error' in result ? { error: result.error } : {}),
+        ...('page' in result ? { page: result.page } : {}),
+      },
+      retrievedAt,
+    );
+    console.log(output);
+    if ('error' in result && result.error) console.error(result.error.code);
+    process.exitCode = status === 'error' ? 1 : status === 'partial' ? 2 : 0;
+  }
 } catch (error) {
   const detail = errorDetail(error);
   console.log(

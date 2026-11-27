@@ -1,5 +1,6 @@
 import { type ChildProcess, execFile } from 'node:child_process';
 import { candleQuery } from './toss-candles.ts';
+import { discoveryQuery } from './toss-discovery.ts';
 import { priceQuery } from './toss-prices.ts';
 import { isinPattern, marketPattern } from './toss-stock.ts';
 import { record, symbolPattern, validTime } from './toss-values.ts';
@@ -14,7 +15,16 @@ function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-function validCliError(error: unknown) {
+function matchesListing(row: Record<string, unknown>, [command, symbol, market, isin]: string[]) {
+  return (
+    row.symbol === symbol &&
+    (command !== 'stock' ||
+      ((market === undefined || row.market === market) &&
+        (isin === undefined || row.isinCode === (isin === '-' ? null : isin))))
+  );
+}
+
+function validCliError(error: unknown, args: string[]) {
   if (!record(error)) return false;
   const { code, choices, providerCode, requestId } = error;
   return (
@@ -29,11 +39,14 @@ function validCliError(error: unknown) {
       (typeof requestId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(requestId))) &&
     (choices === undefined ||
       (code === 'IDENTITY_AMBIGUOUS' &&
+        (args[0] === 'stock' ||
+          (args[0] === 'candles' && candleQuery(args[1], args.slice(2)).date !== null)) &&
         Array.isArray(choices) &&
         choices.length > 1 &&
         choices.every(
           (choice) =>
             record(choice) &&
+            matchesListing(choice, args) &&
             Object.keys(choice).length === 4 &&
             typeof choice.symbol === 'string' &&
             symbolPattern.test(choice.symbol) &&
@@ -47,7 +60,11 @@ function validCliError(error: unknown) {
   );
 }
 
-function isCliResponse(response: unknown, status: string | undefined): response is CliResponse {
+function isCliResponse(
+  response: unknown,
+  status: string | undefined,
+  args: string[],
+): response is CliResponse {
   if (
     status === undefined ||
     !record(response) ||
@@ -63,7 +80,7 @@ function isCliResponse(response: unknown, status: string | undefined): response 
   const { omissions, error } = response;
   if (status === 'error')
     return (
-      validCliError(error) &&
+      validCliError(error, args) &&
       (omissions === undefined || (Array.isArray(omissions) && !omissions.length))
     );
   return (
@@ -109,11 +126,11 @@ function readinessState({ source, data, error }: CliResponse, exitCode: number) 
 }
 
 function matchesMarketQuery(response: CliResponse, args: string[]) {
-  const { source, data, status, omissions = [], error } = response;
-  const [command, target, option, count] = args;
+  const { source, data, status, omissions = [] } = response;
+  const [command, target] = args;
   if (status === 'error') {
     if (data.length) return false;
-    if (command !== 'stock' && Object.keys(source).length === 1) return true;
+    if (Object.keys(source).length === 1) return true;
   }
   switch (command) {
     case 'prices': {
@@ -136,28 +153,18 @@ function matchesMarketQuery(response: CliResponse, args: string[]) {
       }
       return remaining.size === 0;
     }
-    case 'stock': {
-      const [, , market, isin] = args;
-      const matchesListing = (row: Record<string, unknown>) =>
-        row.symbol === target &&
-        (market === undefined || row.market === market) &&
-        (isin === undefined || row.isinCode === (isin === '-' ? null : isin));
-      if (status === 'error') {
-        return (
-          (Object.keys(source).length === 1 || source.endpoint === '/api/v1/stocks') &&
-          record(error) &&
-          (!Array.isArray(error.choices) || error.choices.every(matchesListing))
-        );
-      }
-      return source.endpoint === '/api/v1/stocks' && data.length === 1 && matchesListing(data[0]);
-    }
-    case 'rankings':
+    case 'stock':
+      return (
+        source.endpoint === '/api/v1/stocks' &&
+        (status === 'error' || (data.length === 1 && matchesListing(data[0], args)))
+      );
+    case 'rankings': {
+      const expected = discoveryQuery(command, target, args.slice(2)).source;
       return (
         source.endpoint === '/api/v1/rankings' &&
-        source.type === target &&
-        source.duration === option &&
-        source.count === (count ?? '20')
+        Object.entries(expected).every(([key, value]) => source[key] === value)
       );
+    }
     case 'candles': {
       const expected: Record<string, unknown> = candleQuery(target, args.slice(2)).source;
       return (
@@ -237,7 +244,7 @@ export class DotWindow {
             const response: unknown = JSON.parse(stdout);
             if (
               typeof exitCode !== 'number' ||
-              !isCliResponse(response, ['success', 'error', 'partial'][exitCode])
+              !isCliResponse(response, ['success', 'error', 'partial'][exitCode], args)
             )
               throw new Error();
             resolve({ exitCode, response });

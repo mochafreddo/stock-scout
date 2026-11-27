@@ -286,6 +286,12 @@ test('incomplete or inconsistent readiness never admits or classifies a market q
       { code: 'AUTH_STORAGE' },
     ],
     [[{ ...readyRow, readiness: 'unavailable' }], 'partial', 2],
+    [
+      [{ readiness: 'unavailable', token: 'unknown', reasons: ['IDENTITY_AMBIGUOUS'] }],
+      'error',
+      1,
+      candleChoices.error,
+    ],
   ]) {
     const response = envelope('local:readiness', data, { status, error });
     writeFileSync(
@@ -297,7 +303,7 @@ test('incomplete or inconsistent readiness never admits or classifies a market q
       error: { code: 'CLI_RESULT_UNAVAILABLE' },
     });
   }
-  assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), Array(5).fill('readiness'));
+  assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), Array(6).fill('readiness'));
 });
 
 test('a market query rejects a mismatched CLI envelope or command source', async (t) => {
@@ -376,6 +382,26 @@ function checkQueryResults(name, cases) {
   });
 }
 
+const rankingArgs = { type: 'TOP_GAINERS', duration: '1d' };
+const rankingResponse = envelope('/api/v1/rankings', []);
+Object.assign(rankingResponse.source, rankingArgs, {
+  count: '20',
+  marketCountry: 'US',
+  aggregation: 'US_market',
+});
+checkQueryResults('rankings', [
+  ['US rankings', rankingArgs, rankingResponse, true],
+  ...[
+    ['another country', { marketCountry: 'KR' }],
+    ['another aggregation', { aggregation: 'all_markets' }],
+  ].map(([label, fields]) => [
+    label,
+    rankingArgs,
+    { ...rankingResponse, source: { ...rankingResponse.source, ...fields } },
+    false,
+  ]),
+]);
+
 const pair = { symbols: ['DEMO', 'NEXT', 'DEMO'] };
 const missingPrice = (symbol) => ({
   ...pricesResponse,
@@ -406,6 +432,22 @@ const ambiguous = (other, redacted) => ({
   status: 'error',
   error: { code: 'IDENTITY_AMBIGUOUS', choices: [listing, { ...listing, ...other }] },
 });
+const candleArgs = { symbol: 'DEMO', date: '2026-11-24' };
+const candleChoices = ambiguous({ market: 'NASDAQ' }, true);
+checkQueryResults('candles', [
+  ['matching dated choices', candleArgs, candleChoices, true],
+  ['another candidate symbol', candleArgs, ambiguous({ symbol: 'OTHER' }, true), false],
+  ['undated choices', { symbol: 'DEMO' }, candleChoices, false],
+  ['choices with wrong endpoint', candleArgs, ambiguous({ market: 'NASDAQ' }, false), false],
+  ['redacted error without choices', { symbol: 'DEMO' }, redactedError, true],
+]);
+for (const [name, args] of [
+  ['prices', pair],
+  ['sessions', { date: '2026-11-24' }],
+  ['rankings', rankingArgs],
+]) {
+  checkQueryResults(name, [['unexpected listing choices', args, candleChoices, false]]);
+}
 checkQueryResults('stock', [
   ['matching explicit null ISIN', listedStock, stockRows(listing), true],
   ['empty success', listedStock, stockRows(), false],

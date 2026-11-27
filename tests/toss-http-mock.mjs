@@ -127,6 +127,7 @@ mock.method(fs, 'mkdirSync', (path, ...args) => {
 });
 const fsyncSync = fs.fsyncSync;
 let accountRenamed = false;
+let directorySyncDelay = Number(process.env.TEST_FIRST_DIRECTORY_SYNC_MS || 0);
 mock.method(fs, 'fsyncSync', (descriptor) => {
   if (
     process.env.TEST_FAIL_ACCOUNT_SAVE === 'directory-sync' &&
@@ -134,7 +135,12 @@ mock.method(fs, 'fsyncSync', (descriptor) => {
     fs.fstatSync(descriptor).isDirectory()
   )
     throw new Error('synthetic-secret');
-  return fsyncSync(descriptor);
+  const result = fsyncSync(descriptor);
+  if (directorySyncDelay && fs.fstatSync(descriptor).isDirectory()) {
+    mock.timers.tick(directorySyncDelay);
+    directorySyncDelay = 0;
+  }
+  return result;
 });
 const renameSync = fs.renameSync;
 let cooldownSaveFailed = false;

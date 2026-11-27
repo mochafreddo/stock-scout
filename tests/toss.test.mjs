@@ -12,6 +12,7 @@ import {
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
+  authState,
   closeRuns,
   fixture,
   price,
@@ -974,4 +975,154 @@ test('Toss CLI checks each execution clock before sending HTTP', async () => {
       f.close();
     }
   }
+});
+
+function issuedToken(value, seconds) {
+  return { body: { access_token: value, token_type: 'Bearer', expires_in: seconds } };
+}
+
+test('prices combines expiry during the shared wait with provider recovery and transient retry', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const r = await runCli(
+    f,
+    [
+      { expectedToken: 'synthetic-next', status: 401, body: { error: { code: 'expired-token' } } },
+      { expectedToken: 'synthetic-last', status: 503, body: {} },
+      { expectedToken: 'synthetic-last', body: { result: [price] } },
+    ],
+    undefined,
+    {
+      TEST_AUTH_STEPS: JSON.stringify([
+        issuedToken('synthetic-short', 1),
+        issuedToken('synthetic-next', 10),
+        issuedToken('synthetic-last', 10),
+      ]),
+    },
+  );
+  assert.deepEqual(
+    r.requests.map(({ method, authorization }) => authorization ?? method),
+    [
+      'POST',
+      'POST',
+      'Bearer synthetic-next',
+      'POST',
+      'Bearer synthetic-last',
+      'Bearer synthetic-last',
+    ],
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test('prices checks expiry and the execution deadline after reservation directory sync', async (t) => {
+  for (const delay of [16000, 60000]) {
+    const f = fixture();
+    t.after(f.close);
+    const start = Date.parse('2026-11-06T15:00:00Z');
+    writeFileSync(
+      join(f.directory, 'state.json'),
+      JSON.stringify(
+        authState({
+          token: { value: 'synthetic-cached', expiresAt: start + 16000 },
+        }),
+      ),
+      { mode: 0o600 },
+    );
+    const r = await runCli(f, [], undefined, { TEST_FIRST_DIRECTORY_SYNC_MS: String(delay) });
+    assert.deepEqual(
+      r.requests.map(({ method }) => method),
+      delay === 16000 ? ['POST', 'GET'] : [],
+    );
+    assert.equal(r.status, delay === 16000 ? 0 : 1, r.stdout + r.stderr);
+    if (delay === 60000) assert.equal(JSON.parse(r.stdout).error.code, 'TIMEOUT');
+  }
+});
+
+test('prices uses the still-live replacement issued by a peer during its shared wait', async () => {
+  const f = fixture();
+  const gate = join(f.directory, 'wait');
+  const runs = [];
+  try {
+    const state = authState();
+    state.token.expiresAt = Date.now() + 120000;
+    state.clock.nextNs = (process.hrtime.bigint() + 3000000000n).toString().padStart(30, '0');
+    writeFileSync(join(f.directory, 'state.json'), JSON.stringify(state), { mode: 0o600 });
+    const success = { expectedToken: 'synthetic-peer', body: { result: [price] } };
+    const first = runCli(f, [success], undefined, { TEST_REAL_CLOCK: '1', TEST_WAIT_GATE: gate });
+    runs.push(first);
+    await waitForFile(`${gate}.ready`, first);
+    const peer = await runCli(
+      f,
+      [{ status: 401, body: { error: { code: 'expired-token' } } }, success],
+      undefined,
+      {
+        TEST_REAL_CLOCK: '1',
+        TEST_AUTH_STEPS: JSON.stringify([issuedToken('synthetic-peer', 15)]),
+      },
+    );
+    assert.equal(peer.status, 0, peer.stdout + peer.stderr);
+    writeFileSync(gate, '', { mode: 0o600 });
+    const r = await first;
+    assert.deepEqual(
+      r.requests.map(({ authorization, method }) => authorization ?? method),
+      ['Bearer synthetic-token', 'POST', 'Bearer synthetic-peer', 'Bearer synthetic-peer'],
+    );
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    await closeRuns(f, runs, [gate]);
+  }
+});
+
+test('candles-batch preserves the first page and stops when token reselection fails', async (t) => {
+  for (const [issuance, code] of [
+    [issuedToken('synthetic-short', 1), 'AUTH_TOKEN_UNAVAILABLE'],
+    [{ status: 403, body: {} }, 'PERMISSION_DENIED'],
+  ]) {
+    const f = fixture();
+    t.after(f.close);
+    const r = await runCli(
+      f,
+      [
+        {
+          path: '/api/v1/candles',
+          headers: { 'Retry-After': '40' },
+          body: { result: { candles: [], nextBefore: null } },
+        },
+      ],
+      ['candles-batch', 'AAPL,MSFT,AMD'],
+      {
+        TEST_AUTH_STEPS: JSON.stringify([issuedToken('synthetic-token', 30), issuance]),
+      },
+    );
+    const rows = JSON.parse(r.stdout).data;
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.deepEqual(
+      rows.map(({ status }) => status),
+      ['success', 'error', 'not_queried'],
+    );
+    assert.equal(rows[1].error.code, code);
+    assert.equal(rows[2].reason, code);
+    assert.deepEqual(
+      r.requests.map(({ method }) => method),
+      ['POST', 'GET', 'POST'],
+    );
+  }
+});
+
+test('prices returns a local auth error after two tokens expire without a GET', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const r = await runCli(f, [], undefined, {
+    TEST_AUTH_STEPS: JSON.stringify([
+      issuedToken('synthetic-one', 1),
+      issuedToken('synthetic-two', 1),
+    ]),
+  });
+  assert.deepEqual(
+    r.requests.map(({ method }) => method),
+    ['POST', 'POST'],
+  );
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual(JSON.parse(r.stdout).error, { code: 'AUTH_TOKEN_UNAVAILABLE' });
+  assert.equal(r.stderr, 'AUTH_TOKEN_UNAVAILABLE\n');
 });

@@ -84,6 +84,22 @@ test('only financial requests receive the selected account header, including aut
   }
 });
 
+test('masking a scope in the success response preserves the previous selection bytes', async (t) => {
+  const f = fixture('buying-power');
+  t.after(f.close);
+  const original = await selection(f, 741, ['holdings']);
+  assert.equal(original.status, 0, original.stdout + original.stderr);
+  const account = join(f.directory, 'account.json');
+  const before = readFileSync(account);
+  const rejected = await selection(f, 852, ['buying-power'], 'secondary');
+  assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+  assert.deepEqual(JSON.parse(rejected.stdout).error, { code: 'SENSITIVE_OUTPUT' });
+  assert.equal(rejected.stderr, 'SENSITIVE_OUTPUT\n');
+  assert.doesNotMatch(rejected.stdout + rejected.stderr, /buying-power|852/);
+  assert.deepEqual(rejected.requests, []);
+  assert.deepEqual(readFileSync(account), before);
+});
+
 test('saved selection reports success after the deadline and is used by the next CLI', async () => {
   const f = fixture();
   try {

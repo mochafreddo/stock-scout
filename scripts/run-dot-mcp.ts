@@ -157,9 +157,12 @@ if (import.meta.main) {
         },
       });
       if (run) {
-        process.once('SIGTERM', () => void run.stop());
-        process.once('SIGINT', () => void run.stop());
+        const stop = () => void run.stop();
+        process.on('SIGTERM', stop);
+        process.on('SIGINT', stop);
         await run.done;
+        process.off('SIGTERM', stop);
+        process.off('SIGINT', stop);
       }
     } catch {
       reportStartError('START_FAILED');

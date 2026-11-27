@@ -123,6 +123,106 @@ exec cat
   }
 });
 
+for (const signalName of ['SIGTERM', 'SIGINT']) {
+  test(`direct launcher drains a running query across repeated ${signalName}`, async (t) => {
+    const state = stateDirectory(t);
+    const marker = (name) => join(state, name);
+    function executable(name, body) {
+      const path = marker(`${name}.mjs`);
+      writeFileSync(
+        path,
+        `#!${process.execPath}
+        import { existsSync, renameSync, writeFileSync } from 'node:fs';
+        import { setTimeout as delay } from 'node:timers/promises';
+        const marker = name => ${JSON.stringify(state)} + '/' + name;
+        setTimeout(() => process.exit(1), 5000).unref();
+        ${body}`,
+        { mode: 0o700 },
+      );
+      return path;
+    }
+    const tunnel = executable(
+      'tunnel',
+      `
+      process.on('SIGTERM', () => {
+        writeFileSync(marker('tunnel-stopped'), '');
+        process.exit(0);
+      });
+      writeFileSync(marker('url.tmp'), process.argv[2]);
+      renameSync(marker('url.tmp'), marker('url'));
+      setInterval(() => {}, 5000);
+    `,
+    );
+    const price = { symbol: 'DEMO', priceAge: { thresholdSeconds: 900 } };
+    const launcher = executable(
+      'launcher',
+      `
+      const ready = process.argv[2] === 'readiness';
+      if (!ready) {
+        writeFileSync(marker('query-started'), '');
+        while (!existsSync(marker('release'))) await delay(10);
+        process.on('exit', () => writeFileSync(marker('query-exited'), ''));
+      }
+      console.log(JSON.stringify({
+        version: 1, status: 'success', retrievedAt: ${JSON.stringify(open)}, omissions: [],
+        source: { provider: 'tossinvest', endpoint: ready ? 'local:readiness' : '/api/v1/prices' },
+        data: ready ? [{ readiness: 'ready', token: 'valid', reasons: [] }] : [${JSON.stringify(price)}],
+      }));
+    `,
+    );
+    const run = promisify(execFile)(process.execPath, args(state, open, tunnel, launcher), {
+      timeout: 10000,
+      killSignal: 'SIGKILL',
+    });
+    const completed = Promise.allSettled([run]);
+    const signal = AbortSignal.timeout(5000);
+    try {
+      while (!existsSync(marker('url'))) await delay(10, undefined, { signal });
+      const url = readFileSync(marker('url'), 'utf8');
+      const request = fetch(url, {
+        method: 'POST',
+        signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'prices', arguments: { symbols: ['DEMO'] } },
+        }),
+      }).then((response) => response.json());
+      void request.catch(() => {});
+      while (!existsSync(marker('query-started'))) await delay(10, undefined, { signal });
+      assert.ok(run.child.kill(signalName));
+      while (true) {
+        try {
+          await fetch(url, { headers: { connection: 'close' }, signal });
+        } catch (error) {
+          assert.equal(error.cause?.code, 'ECONNREFUSED');
+          break;
+        }
+        await delay(10, undefined, { signal });
+      }
+      assert.ok(run.child.kill(signalName));
+      writeFileSync(marker('release'), '');
+      const { stdout, stderr } = await run;
+      assert.equal(stderr, '');
+      const response = await request;
+      assert.deepEqual(response.result.structuredContent.response.data, [price]);
+      assert.ok(existsSync(marker('query-exited')));
+      assert.ok(existsSync(marker('tunnel-stopped')));
+      const statuses = stdout
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line).status);
+      assert.deepEqual(statuses, ['started', 'success', 'closed']);
+    } finally {
+      writeFileSync(marker('release'), '');
+      run.child.kill('SIGKILL');
+      await completed;
+    }
+  });
+}
+
 test('direct launcher fails when the tunnel exits while a response is draining', (t) => {
   const state = stateDirectory(t);
   const tunnel = join(state, 'tunnel.mjs');

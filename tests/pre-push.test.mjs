@@ -11,6 +11,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -92,6 +93,44 @@ for (const mode of ['docs', 'staged', 'push']) {
     if (mode === 'push') git(root, 'commit', '-m', 'link targets');
     return run(root, git(root, 'rev-parse', 'HEAD'), base, args);
   }
+
+  test(`${mode} checks inline Markdown links with a parenthesized title`, (t) => {
+    const { root, base } = fixture(t);
+    writeFileSync(join(root, 'guide(v1).md'), '# Details\n');
+    const valid = '[Guide](guide(v1).md#details (first title))';
+    for (const [link, diagnostic] of [
+      [valid, null],
+      ['[Guide](missing(v1).md (first title))', /missing local target missing\(v1\)\.md/],
+      ['[Guide](guide(v1).md#absent (first title))', /missing heading guide\(v1\)\.md#absent/],
+      [`${valid} [Next](missing.md (second title))`, /missing local target missing\.md/],
+    ]) {
+      const result = checkReadme(root, base, `${link}\n`);
+      assert.equal(result.status, diagnostic ? 1 : 0, result.stderr);
+      if (diagnostic) assert.match(result.stderr, diagnostic);
+    }
+  });
+
+  test(`${mode} checks rendered emphasis in Markdown heading anchors`, (t) => {
+    const { root, base } = fixture(t);
+    const headings = [
+      '# _Read_ __this__',
+      'Read _this_',
+      '===',
+      'Read this-1',
+      '---',
+      '# _snake_case_ \\_literal\\_ `_code_` unmatched_',
+    ].join('\n');
+    for (const [targets, missing] of [
+      [['read-this', 'read-this-1', 'read-this-1-1', 'snake_case-_literal_-_code_-unmatched_']],
+      [['_read_-__this__'], '_read_-__this__'],
+      [['read-_this_'], 'read-_this_'],
+    ]) {
+      const links = targets.map((target) => `[Jump](#${target})`).join('\n');
+      const result = checkReadme(root, base, `${headings}\n\n${links}\n`);
+      assert.equal(result.status, missing ? 1 : 0, result.stderr);
+      if (missing) assert.ok(result.stderr.includes(`missing heading #${missing}`), result.stderr);
+    }
+  });
 
   for (const [kind, hidden, suffix = ''] of [
     ['block comment with a fence', '<!--\n```\n[example](hidden.md)\n-->\n'],
@@ -1311,6 +1350,59 @@ test('code pushes run every quality command and refuse missing dependencies', (t
   assert.equal(missing.status, 1, missing.stderr);
   assert.match(missing.stderr, /expected a snapshot pnpm-lock.yaml file/);
   assert.doesNotMatch(missing.stderr, /fixture check/);
+});
+
+for (const name of ['pre-push', 'pre-push.local']) {
+  test(`hook installation preserves and rejects user-owned 0655 ${name}`, (t) => {
+    const { root } = fixture(t);
+    const hooks = join(root, '.git/hooks');
+    if (name === 'pre-push.local') {
+      writeFileSync(
+        join(hooks, 'pre-push'),
+        '#!/bin/sh\n# gstack-redact pre-push (managed)\nexec "$(git rev-parse --git-path hooks/pre-push.local)" "$@"\n',
+        { mode: 0o700 },
+      );
+    }
+    const installed = run(root, '', '', ['--install']);
+    assert.equal(installed.status, 0, installed.stderr);
+    const path = join(hooks, name);
+    const bytes = readFileSync(path);
+    chmodSync(path, 0o655);
+    const refused = run(root, '', '', ['--install']);
+    assert.equal(refused.status, 1, refused.stderr);
+    assert.deepEqual(readFileSync(path), bytes);
+    assert.equal(statSync(path).mode & 0o777, 0o655);
+  });
+}
+
+test('hook installation with a restrictive umask leaves the destination absent', (t) => {
+  const { root } = fixture(t);
+  const result = fixtureProcess(
+    'sh',
+    ['-c', 'umask 0111 && exec "$@"', 'install', process.execPath, cli, '--install'],
+    { cwd: root },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(existsSync(join(root, '.git/hooks/pre-push')), false);
+});
+
+test('hook installation rejects a draft created without execute permission', (t) => {
+  const { root } = fixture(t);
+  const preload = join(root, 'file-umask.cjs');
+  writeFileSync(
+    preload,
+    `const fs = require('node:fs');
+const write = fs.writeFileSync;
+fs.writeFileSync = (...args) => {
+  process.umask(0o111);
+  return write(...args);
+};
+require('node:module').syncBuiltinESMExports();
+`,
+  );
+  const result = run(root, '', '', ['--install'], { NODE_OPTIONS: `--require="${preload}"` });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(existsSync(join(root, '.git/hooks/pre-push')), false);
 });
 
 test('hook installation is idempotent and preserves an occupied hook slot', (t) => {
