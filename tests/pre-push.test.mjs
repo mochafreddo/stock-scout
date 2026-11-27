@@ -94,6 +94,68 @@ for (const mode of ['docs', 'staged', 'push']) {
     return run(root, git(root, 'rev-parse', 'HEAD'), base, args);
   }
 
+  test(`${mode} decodes Markdown escapes in link destinations`, (t) => {
+    const { root, base } = fixture(t);
+    writeFileSync(join(root, 'guide)v1.md'), 'First\nsection\n===\n');
+    for (const [body, diagnostic] of [
+      [String.raw`[valid](guide\)v1.md#first\-section)`, null],
+      [String.raw`[broken](missing\(v1.md)`, /missing local target missing\(v1\.md/],
+      [String.raw`[ref]: <guide\)v1.md#absent>`, /missing heading guide\)v1\.md#absent/],
+    ]) {
+      const result = checkReadme(root, base, `${body}\n`);
+      assert.equal(result.status, diagnostic ? 1 : 0, result.stderr);
+      if (diagnostic) assert.match(result.stderr, diagnostic);
+    }
+  });
+
+  test(`${mode} skips Markdown inside HTML blocks and preserves real anchors`, (t) => {
+    const { root, base } = fixture(t);
+    const html = '<div id="example">\n[hidden](missing.md)\n# Hidden\n</div>';
+    for (const [body, diagnostic] of [
+      [`${html}\n\n[jump](#example)`, null],
+      [`${html}\n\n[jump](#hidden)`, /missing heading #hidden/],
+      [
+        '<pre>\n\n[hidden](missing.md)\n</pre>\n[visible](absent.md)',
+        /missing local target absent.md/,
+      ],
+      ['<widget>\n[hidden](missing.md)\n\n[visible](absent.md)', /missing local target absent.md/],
+      ['Paragraph\n<widget>\n[visible](absent.md)', /missing local target absent.md/],
+      ['<div>\n<!--\n<a id="hidden">\n-->\n</div>\n\n[jump](#hidden)', /missing heading #hidden/],
+      ['> <div>\n> [hidden](missing.md)\n[visible](absent.md)', /missing local target absent.md/],
+    ]) {
+      const result = checkReadme(root, base, `${body}\n`);
+      assert.equal(result.status, diagnostic ? 1 : 0, result.stderr);
+      if (diagnostic) assert.match(result.stderr, diagnostic);
+    }
+  });
+
+  test(`${mode} recognizes reference definitions only at paragraph boundaries`, (t) => {
+    const { root, base } = fixture(t);
+    for (const [body, missing] of [
+      ['Text\n[label]: missing.md', false],
+      ['Text\n[label]: [visible](missing.md)', true],
+      ['[first]: #start\n[second]: missing.md', true],
+      ['[first]: #start\n    [code](missing.md)', false],
+    ]) {
+      const result = checkReadme(root, base, `# Start\n\n${body}\n`);
+      assert.equal(result.status, missing ? 1 : 0, result.stderr);
+      if (missing) assert.match(result.stderr, /missing local target missing\.md/);
+    }
+  });
+
+  test(`${mode} distinguishes indented paragraph continuations from code blocks`, (t) => {
+    const { root, base } = fixture(t);
+    for (const [body, missing] of [
+      ['Paragraph\n    [visible](missing.md)', true],
+      ['Paragraph\n\n    [code](missing.md)', false],
+      ['Multi\n    line\n===\n\n[jump](#multi-line)', false],
+    ]) {
+      const result = checkReadme(root, base, `${body}\n`);
+      assert.equal(result.status, missing ? 1 : 0, result.stderr);
+      if (missing) assert.match(result.stderr, /missing local target missing\.md/);
+    }
+  });
+
   test(`${mode} checks inline Markdown links with a parenthesized title`, (t) => {
     const { root, base } = fixture(t);
     writeFileSync(join(root, 'guide(v1).md'), '# Details\n');
