@@ -46,31 +46,26 @@ function closeChange(bars) {
   };
 }
 
-const output = JSON.parse(readFileSync(0, 'utf8'));
-assert.equal(output.version, 1);
-assert.ok(['success', 'partial', 'error'].includes(output.status), 'valid CLI status required');
-assert.ok(Array.isArray(output.data), 'CLI data must be an array');
-const emptyError = output.status === 'error' && !output.data.length;
-if (emptyError) {
+function assertSafeError(error) {
   assert.ok(
-    record(output.error) && typeof output.error.code === 'string' && output.error.code.length > 0,
+    record(error) && typeof error.code === 'string' && error.code.length > 0,
     'CLI error code required',
   );
   assert.ok(
-    Object.keys(output.error).every((field) =>
+    Object.keys(error).every((field) =>
       ['code', 'providerCode', 'requestId', 'choices'].includes(field),
     ),
     'CLI error contains unexpected fields',
   );
   for (const field of ['providerCode', 'requestId'])
     assert.ok(
-      !Object.hasOwn(output.error, field) || typeof output.error[field] === 'string',
+      !Object.hasOwn(error, field) || typeof error[field] === 'string',
       `CLI error ${field} must be a string`,
     );
   assert.ok(
-    !Object.hasOwn(output.error, 'choices') ||
-      (Array.isArray(output.error.choices) &&
-        output.error.choices.every(
+    !Object.hasOwn(error, 'choices') ||
+      (Array.isArray(error.choices) &&
+        error.choices.every(
           (choice) =>
             record(choice) &&
             Object.keys(choice).length === 4 &&
@@ -82,6 +77,13 @@ if (emptyError) {
     'CLI error choices must contain stock choices',
   );
 }
+
+const output = JSON.parse(readFileSync(0, 'utf8'));
+assert.equal(output.version, 1);
+assert.ok(['success', 'partial', 'error'].includes(output.status), 'valid CLI status required');
+assert.ok(Array.isArray(output.data), 'CLI data must be an array');
+const emptyError = output.status === 'error' && !output.data.length;
+if (emptyError || Object.hasOwn(output, 'error')) assertSafeError(output.error);
 assert.ok(
   record(output.source) &&
     ((emptyError &&
@@ -95,6 +97,16 @@ const batch = !Object.hasOwn(output.source, 'interval');
 const rows = batch ? output.data : [{ ...output, symbol: output.source.symbol }];
 assert.ok(emptyError || rows.length > 0, 'daily candle batch requires at least one symbol row');
 if (batch && !emptyError) {
+  for (const row of rows) {
+    if (row.status === 'error' || Object.hasOwn(row, 'error')) assertSafeError(row.error);
+    if (row.status === 'not_queried')
+      assert.ok(typeof row.reason === 'string' && row.reason.trim(), 'batch stop reason required');
+    if (row.status === 'error' || row.status === 'not_queried')
+      assert.ok(
+        Array.isArray(row.data) && row.data.length === 0,
+        'failed or unqueried row must have empty data',
+      );
+  }
   const states = rows.map(({ status }) => status);
   assert.ok(
     states.every((status) => ['success', 'partial', 'error', 'not_queried'].includes(status)),
