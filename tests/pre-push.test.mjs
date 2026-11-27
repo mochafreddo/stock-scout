@@ -127,6 +127,7 @@ for (const mode of ['docs', 'staged', 'push']) {
       ['[guide](missing.md "a\nb"\n\n)', null],
       ['[guide](missing.md "a\n# Heading\nb")', null],
       ['[guide](missing.md "a\n---\nb")', null],
+      ['[guide](missing.md "a\n--\nb")', null],
       [String.raw`\[not a link](missing.md)`, null],
       ['# [\n\\[not a link](missing.md)', null],
       [String.raw`\\[even slash](missing.md)`, /missing local target missing\.md/],

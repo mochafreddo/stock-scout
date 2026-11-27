@@ -167,7 +167,7 @@ function markdownText(path: string) {
 
 const inlineCodeOrEscape = /\\[\\<`]|(?<!`)(`+)(?!`)(?:[^\n]|\n(?![ \t]*\n))*?(?<!`)\1(?!`)/g;
 const atxHeading = /^ {0,3}#{1,6}(?=[ \t]|$)/;
-const setextUnderline = /^ {0,3}=+[ \t]*$/;
+const setextUnderline = /^ {0,3}(?:=+|-+)[ \t]*$/;
 const markdownInline = new RegExp(
   [
     /^ {4}.*$/.source,
@@ -330,7 +330,7 @@ function headingIds(text: string) {
   const paragraph: string[] = [];
   for (const line of visible.split('\n')) {
     const atx = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
-    const underline = /^ {0,3}(?:=+|-+)[ \t]*$/.test(line);
+    const underline = setextUnderline.test(line);
     const title = atx?.[1] ?? (underline ? paragraph.join(' ') : '');
     if (atx || underline || thematicBreak.test(line) || !line.trim()) paragraph.length = 0;
     else paragraph.push(line.trim());
