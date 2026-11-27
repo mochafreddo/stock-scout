@@ -1037,6 +1037,44 @@ test('prices combines expiry during the shared wait with provider recovery and t
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
+for (const method of ['GET', 'POST']) {
+  for (const phase of ['before', 'after']) {
+    test(`reservation sync failure ${phase} ${method} start controls subsequent CLI sends`, async (t) => {
+      const f = fixture();
+      t.after(f.close);
+      if (method === 'GET')
+        writeFileSync(join(f.directory, 'state.json'), JSON.stringify(authState()), {
+          mode: 0o600,
+        });
+      const first = await runCli(f, [], undefined, { TEST_FAIL_RESERVATION_SYNC: phase });
+      const methods = phase === 'after' ? [method] : [];
+      assert.deepEqual(
+        first.requests.map((request) => request.method),
+        methods,
+      );
+      assert.equal(first.status, 1);
+      assert.equal(JSON.parse(first.stdout).error.code, 'AUTH_STORAGE');
+
+      const readiness = await runCli(f, [], ['readiness']);
+      const { reasons } = JSON.parse(readiness.stdout).data[0];
+      assert.equal(reasons.includes('LOCK_PRESENT'), phase === 'after');
+      assert.deepEqual(
+        readiness.requests.map((request) => request.method),
+        methods,
+      );
+      if (phase === 'after') {
+        const next = await runCli(f);
+        assert.equal(next.status, 1);
+        assert.equal(JSON.parse(next.stdout).error.code, 'TIMEOUT');
+        assert.deepEqual(
+          next.requests.map((request) => request.method),
+          methods,
+        );
+      }
+    });
+  }
+}
+
 test('prices checks expiry and the execution deadline after reservation directory sync', async (t) => {
   for (const delay of [16000, 60000]) {
     const f = fixture();

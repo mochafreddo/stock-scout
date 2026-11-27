@@ -264,7 +264,7 @@ async function withLock<T>(
   name: string,
   check: () => void,
   wait: (milliseconds: number) => Promise<void>,
-  operation: () => Promise<T>,
+  operation: (retainLock: () => void) => Promise<T>,
 ): Promise<T> {
   const lock = join(directory, name);
   try {
@@ -278,11 +278,14 @@ async function withLock<T>(
         if (lockPresent(lock)) await wait(25);
       }
     }
+    let retained = false;
     try {
       secure(lock, true);
-      return await operation();
+      return await operation(() => {
+        retained = true;
+      });
     } finally {
-      rmdirSync(lock);
+      if (!retained) rmdirSync(lock);
     }
   } catch (error) {
     throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
@@ -355,7 +358,7 @@ class SharedRequestCoordinator {
   ) {
     for (;;) {
       this.check();
-      const delay = await this.locked(async (state) => {
+      const delay = await this.locked(async (state, retainLock) => {
         this.check();
         const delay = Number(BigInt(state.clock.nextNs) - process.hrtime.bigint()) / 1000000;
         if (delay > 0) return delay;
@@ -387,7 +390,12 @@ class SharedRequestCoordinator {
         if (previousToken && token && (tokenRemaining(previousToken) ?? 0) <= 0)
           throw new TossError('AUTH_TOKEN_UNAVAILABLE');
         startFetch();
-        this.reserve(state);
+        try {
+          this.reserve(state);
+        } catch (error) {
+          retainLock();
+          throw error;
+        }
         return 0;
       });
       if (!delay) return;
@@ -484,14 +492,14 @@ class SharedRequestCoordinator {
     if (latest > state.clock.nextNs) state.clock.nextNs = latest;
     return { state, records };
   }
-  private locked<T>(operation: (state: State) => Promise<T>) {
-    return withLock(this.directory, 'client.lock', this.check, this.wait, () => {
+  private locked<T>(operation: (state: State, retainLock: () => void) => Promise<T>) {
+    return withLock(this.directory, 'client.lock', this.check, this.wait, (retainLock) => {
       const { state, records } = this.loadReservation('locked');
       if (records.length) {
         save(this.directory, state);
         for (const name of records) unlinkSync(join(this.directory, name));
       }
-      return operation(state);
+      return operation(state, retainLock);
     });
   }
   private reserve(state: State) {
