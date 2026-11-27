@@ -808,16 +808,17 @@ export class TossClient {
           const response = await flight;
           if (!response) throw new TossError('NETWORK_ERROR');
           receivedResponse = response;
-          const seconds = Math.max(
-            0,
-            ...['Retry-After', 'X-RateLimit-Reset'].map((name) => {
-              const value = response.headers.get(name);
-              return value !== null && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : 0;
-            }),
-          );
-          if (!Number.isSafeInteger(Math.ceil(seconds * 1000)))
-            throw new TossError('RESPONSE_INVALID');
-          if (seconds) this.coordination.publishCooldown(Math.ceil(seconds * 1000));
+          let cooldownMs = 0;
+          let oversized = false;
+          for (const name of ['Retry-After', 'X-RateLimit-Reset']) {
+            const value = response.headers.get(name);
+            if (value === null || !/^\d+(?:\.\d+)?$/.test(value)) continue;
+            const milliseconds = Math.ceil(Number(value) * 1000);
+            if (Number.isSafeInteger(milliseconds)) cooldownMs = Math.max(cooldownMs, milliseconds);
+            else oversized = true;
+          }
+          if (cooldownMs > 0) this.coordination.publishCooldown(cooldownMs);
+          if (oversized) throw new TossError('RESPONSE_INVALID');
           checkRequest();
           const reader = response.body?.getReader();
           const chunks: Uint8Array[] = [];
