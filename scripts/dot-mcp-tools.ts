@@ -69,7 +69,7 @@ export const marketTools = [
   ),
   tool(
     'candles',
-    'Query one daily candle page by symbol. No page inherits the market or ISIN selected with stock. With date, the CLI independently confirms a US listing market and rejects ambiguous symbols. For a follow-up, pass page.nextBefore as before and omit date. For a shared symbol, leave candles unattributed unless other evidence identifies the listing.',
+    'Query one daily candle page by symbol. No page inherits the market or ISIN selected with stock. With date, the CLI independently confirms a US listing market and rejects ambiguous symbols. For a shared symbol, leave candles unattributed unless other evidence identifies the listing. Track every boundary requested for this query, including source.before from the initial date lookup. Compare page.nextBefore with all of them as instants using their UTC offsets and full fractional seconds. On a match, stop and report the coverage obtained and what remains unconfirmed. If another page is needed and the boundary is new, pass page.nextBefore unchanged as before, omit date, and keep the same symbol, interval, count and adjustment.',
     {
       symbol,
       interval: { type: 'string', const: '1d' },
