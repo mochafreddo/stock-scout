@@ -441,39 +441,54 @@ test('both candle intervals use common authentication recovery, limits and safe 
   }
 });
 
-test('daily candles compare OHLC exactly and preserve inclusive decimal bounds', async () => {
-  const low = '9007199254740992.0000000000000';
-  const high = '9007199254740992.0000000000002';
-  const bar = { ...candle, openPrice: low, lowPrice: low, highPrice: high, closePrice: high };
-  const zero = {
-    ...candle,
-    openPrice: '-0.00',
-    lowPrice: '00',
-    closePrice: '000.0',
-    highPrice: '0',
-  };
-  const invalid = [
-    { ...bar, openPrice: '9007199254740991.9999999999999' },
-    { ...bar, openPrice: '9007199254740992.0000000000003' },
-    { ...bar, closePrice: '9007199254740991.9999999999999' },
-    { ...bar, closePrice: '9007199254740992.0000000000003' },
-  ];
-  const mixed = await lookup({ candles: [bar, ...invalid, zero], nextBefore: null });
-  assert.equal(mixed.status, 2, mixed.stdout);
-  assert.equal(mixed.out.status, 'partial');
-  assert.deepEqual(
-    mixed.out.data,
-    [bar, zero].map((row) => ({ ...row, completion: 'unknown', inProgress: 'unknown' })),
-  );
-  assert.deepEqual(
-    mixed.out.omissions,
-    invalid.map((_, index) => ({ index: index + 1, reason: 'invalid_item' })),
-  );
-  const rejected = await lookup({ candles: invalid, nextBefore: null });
-  assert.equal(rejected.status, 1, rejected.stdout);
-  assert.equal(rejected.out.error.code, 'RESPONSE_INVALID');
+for (const interval of ['1d', '1m']) {
+  test(`${interval} candles enforce inclusive OHLC bounds with exact decimals`, async () => {
+    const args = ['AAPL', interval];
+    const low = '9007199254740992.0000000000000';
+    const high = '9007199254740992.0000000000002';
+    const bar = { ...candle, openPrice: low, lowPrice: low, highPrice: high, closePrice: high };
+    const zero = {
+      ...candle,
+      openPrice: '-0.00',
+      lowPrice: '00',
+      closePrice: '000.0',
+      highPrice: '0',
+    };
+    const invalid = [
+      { ...bar, openPrice: '9007199254740991.9999999999999' },
+      { ...bar, openPrice: '9007199254740992.0000000000003' },
+      { ...bar, closePrice: '9007199254740991.9999999999999' },
+      { ...bar, closePrice: '9007199254740992.0000000000003' },
+    ];
+    const valid = await lookup({ candles: [bar, zero], nextBefore: null }, args);
+    assert.equal(valid.status, 0, valid.stdout);
+    assert.equal(valid.out.status, 'success');
+    assert.deepEqual(valid.out.omissions, []);
+    const expected = [bar, zero].map((row) => ({
+      ...row,
+      completion: 'unknown',
+      inProgress: 'unknown',
+    }));
+    assert.deepEqual(valid.out.data, expected);
 
-  const minute = await lookup({ candles: invalid, nextBefore: null }, ['AAPL', '1m']);
-  assert.equal(minute.status, 0, minute.stdout);
-  assert.equal(minute.out.data.length, invalid.length);
-});
+    const mixed = await lookup({ candles: [bar, ...invalid, zero], nextBefore: null }, args);
+    assert.equal(mixed.status, 2, mixed.stdout);
+    assert.equal(mixed.out.status, 'partial');
+    assert.deepEqual(mixed.out.data, expected);
+    assert.deepEqual(
+      mixed.out.omissions,
+      invalid.map((_, index) => ({ index: index + 1, reason: 'invalid_item' })),
+    );
+    const rejected = await lookup({ candles: invalid, nextBefore: null }, args);
+    assert.equal(rejected.status, 1, rejected.stdout);
+    assert.equal(rejected.out.status, 'error');
+    assert.deepEqual(rejected.out.data, []);
+    assert.equal(rejected.out.error.code, 'RESPONSE_INVALID');
+
+    const empty = await lookup({ candles: [], nextBefore: null }, args);
+    assert.equal(empty.status, 0, empty.stdout);
+    assert.equal(empty.out.status, 'success');
+    assert.deepEqual(empty.out.data, []);
+    assert.deepEqual(empty.out.omissions, []);
+  });
+}

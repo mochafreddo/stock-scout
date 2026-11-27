@@ -208,7 +208,6 @@ function isNewYorkMidnight(timestamp: string) {
 
 export function candleResult(value: unknown, { query, date }: ReturnType<typeof candleQuery>) {
   const count = Number(query.get('count'));
-  const daily = query.get('interval') === '1d';
   if (!record(value) || !Array.isArray(value.candles) || value.candles.length > count)
     throw new TossError('RESPONSE_INVALID');
   const result = items(value.candles, (row) => {
@@ -222,11 +221,10 @@ export function candleResult(value: unknown, { query, date }: ReturnType<typeof 
       !nonnegativeDecimal(row.lowPrice) ||
       !nonnegativeDecimal(row.closePrice) ||
       !nonnegativeDecimal(row.volume) ||
-      (daily &&
-        (compareNonnegativeDecimals(row.openPrice, row.lowPrice) < 0 ||
-          compareNonnegativeDecimals(row.openPrice, row.highPrice) > 0 ||
-          compareNonnegativeDecimals(row.closePrice, row.lowPrice) < 0 ||
-          compareNonnegativeDecimals(row.closePrice, row.highPrice) > 0)) ||
+      compareNonnegativeDecimals(row.openPrice, row.lowPrice) < 0 ||
+      compareNonnegativeDecimals(row.openPrice, row.highPrice) > 0 ||
+      compareNonnegativeDecimals(row.closePrice, row.lowPrice) < 0 ||
+      compareNonnegativeDecimals(row.closePrice, row.highPrice) > 0 ||
       typeof row.currency !== 'string' ||
       !row.currency.trim()
     )
