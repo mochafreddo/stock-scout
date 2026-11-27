@@ -160,7 +160,7 @@ function markdownText(path: string) {
         blockEnd = marker[1];
         return '';
       }
-      return content;
+      return containers.length > depth ? `\n${content}` : content;
     })
     .join('\n');
 }
