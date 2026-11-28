@@ -142,7 +142,9 @@ export function orderResult(value: unknown, request: ReturnType<typeof orderQuer
     !Array.isArray(value[key]) ||
     typeof value.hasNext !== 'boolean' ||
     (!conditional && !('nextCursor' in value)) ||
-    ('nextCursor' in value && value.nextCursor !== null && !text(value.nextCursor)) ||
+    ('nextCursor' in value &&
+      value.nextCursor !== null &&
+      (typeof value.nextCursor !== 'string' || !value.nextCursor.length)) ||
     (conditional &&
       typeof value.nextCursor === 'string' &&
       !/^[A-Za-z0-9_-]+$/.test(value.nextCursor)) ||

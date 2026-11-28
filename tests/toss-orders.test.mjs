@@ -279,6 +279,31 @@ test('conditional orders preserve both legs, optional fields and future codes', 
   }
 });
 
+test('closed orders preserve the current row and continue with a whitespace-only cursor', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  await select(f);
+  const cursor = ' \t ';
+  const result = await runCli(
+    f,
+    [accounts, page('orders', [order], { hasNext: true, nextCursor: cursor })],
+    ['orders', 'CLOSED'],
+  );
+  assert.equal(result.status, 2, result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, 'partial');
+  assert.deepEqual(output.data, [order]);
+  assert.deepEqual(output.omissions, [{ reason: 'next_page' }]);
+  assert.equal(output.page.nextCursor, cursor);
+  const next = await runCli(
+    f,
+    [accounts, page('orders', [])],
+    ['orders', 'CLOSED', `cursor=${output.page.nextCursor}`, `context=${output.page.context}`],
+  );
+  assert.equal(next.status, 0, next.stdout);
+  assert.equal(new URLSearchParams(next.requests.at(-1).query).get('cursor'), cursor);
+});
+
 test('orders preserve page data when the next cursor cannot be passed through argv', async (t) => {
   const f = fixture();
   t.after(f.close);
@@ -546,7 +571,12 @@ test('order pagination validates envelopes and preserves an unavailable optional
       const r = await runCli(f, [accounts, page(command, [])], [command, 'CLOSED']);
       assert.equal(r.status, 0, r.stdout);
       assert.deepEqual(JSON.parse(r.stdout).data, []);
-      for (const extra of [{ hasNext: 'false' }, { nextCursor: 'orphan' }, { nextCursor: '' }]) {
+      for (const extra of [
+        { hasNext: 'false' },
+        { nextCursor: 'orphan' },
+        { nextCursor: '' },
+        { hasNext: true, nextCursor: '' },
+      ]) {
         const bad = await runCli(f, [accounts, page(command, [], extra)], [command, 'CLOSED']);
         assert.equal(JSON.parse(bad.stdout).error.code, 'RESPONSE_INVALID');
       }

@@ -194,7 +194,7 @@ function consume(result) {
   });
 }
 
-test('consumer preserves safe empty CLI errors when sensitive source metadata is removed', async (t) => {
+test('candle consumer preserves safe empty CLI errors when sensitive source metadata is removed', async (t) => {
   const f = fixture('/api/v1/candles');
   t.after(f.close);
   const result = await runCli(
@@ -769,6 +769,48 @@ test('batch consumer preserves usable partial coverage, empty pages, errors and 
       latestTradeDate: null,
       tradeDateUnavailableReason: null,
     });
+    assert.deepEqual(row.bars, []);
+    assert.equal(row.analysis, null);
+  }
+});
+
+test('candle consumer rejects malformed single daily errors before emitting analysis', async (t) => {
+  const result = run('success', 'candles', 'DEMO', '1d');
+  assert.equal(result.status, 0, result.stderr);
+  const query = JSON.parse(result.stdout);
+  for (const [name, patch] of [
+    ['bars on failed query', { error: { code: 'RESPONSE_INVALID' } }],
+    ['missing error', {}],
+    ['missing error on empty data', { data: [] }],
+  ]) {
+    await t.test(name, () => {
+      const consumed = consume({ stdout: JSON.stringify({ ...query, status: 'error', ...patch }) });
+      assert.equal(consumed.status, 1, consumed.stderr);
+      assert.equal(consumed.stdout, '');
+    });
+  }
+});
+
+test('candle consumer preserves each error when all batch symbols fail', async (t) => {
+  const f = fixture();
+  t.after(f.close);
+  const invalid = {
+    path: '/api/v1/candles',
+    body: { result: { candles: [{}], nextBefore: null } },
+  };
+  const result = await runCli(f, [invalid, invalid], ['candles-batch', 'DEMO,OTHER']);
+  assert.equal(result.status, 1, result.stderr);
+  const consumed = consume(result);
+  assert.equal(consumed.status, 0, consumed.stderr);
+  const output = JSON.parse(consumed.stdout);
+  assert.equal(output.status, 'error');
+  assert.deepEqual(
+    output.data.map((row) => row.symbol),
+    ['DEMO', 'OTHER'],
+  );
+  for (const row of output.data) {
+    assert.equal(row.status, 'error');
+    assert.deepEqual(row.error, { code: 'RESPONSE_INVALID' });
     assert.deepEqual(row.bars, []);
     assert.equal(row.analysis, null);
   }

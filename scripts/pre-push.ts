@@ -492,7 +492,9 @@ function checkLinks(root: string, files: string[], headingCache?: Map<string, Se
         '$1',
       );
       if (/^[a-z][a-z\d+.-]*:/i.test(link) || link.startsWith('//')) continue;
-      const [path, fragment] = link.split('#');
+      const hash = link.indexOf('#');
+      const path = hash < 0 ? link : link.slice(0, hash);
+      const fragment = hash < 0 ? '' : link.slice(hash + 1);
       const target = path
         ? resolve(
             path.startsWith('/') ? root : dirname(source),
@@ -753,6 +755,12 @@ function installHook(name: 'pre-commit' | 'pre-push') {
     accessSync(destination, constants.X_OK);
   }
   process.stderr.write(`Installed ${destination}\n`);
+  if (destination !== primary) {
+    process.stderr.write(
+      'Installation did not verify that pre-push calls pre-push.local and propagates its failure status.\n' +
+        'See docs/development.md#기존-훅-이전과-검사기-갱신 for manual integration.\n',
+    );
+  }
 }
 
 type PushSelection = { mode: 'push'; commit: string; tree: string; changed: string[] };

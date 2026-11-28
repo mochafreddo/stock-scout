@@ -108,6 +108,22 @@ for (const mode of ['docs', 'staged', 'push']) {
     }
   });
 
+  for (const [fragment, status] of [
+    ['section#details', 0],
+    ['section%23details', 0],
+    ['section#missing', 1],
+    ['section%23missing', 1],
+    ['section%2523details', 1],
+  ]) {
+    test(`${mode} checks the complete fragment #${fragment}`, (t) => {
+      const { root, base } = fixture(t);
+      const body = `# Section\n\n<a id="section#details"></a>\n\n[jump](#${fragment})\n`;
+      const result = checkReadme(root, base, body);
+      assert.equal(result.status, status, result.stderr);
+      if (status === 1) assert.ok(result.stderr.includes(`missing heading #${fragment}`));
+    });
+  }
+
   test(`${mode} skips Markdown inside HTML blocks and preserves real anchors`, (t) => {
     const { root, base } = fixture(t);
     const html = '<div id="example">\n[hidden](missing.md)\n# Hidden\n</div>';

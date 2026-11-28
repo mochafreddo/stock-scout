@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deserialize } from 'node:v8';
-import { authState, fixture, runCli, snapshot } from './toss-cli-helper.mjs';
+import { authState, fixture, runCli, selectAccount, snapshot } from './toss-cli-helper.mjs';
 
 function writeState(f, changes = {}) {
   writeFileSync(
@@ -395,6 +395,38 @@ test('readiness reports pending issuance, waits and locks together without mergi
     f.close();
   }
 });
+
+for (const failure of ['lstatSync:EIO', 'openSync:ENOENT']) {
+  test(`shared state read failure (${failure}) preserves the account and prevents HTTP`, async (t) => {
+    const f = fixture();
+    try {
+      assert.equal((await selectAccount(f, 741, ['holdings'])).status, 0);
+      const account = join(f.directory, 'account.json');
+      const preserved = readFileSync(account);
+      const input = join(f.directory, 'selection-input.json');
+      writeFileSync(
+        input,
+        JSON.stringify({ alias: 'secondary', accountSeq: 852, scopes: ['holdings'] }),
+      );
+      writeFileSync(join(f.directory, 'state.json'), JSON.stringify(authState()), { mode: 0o600 });
+      for (const args of [['account-select', input], ['readiness'], ['prices', 'AAPL']]) {
+        await t.test(args[0], async () => {
+          const result = await runCli(f, [], args, {
+            TEST_PLATFORM: 'darwin',
+            TEST_STATE_READ_FAILURE: failure,
+          });
+          assert.deepEqual(result.requests, []);
+          assert.deepEqual(readFileSync(account), preserved);
+          assert.equal(result.status, 1);
+          assert.equal(JSON.parse(result.stdout).error.code, 'AUTH_STORAGE');
+          assert.equal(result.stderr.trim(), 'AUTH_STORAGE');
+        });
+      }
+    } finally {
+      f.close();
+    }
+  });
+}
 
 for (const phase of ['before-list', 'after-list', 'missing-state']) {
   test(`readiness checks the shared state when a cooldown disappears (${phase})`, async () => {

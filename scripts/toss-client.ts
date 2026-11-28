@@ -259,6 +259,16 @@ function lockPresent(path: string): boolean {
   }
 }
 
+function tryLock(path: string): boolean {
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  }
+  return true;
+}
+
 async function withLock<T>(
   directory: string,
   name: string,
@@ -270,13 +280,8 @@ async function withLock<T>(
   try {
     for (;;) {
       check();
-      try {
-        mkdirSync(lock, { mode: 0o700 });
-        break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        if (lockPresent(lock)) await wait(25);
-      }
+      if (tryLock(lock)) break;
+      if (lockPresent(lock)) await wait(25);
     }
     let retained = false;
     try {
@@ -317,7 +322,7 @@ class SharedRequestCoordinator {
     this.load();
   }
   inspect(): ReadinessObservation {
-    const { state } = this.loadReservation('inspect');
+    const { state } = this.loadReservation();
     const reasons: string[] = [];
     if (state.pending) reasons.push('AUTH_ISSUANCE_UNKNOWN');
     if (BigInt(state.clock.nextNs) > process.hrtime.bigint()) reasons.push('WAIT_REQUIRED');
@@ -403,19 +408,25 @@ class SharedRequestCoordinator {
     }
   }
   publishCooldown(milliseconds: number) {
-    save(
-      this.directory,
-      {
-        fingerprint: this.fingerprint,
-        clock: {
-          id: this.clockId,
-          nextNs: (process.hrtime.bigint() + BigInt(milliseconds) * 1000000n)
-            .toString()
-            .padStart(30, '0'),
-        },
-      },
-      `cooldown-${randomUUID()}.json`,
-    );
+    const nextNs = (process.hrtime.bigint() + BigInt(milliseconds) * 1000000n)
+      .toString()
+      .padStart(30, '0');
+    const observation = { fingerprint: this.fingerprint, clock: { id: this.clockId, nextNs } };
+    try {
+      save(this.directory, observation, `cooldown-${randomUUID()}.json`);
+    } catch (error) {
+      const lock = join(this.directory, 'client.lock');
+      try {
+        if (tryLock(lock)) {
+          secure(lock, true);
+          const { state } = this.loadReservation(this.load(true));
+          if (nextNs > state.clock.nextNs) state.clock.nextNs = nextNs;
+          save(this.directory, state);
+          rmdirSync(lock);
+        }
+      } catch {}
+      throw error;
+    }
   }
   private load(requireStoredState = false): State {
     const path = join(this.directory, 'state.json');
@@ -430,9 +441,14 @@ class SharedRequestCoordinator {
           clock: { id: this.clockId, nextNs: '0'.repeat(30) },
           pending: false,
         };
-      throw error;
+      throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
     }
-    const state = read(path);
+    let state: ReturnType<typeof read>;
+    try {
+      state = read(path);
+    } catch (error) {
+      throw error instanceof TossError ? error : new TossError('AUTH_STORAGE');
+    }
     if (
       !state ||
       state.fingerprint !== this.fingerprint ||
@@ -461,8 +477,7 @@ class SharedRequestCoordinator {
     if (state.token) this.observeToken(state.token.value);
     return state;
   }
-  private loadReservation(mode: 'inspect' | 'locked') {
-    const lockedState = mode === 'locked' ? this.load() : undefined;
+  private loadReservation(lockedState?: State) {
     const records = readdirSync(this.directory).filter((name) =>
       /^cooldown-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/.test(name),
     );
@@ -473,7 +488,7 @@ class SharedRequestCoordinator {
       try {
         record = read(join(this.directory, name));
       } catch (error) {
-        if (mode !== 'inspect' || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        if (lockedState || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         disappeared = true;
         continue;
       }
@@ -494,7 +509,7 @@ class SharedRequestCoordinator {
   }
   private locked<T>(operation: (state: State, retainLock: () => void) => Promise<T>) {
     return withLock(this.directory, 'client.lock', this.check, this.wait, (retainLock) => {
-      const { state, records } = this.loadReservation('locked');
+      const { state, records } = this.loadReservation(this.load());
       if (records.length) {
         save(this.directory, state);
         for (const name of records) unlinkSync(join(this.directory, name));

@@ -83,7 +83,6 @@ assert.equal(output.version, 1);
 assert.ok(['success', 'partial', 'error'].includes(output.status), 'valid CLI status required');
 assert.ok(Array.isArray(output.data), 'CLI data must be an array');
 const emptyError = output.status === 'error' && !output.data.length;
-if (emptyError || Object.hasOwn(output, 'error')) assertSafeError(output.error);
 assert.ok(
   record(output.source) &&
     ((emptyError &&
@@ -94,19 +93,10 @@ assert.ok(
   'daily candle output required',
 );
 const batch = !Object.hasOwn(output.source, 'interval');
+if (batch && (emptyError || Object.hasOwn(output, 'error'))) assertSafeError(output.error);
 const rows = batch ? output.data : [{ ...output, symbol: output.source.symbol }];
 assert.ok(emptyError || rows.length > 0, 'daily candle batch requires at least one symbol row');
 if (batch && !emptyError) {
-  for (const row of rows) {
-    if (row.status === 'error' || Object.hasOwn(row, 'error')) assertSafeError(row.error);
-    if (row.status === 'not_queried')
-      assert.ok(typeof row.reason === 'string' && row.reason.trim(), 'batch stop reason required');
-    if (row.status === 'error' || row.status === 'not_queried')
-      assert.ok(
-        Array.isArray(row.data) && row.data.length === 0,
-        'failed or unqueried row must have empty data',
-      );
-  }
   const states = rows.map(({ status }) => status);
   assert.ok(
     states.every((status) => ['success', 'partial', 'error', 'not_queried'].includes(status)),
@@ -120,6 +110,14 @@ if (batch && !emptyError) {
   assert.equal(output.status, expected, 'daily candle batch status must match its rows');
 }
 const data = rows.map((row) => {
+  if (row.status === 'error' || Object.hasOwn(row, 'error')) assertSafeError(row.error);
+  if (row.status === 'not_queried')
+    assert.ok(typeof row.reason === 'string' && row.reason.trim(), 'batch stop reason required');
+  if (row.status === 'error' || row.status === 'not_queried')
+    assert.ok(
+      Array.isArray(row.data) && row.data.length === 0,
+      'failed or unqueried row must have empty data',
+    );
   const usable = row.status === 'success' || row.status === 'partial';
   if (usable)
     assert.ok(

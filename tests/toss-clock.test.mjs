@@ -378,19 +378,37 @@ test('failed cooldown merge preserves the observation for a later execution with
 });
 
 for (const wallJump of [0, 16000]) {
-  test(`cooldown publication storage failure with ${wallJump}ms wall jump stops a single query without another GET`, async () => {
+  test(`cooldown publication storage failure with ${wallJump}ms wall jump preserves the wait for the next CLI`, async () => {
     const f = fixture();
     try {
       const result = await runCli(
         f,
-        [{ status: 429, headers: { 'Retry-After': '80' }, body: {}, responseWallJump: wallJump }],
+        [
+          {
+            status: 429,
+            headers: { 'Retry-After': '80' },
+            body: {},
+            responseWallJump: wallJump,
+            freezeAt: '2026-11-06T15:00:05Z',
+          },
+        ],
         undefined,
-        { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' },
+        { TEST_FAIL_COOLDOWN_SAVE_ONCE: '1', TEST_COOLDOWN_SAVE_DELAY_MS: '5000' },
       );
       assert.equal(result.status, 1, result.stdout + result.stderr);
       assert.equal(JSON.parse(result.stdout).error.code, 'AUTH_STORAGE');
       assert.equal(result.stderr, 'AUTH_STORAGE\n');
       assert.equal(result.requests.length, 2);
+      const { clock } = JSON.parse(readFileSync(join(f.directory, 'state.json')));
+      assert.equal(BigInt(clock.nextNs), BigInt(Date.parse('2026-11-06T15:01:25Z')) * 1000000n);
+      const early = await runCli(f);
+      assert.equal(JSON.parse(early.stdout).error?.code, 'TIMEOUT');
+      assert.equal(early.requests.length, 2);
+      const late = await runCli(f, [], undefined, {
+        TEST_CLOCK_START: String(Date.parse('2026-11-06T15:01:30Z')),
+      });
+      assert.equal(late.status, 0, late.stdout + late.stderr);
+      assert.equal(late.requests.length, 3);
       assert.doesNotMatch(result.stdout + result.stderr, /synthetic-secret/);
     } finally {
       f.close();
@@ -448,6 +466,81 @@ for (const wallJump of [0, 16000]) {
       assert.equal(result.stderr, 'AUTH_STORAGE\n');
       assert.equal(result.requests.length, 3);
       assert.doesNotMatch(result.stdout + result.stderr, /synthetic-secret/);
+    } finally {
+      f.close();
+    }
+  });
+}
+
+for (const merged of [false, true]) {
+  test(`failed publication preserves a peer's longer ${merged ? 'merged' : 'published'} wait`, async () => {
+    const f = fixture();
+    const gate = join(f.directory, 'response');
+    const pending = runCli(
+      f,
+      [{ gate: true, status: 429, headers: { 'Retry-After': '80' }, body: {} }],
+      undefined,
+      { TEST_REAL_CLOCK: '1', TEST_GATE: gate, TEST_FAIL_COOLDOWN_SAVE_ONCE: '1' },
+    );
+    try {
+      await waitForFile(`${gate}.ready`, pending);
+      const peer = await runCli(
+        f,
+        [{ status: 429, headers: { 'Retry-After': '200' }, body: {}, responseWallJump: 60001 }],
+        undefined,
+        { TEST_REAL_CLOCK: '1' },
+      );
+      assert.equal(JSON.parse(peer.stdout).error.code, 'TIMEOUT');
+      const [record] = readdirSync(f.directory).filter((name) => name.startsWith('cooldown-'));
+      const deadline = JSON.parse(readFileSync(join(f.directory, record))).clock.nextNs;
+      if (merged) {
+        const early = await runCli(f, [], undefined, { TEST_REAL_CLOCK: '1' });
+        assert.equal(JSON.parse(early.stdout).error.code, 'TIMEOUT');
+      }
+      writeFileSync(gate, '', { mode: 0o600 });
+      const failed = await pending;
+      assert.equal(JSON.parse(failed.stdout).error.code, 'AUTH_STORAGE');
+      assert.equal(
+        JSON.parse(readFileSync(join(f.directory, 'state.json'))).clock.nextNs,
+        deadline,
+      );
+      const early = await runCli(f, [], undefined, {
+        TEST_SHARED_CLOCK_START_NS: String(BigInt(deadline) - 100000000000n),
+      });
+      assert.equal(JSON.parse(early.stdout).error.code, 'TIMEOUT');
+      assert.equal(early.requests.length, 3);
+    } finally {
+      writeFileSync(gate, '', { mode: 0o600 });
+      await Promise.allSettled([pending]);
+      f.close();
+    }
+  });
+}
+
+for (const failure of ['lock-validation', 'read', 'write', 'busy']) {
+  test(`cooldown recovery with a ${failure} failure leaves the client locked`, async () => {
+    const f = fixture();
+    const trace = join(f.directory, 'recovery-trace');
+    try {
+      writeFileSync(trace, '', { mode: 0o600 });
+      const first = await runCli(
+        f,
+        [{ status: 429, headers: { 'Retry-After': '80' }, body: {} }],
+        undefined,
+        {
+          TEST_FAIL_COOLDOWN_SAVE_ONCE: '1',
+          TEST_RECOVERY_FAILURE: failure,
+          TEST_RECOVERY_TRACE: trace,
+        },
+      );
+      assert.equal(JSON.parse(first.stdout).error.code, 'AUTH_STORAGE');
+      assert.equal(first.requests.length, 2);
+      assert.equal(readFileSync(trace, 'utf8'), 'mkdir\n');
+      const ready = await runCli(f, [], ['readiness']);
+      assert.ok(JSON.parse(ready.stdout).data[0].reasons.includes('LOCK_PRESENT'));
+      const next = await runCli(f);
+      assert.equal(JSON.parse(next.stdout).error.code, 'TIMEOUT');
+      assert.equal(next.requests.length, 2);
     } finally {
       f.close();
     }

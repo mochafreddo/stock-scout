@@ -12,6 +12,15 @@ if (process.env.TEST_CLI_TRACE)
   });
 
 if (process.env.TEST_CLI_UMASK) process.umask(Number(process.env.TEST_CLI_UMASK));
+if (process.env.TEST_STATE_READ_FAILURE) {
+  const [method, code] = process.env.TEST_STATE_READ_FAILURE.split(':');
+  const original = fs[method];
+  mock.method(fs, method, (path, ...args) => {
+    if (path === `${process.env.TOSS_STATE_DIR}/state.json`)
+      throw Object.assign(new Error('synthetic state read failure'), { code });
+    return original(path, ...args);
+  });
+}
 if (process.env.TEST_TEMP_FILE_UMASK) {
   const open = fs.openSync;
   mock.method(fs, 'openSync', (path, ...args) => {
@@ -130,8 +139,19 @@ if (process.env.TEST_RELEASE_CLIENT_LOCK) {
     return lstatSync(path, ...args);
   });
 }
+let cooldownSaveFailed = false;
+if (process.env.TEST_RECOVERY_FAILURE === 'lock-validation') {
+  const lstatSync = fs.lstatSync;
+  mock.method(fs, 'lstatSync', (path, ...args) => {
+    if (cooldownSaveFailed && path === `${process.env.TOSS_STATE_DIR}/client.lock`)
+      throw Object.assign(new Error('synthetic-secret'), { code: 'EIO' });
+    return lstatSync(path, ...args);
+  });
+}
 const mkdirSync = fs.mkdirSync;
 mock.method(fs, 'mkdirSync', (path, ...args) => {
+  if (cooldownSaveFailed && process.env.TEST_RECOVERY_TRACE)
+    appendFileSync(process.env.TEST_RECOVERY_TRACE, 'mkdir\n');
   const result = mkdirSync(path, ...args);
   if (
     process.env.TEST_ACCOUNT_LOCK_ELAPSED &&
@@ -165,7 +185,6 @@ mock.method(fs, 'fsyncSync', (descriptor) => {
   return result;
 });
 const renameSync = fs.renameSync;
-let cooldownSaveFailed = false;
 mock.method(fs, 'renameSync', (source, target) => {
   if (
     process.env.TEST_FAIL_ACCOUNT_SAVE === 'rename' &&
@@ -178,9 +197,25 @@ mock.method(fs, 'renameSync', (source, target) => {
     /\/cooldown-[0-9a-f-]{36}\.json$/.test(target)
   ) {
     cooldownSaveFailed = true;
+    if (process.env.TEST_COOLDOWN_SAVE_DELAY_MS)
+      mock.timers.tick(Number(process.env.TEST_COOLDOWN_SAVE_DELAY_MS));
+    if (process.env.TEST_RECOVERY_FAILURE === 'read')
+      fs.unlinkSync(`${process.env.TOSS_STATE_DIR}/state.json`);
+    if (process.env.TEST_RECOVERY_FAILURE === 'busy') {
+      mkdirSync(`${process.env.TOSS_STATE_DIR}/client.lock`, { mode: 0o700 });
+      const schedule = globalThis.setTimeout;
+      mock.method(globalThis, 'setTimeout', (...args) => {
+        appendFileSync(process.env.TEST_RECOVERY_TRACE, 'timer\n');
+        return schedule(...args);
+      });
+    }
     throw Object.assign(new Error('synthetic-secret'), { code: 'EIO' });
   }
-  if (process.env.TEST_FAIL_STATE_SAVE && target === `${process.env.TOSS_STATE_DIR}/state.json`)
+  if (
+    (process.env.TEST_FAIL_STATE_SAVE ||
+      (cooldownSaveFailed && process.env.TEST_RECOVERY_FAILURE === 'write')) &&
+    target === `${process.env.TOSS_STATE_DIR}/state.json`
+  )
     throw new Error('synthetic-secret');
   if (
     process.env.TEST_FAIL_REJECTED_ISSUANCE_SAVE &&
