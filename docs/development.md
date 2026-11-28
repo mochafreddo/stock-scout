@@ -56,6 +56,13 @@ mise exec -- pnpm test
 node --test tests/toss-candle-date.test.mjs
 ```
 
+루프백을 사용하는 테스트만 골라 실행할 때도 같은 저장소 루트와 권한에서 기존 사전 검사를 먼저 실행하세요. 예를 들어 pre-push의 루프백 검사는 다음 명령으로 실행합니다.
+
+```sh
+node scripts/test-preflight.ts &&
+  node --test --test-name-pattern='push CLI honors the pnpm test loopback preflight' tests/pre-push.test.mjs
+```
+
 fixture의 상태는 실행별로 격리하고 하위 프로세스가 종료된 뒤 정리하세요. 정상 빈 배열·부분 페이지·조회 오류를 각각 검사하며, 공급자 순서와 원래 커서·소수 문자열이 소비자에게 그대로 전달되는지도 확인하세요. mock을 바꾸면 테스트 도우미와 소비 예제가 여전히 실제 CLI를 통과하는지 확인하세요.
 
 ## 조회 동작을 수정하거나 추가하기
